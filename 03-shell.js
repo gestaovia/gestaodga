@@ -71,6 +71,7 @@ const PAGES = {}; // registrado nos demais arquivos: PAGES[nome] = { title, rend
 
 function go(page, p = {}, opts = {}) {
   ROUTE = { page, p };
+  if (CUR && page !== 'login') { try { sessionStorage.setItem('gv-route', JSON.stringify({ page, p })); } catch (e) { } }
   if (!opts.keepDraft) DRAFT = null;
   SIDE_OPEN = false;
   if (!opts.noPush) { try { history.pushState({ page, p }, ''); } catch (e) { } }
@@ -104,11 +105,22 @@ function sidebar() {
     if (!items.length) return '';
     return `<div class="nav-group">${g.g}</div>` + items.map(([k, l, i]) => `<button data-go="${k}" class="${ROUTE.page === k || (PARENT[ROUTE.page] === k) ? 'on' : ''}">${ic(i)}<span>${l}</span>${counts[k] ? `<span class="count ${k === 'dashboard' ? 'crit' : ''}">${counts[k]}</span>` : ''}</button>`).join('');
   }).join('');
-  return `<aside class="side ${SIDE_OPEN ? 'open' : ''}"><div class="brand">${brandMark()}<div><b>gestaovia</b><span>Gestão de frota${APP_VERSION ? ` · v${APP_VERSION}` : ''}</span></div></div>
+  return `<aside class="side ${SIDE_OPEN ? 'open' : ''}"><div class="brand">${orgBrand()}</div>
     <nav class="nav" aria-label="Menu principal">${groups}</nav>
-    <div class="side-foot"><span class="avatar">${initials(CUR.name)}</span><div style="flex:1;min-width:0"><b style="color:var(--text2);display:block">${esc(CUR.name)}</b>${roleLabel(CUR)}</div><button class="icon-btn" data-act="logout" aria-label="Sair" title="Sair">${ic('logout')}</button></div></aside>`;
+    <div class="side-foot">${av(CUR)}<div style="flex:1;min-width:0"><b style="color:var(--text2);display:block">${esc(CUR.name)}</b>${roleLabel(CUR)}</div><button class="icon-btn" data-act="logout" aria-label="Sair" title="Sair">${ic('logout')}</button></div></aside>`;
 }
-const brandMark = () => `<div class="brand-mark">${ic('car')}</div>`;
+// foto de perfil: do próprio usuário ou, para um condutor, do usuário vinculado a ele
+const photoOf = o => o ? (o.avatar || (S?.users || []).find(u => u.driverId === o.id || (o.driverId && u.id === o.id))?.avatar || null) : null;
+const av = (o, size = '') => { const ph = photoOf(o); return ph && /^data:image\/(jpeg|png|webp);base64,/.test(ph) ? `<span class="avatar img ${size}"><img src="${esc(ph)}" alt=""></span>` : `<span class="avatar ${size}">${initials(o?.name || '?')}</span>`; };
+const orgOf = () => S?.settings?.org || {};
+const orgLogoOk = l => typeof l === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(l);
+function orgBrand(compact) {
+  const o = orgOf(); const nm = o.displayName || o.name || 'GestaoVia';
+  const logo = orgLogoOk(o.logo) ? `<img class="org-logo" src="${o.logo}" alt="">` : brandMark();
+  if (compact) return `${logo}<b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(nm)}</b>`;
+  return `${logo}<div style="min-width:0"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${esc(nm)}</b><span>GestaoVia${APP_VERSION ? ` · v${APP_VERSION}` : ''}</span></div>`;
+}
+const brandMark = () => `<img class="brand-logo" src="${window.GV_LOGO || ''}" alt="GestaoVia">`;
 const PARENT = { veiculo: 'veiculos', condutor: 'condutores', transferencia: 'transferencias', scan_result: 'veiculos', checklist_view: 'checklists', forcar: 'transferencias', checklist_full: 'manutencao', scanner: 'veiculos', abastecer: 'abastecimento', obra: 'veiculos', problema: 'veiculos' };
 function topbar(pg) {
   const parent = PARENT[ROUTE.page];
@@ -124,17 +136,18 @@ function topbar(pg) {
     <button class="icon-btn scan" data-go="scanner" aria-label="Escanear QR Code" title="Escanear QR Code">${ic('qr')}</button>
     <button class="icon-btn" data-act="notifs" aria-label="Notificações" title="Notificações">${ic('bell')}${unread ? `<span class="badge">${unread}</span>` : ''}</button>
     ${themeBtn()}
-    <div class="who"><span class="avatar">${initials(CUR.name)}</span><span class="nm">${esc(CUR.name.split(' ')[0])}</span></div>
+    <button class="who" data-go="perfil" title="Meu perfil" style="border:0;background:none;cursor:pointer;color:inherit">${av(CUR)}<span class="nm">${esc(CUR.name.split(' ')[0])}</span></button>
   </header>`;
 }
 function driverTop() {
   const unread = myNotifications().filter(n => !n.read).length;
   const home = ROUTE.page === 'inicio';
   return `<header class="top" style="padding-inline:16px">
-    ${home ? `${brandMark()}<b>gestaovia</b>` : `<button class="icon-btn" data-go="inicio" aria-label="Voltar ao início">${ic('back')}</button><h1>${esc(typeof PAGES[ROUTE.page]?.title === 'function' ? PAGES[ROUTE.page].title(ROUTE.p) : PAGES[ROUTE.page]?.title || '')}</h1>`}
+    ${home ? orgBrand(true) : `<button class="icon-btn" data-go="inicio" aria-label="Voltar ao início">${ic('back')}</button><h1>${esc(typeof PAGES[ROUTE.page]?.title === 'function' ? PAGES[ROUTE.page].title(ROUTE.p) : PAGES[ROUTE.page]?.title || '')}</h1>`}
     <div class="spacer"></div>
     <button class="icon-btn" data-act="notifs" aria-label="Notificações">${ic('bell')}${unread ? `<span class="badge">${unread}</span>` : ''}</button>
     ${themeBtn()}
+    <button class="icon-btn" data-go="perfil" aria-label="Meu perfil" style="padding:0;overflow:hidden">${av(CUR)}</button>
     <button class="icon-btn" data-act="logout" aria-label="Sair">${ic('logout')}</button>
   </header>`;
 }
@@ -156,7 +169,8 @@ const vehLink = id => { const v = veh(id); if (!v) return '—'; return isStaff(
 const empty = t => `<div class="panel-b muted">${t}</div>`;
 function photoSrc(p, label = '') {
   if (!p) return null;
-  if (p.startsWith('data:') || p.startsWith('http')) return p;
+  if (typeof p !== 'string') return null;
+  if (/^data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+$/.test(p) || /^https:\/\//.test(p)) return p;
   if (p.startsWith('sb:')) { const u = CLOUD.fileUrl(p); if (u) return u; label = 'Foto indisponível'; p = 'x:'; }
   const lab = { frontal: 'Frontal', traseira: 'Traseira', lat_dir: 'Lateral dir.', lat_esq: 'Lateral esq.', painel: 'Painel', cupom: 'Cupom fiscal' }[p.split(':')[1]] || label;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 160 120"><rect width="160" height="120" fill="#C9CED3"/><path d="M28 80h104M36 80v-16l10-18h68l10 18v16" stroke="#7B838B" stroke-width="3" fill="none"/><circle cx="54" cy="84" r="9" fill="#7B838B"/><circle cx="106" cy="84" r="9" fill="#7B838B"/><text x="80" y="22" font-family="sans-serif" font-size="12" fill="#3E454C" text-anchor="middle">${lab}</text></svg>`;
@@ -166,7 +180,7 @@ function thumbs(photos) {
   if (!photos) return '';
   const ks = Object.entries(photos).filter(([, v]) => v && !v.startsWith('removida'));
   if (!ks.length) return '<span class="muted small">Sem fotos</span>';
-  return `<div class="thumbs">${ks.map(([k, v]) => `<img src="${photoSrc(v, k)}" alt="${esc((PHOTO_SLOTS.find(s => s[0] === k) || [0, k])[1])}" data-act="photo" data-src="${k}">`).join('')}</div>`;
+  return `<div class="thumbs">${ks.map(([k, v]) => `<img src="${esc(photoSrc(v, k))}" alt="${esc((PHOTO_SLOTS.find(s => s[0] === k) || [0, k])[1])}" data-act="photo" data-src="${k}">`).join('')}</div>`;
 }
 
 /* ----- modal e aviso ----- */
@@ -201,7 +215,7 @@ document.addEventListener('click', e => {
   else if (act === 'logout') CLOUD.leave();
   else if (act === 'notifs') showNotifications();
   else if (act === 'theme') { const t = themeNow() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, t); } catch (x) { } applyTheme(t); render(); }
-  else if (act === 'photo') { openModal({ title: 'Foto', body: `<img src="${e.target.src}" alt="" style="width:100%">`, wide: true }); }
+  else if (act === 'photo') { openModal({ title: 'Foto', body: `<img src="${esc(e.target.src)}" alt="" style="width:100%">`, wide: true }); }
   else if (ACTIONS[act]) ACTIONS[act](a, e);
 });
 const ACTIONS = {};
@@ -210,7 +224,7 @@ function showNotifications() {
   const ns = myNotifications();
   openModal({
     title: 'Notificações',
-    body: ns.length ? `<ul class="att" style="padding:0">${ns.slice(0, 30).map(n => `<li ${n.link ? `data-go="${n.link.page}" data-id="${n.link.id || ''}"` : ''}><span class="ic ${n.level === 'info' ? 'neu' : n.level}">${ic('bell')}</span><div>${esc(n.text)}${n.read ? '' : ' <span class="pill blue">nova</span>'}</div><span class="when">${fmtShort(n.at)}</span></li>`).join('')}</ul>` : '<p class="empty">Nenhuma notificação.</p>',
+    body: ns.length ? `<ul class="att" style="padding:0">${ns.slice(0, 30).map(n => `<li ${n.link && PAGES[n.link.page] ? `data-go="${esc(n.link.page)}" data-id="${esc(n.link.id || '')}"` : ''}><span class="ic ${n.level === 'info' ? 'neu' : n.level}">${ic('bell')}</span><div>${esc(n.text)}${n.read ? '' : ' <span class="pill blue">nova</span>'}</div><span class="when">${fmtShort(n.at)}</span></li>`).join('')}</ul>` : '<p class="empty">Nenhuma notificação.</p>',
     foot: ns.length ? '<button class="btn" data-act="notifs-read">Marcar todas como lidas</button>' : ''
   });
 }

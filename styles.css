@@ -533,3 +533,19 @@ img,video,canvas{max-width:100%}
 .tile.scan:hover{border-color:var(--confirm);filter:brightness(.94)}
 .icon-btn.scan{color:var(--confirm);border-color:color-mix(in srgb,var(--confirm) 45%,var(--border))}
 .icon-btn.scan:hover{color:var(--confirm);border-color:var(--confirm)}
+
+/* ---------- marca, entrada e abertura ---------- */
+.brand-logo{width:36px;height:36px;border-radius:9px;flex-shrink:0;object-fit:contain}
+.org-logo{width:36px;height:36px;border-radius:6px;object-fit:contain;background:#fff;flex-shrink:0}
+.login1{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:var(--bg)}
+.login-card{width:100%;max-width:380px;display:flex;flex-direction:column;align-items:center;gap:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:32px 24px}
+.login-card h1{font-size:1.5rem;font-weight:800;letter-spacing:-.01em}
+.login-logo{width:88px;height:88px;border-radius:20px}
+.splash{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:var(--bg)}
+.splash img{width:84px;height:84px;border-radius:20px}
+.spin{width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border);border-top-color:var(--text2);animation:gvspin .8s linear infinite}
+@keyframes gvspin{to{transform:rotate(360deg)}}
+.avatar.img{padding:0;overflow:hidden;background:var(--border2)}
+.avatar.img img{width:100%;height:100%;object-fit:cover;display:block}
+.avatar.xl{width:72px;height:72px;border-radius:12px;font-size:1.4rem}
+.top .icon-btn .avatar{width:100%;height:100%;border-radius:inherit}

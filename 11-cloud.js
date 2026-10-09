@@ -105,11 +105,11 @@ const CLOUD = {
       if (ev === 'PASSWORD_RECOVERY') { RECOVERY = true; if (this.on) go('senha'); }
       if (ev === 'SIGNED_OUT' && this.on) this.leave('Sua sessão terminou. Entre novamente.');
     });
-    ROUTE = { page: 'login', p: {} }; LOGIN_BUSY = true; render();
-    const { data: { session } } = await sb.auth.getSession();
-    LOGIN_BUSY = false;
+    // ao recarregar a página mostra só a marca até saber se já existe sessão (não pisca a tela de entrada)
+    ROUTE = { page: 'login', p: {} }; BOOTING = true; render();
+    let session = null; try { ({ data: { session } } = await sb.auth.getSession()); } catch (e) { }
     if (session?.user) await this.enter(session.user);
-    else render();
+    BOOTING = false; if (!this.on) render();
   },
   async enter(user) {
     const sb = this.client();
@@ -117,28 +117,34 @@ const CLOUD = {
     try {
       const { data: prof, error } = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
       if (error) throw error;
-      if (!prof || !prof.active) { await sb.auth.signOut(); LOGIN_BUSY = false; LOGIN_MSG = 'Seu acesso ainda não foi liberado ou está inativo. Procure o administrador da frota.'; return render(); }
+      if (!prof || !prof.active) { await sb.auth.signOut(); LOGIN_BUSY = false; BOOTING = false; LOGIN_MSG = 'Seu acesso ainda não foi liberado ou está inativo. Procure o administrador da frota.'; return render(); }
       this.profile = prof;
       await this.loadAll();
       CUR = S.users.find(u => u.id === prof.id);
-      this.on = true; LOGIN_BUSY = false; LOGIN_MSG = '';
+      this.on = true; LOGIN_BUSY = false; BOOTING = false; LOGIN_MSG = '';
       this.startPolling();
-      if (prof.must_change_password || RECOVERY) go('senha'); else go(homePage());
+      let back = null; try { back = JSON.parse(sessionStorage.getItem('gv-route') || 'null'); } catch (e) { }
+      if (prof.must_change_password || RECOVERY) go('senha');
+      else if (back?.page && PAGES[back.page] && back.page !== 'login' && back.page !== 'senha') go(back.page, back.p || {}, { noPush: true });
+      else go(homePage());
       if (CUR.role === 'condutor') GPS.refresh();
     } catch (e) {
-      LOGIN_BUSY = false; LOGIN_MSG = 'Não foi possível carregar os dados: ' + friendlyError(e); render();
+      LOGIN_BUSY = false; BOOTING = false; LOGIN_MSG = 'Não foi possível carregar os dados: ' + friendlyError(e); render();
     }
   },
   async leave(msg) {
     this.on = false; clearInterval(this.poll); clearTimeout(this.timer); clearTimeout(this.retryT); GPS.stop();
     this.base = {}; this.signed = {}; CUR = null; S = null; LOGIN_MSG = msg || '';
+    try { sessionStorage.removeItem('gv-route'); } catch (e) { }
     try { await this.client().auth.signOut(); } catch (e) { }
     ROUTE = { page: 'login', p: {} }; render();
   },
 
   /* ---------- leitura (o banco devolve só o que o perfil pode ver) ---------- */
   async fetchAll(sp) {
-    const sb = this.client(); const out = []; const step = 1000; const cap = sp.limit || 50000;
+    const sb = this.client(); const out = [];
+    // condutor: lista de veículos só com identificação (sem locação, documentos e custos)
+    if (sp.key === 'vehicles' && this.profile?.role === 'condutor') { const { data, error } = await sb.rpc('vehicle_directory'); if (error) throw error; return data || []; } const step = 1000; const cap = sp.limit || 50000;
     for (let from = 0; from < cap; from += step) {
       let q = sb.from(sp.table).select('*');
       q = sp.limit ? q.order('at', { ascending: false }) : q.order('id');
@@ -152,7 +158,7 @@ const CLOUD = {
     const sb = this.client();
     const [lists, prof, dir] = await Promise.all([
       Promise.all(SPEC.map(sp => this.fetchAll(sp))),
-      sb.from('profiles').select('id,name,email,role,driver_id,active,must_change_password,is_owner').order('name'),
+      sb.from('profiles').select('id,name,email,role,driver_id,active,must_change_password,is_owner,avatar').order('name'),
       sb.rpc('driver_directory')
     ]);
     if (prof.error) throw prof.error;
@@ -164,7 +170,7 @@ const CLOUD = {
       if (sp.sort) objs.sort((a, b) => (a[sp.sort] || 0) - (b[sp.sort] || 0));
       if (sp.asMap) objs.forEach(o => { const { id, ...l } = o; D.locations[id] = l; }); else D[sp.key] = objs;
     });
-    D.users = (prof.data || []).map(p => ({ id: p.id, name: p.name, email: p.email, role: p.role, driverId: p.driver_id, active: p.active, mustChange: p.must_change_password, owner: !!p.is_owner }));
+    D.users = (prof.data || []).map(p => ({ id: p.id, name: p.name, email: p.email, role: p.role, driverId: p.driver_id, active: p.active, mustChange: p.must_change_password, owner: !!p.is_owner, avatar: p.avatar || null }));
     // condutor: nomes dos colegas sem dados pessoais (CNH, telefone)
     (dir.data || []).forEach(d => { if (!D.drivers.some(x => x.id === d.id)) D.drivers.push({ id: d.id, name: d.name, active: d.active, _ro: true }); });
     S = D;
@@ -352,33 +358,29 @@ function syncBadge() {
 }
 
 /* ===================== Telas: entrar, recuperar e trocar senha ===================== */
-let LOGIN_MSG = '', LOGIN_BUSY = false, LOGIN_VIEW = 'entrar', RECOVERY = false, SERVER_OK = null;
+let BOOTING = false, LOGIN_MSG = '', LOGIN_BUSY = false, LOGIN_VIEW = 'entrar', RECOVERY = false, SERVER_OK = null;
 function cloudLoginPage() {
   const v = LOGIN_VIEW;
-  const form = v === 'entrar' ? `<form id="cl-form" class="stack" style="max-width:380px;gap:12px">
+  const form = v === 'entrar' ? `<form id="cl-form" class="stack" style="width:100%;gap:12px">
       <label class="field"><span>E-mail</span><input class="inp" name="email" type="email" autocomplete="username" required></label>
       <label class="field"><span>Senha</span><input class="inp" name="pass" type="password" autocomplete="current-password" required></label>
       <p class="err" id="login-err">${esc(LOGIN_MSG)}</p>
       <button class="btn pri lg" ${LOGIN_BUSY ? 'disabled' : ''}>${LOGIN_BUSY ? 'Entrando…' : 'Entrar'}</button>
       <div class="row" style="justify-content:space-between"><button type="button" class="link small" data-act="cl-view" data-v="esqueci">Esqueci minha senha</button></div>
     </form>`
-    : v === 'esqueci' ? `<form id="cl-form" class="stack" style="max-width:380px;gap:12px"><p class="muted">Enviaremos um link para criar uma nova senha.</p>
+    : v === 'esqueci' ? `<form id="cl-form" class="stack" style="width:100%;gap:12px"><p class="muted">Enviaremos um link para criar uma nova senha.</p>
       <label class="field"><span>E-mail</span><input class="inp" name="email" type="email" required></label><p class="err" id="login-err">${esc(LOGIN_MSG)}</p>
       <button class="btn pri lg">Enviar link</button><button type="button" class="link small" data-act="cl-view" data-v="entrar">Voltar</button></form>`
       : '';
-  return `<div class="login">
-    <div class="login-l"><div class="brand" style="border:0;padding:0">${brandMark()}<div><b>gestaovia</b><span>Gestão de frota e posse de veículos</span></div></div>
-      <div><h1 style="font-size:26px">${v === 'esqueci' ? 'Recuperar senha' : 'Entrar'}</h1><p class="muted" style="margin-top:4px">Use seu e-mail corporativo.</p></div>
+  if (BOOTING) return `<div class="splash"><img src="${window.GV_LOGO || ''}" alt="GestaoVia"><span class="spin" aria-label="Carregando"></span></div>`;
+  return `<div class="login1"><div class="login-card">
+      <img class="login-logo" src="${window.GV_LOGO || ''}" alt="GestaoVia">
+      <div style="text-align:center"><h1>GestaoVia</h1><p class="muted small">Sistema de Controle de Frotas</p></div>
+      ${v === 'esqueci' ? '<h2 style="font-size:1.05rem">Recuperar senha</h2>' : ''}
       ${form}
-      <p class="small muted" id="srv-note">${SERVER_OK === false ? 'Não foi possível falar com o servidor. Verifique a conexão com a internet.' : ''}</p></div>
-    <div class="login-r"><div><p class="label">Acesso por perfil</p><h2 style="margin-top:4px">Cada pessoa vê só o que precisa</h2></div>
-      <ul class="att" style="padding:0">
-        <li><span class="ic neu">${ic('gear')}</span><div><b>Administrador</b><small>Regras, usuários e integrações</small></div></li>
-        <li><span class="ic neu">${ic('dash')}</span><div><b>Gestor de frota</b><small>Toda a frota, transferência forçada, custos e premiação</small></div></li>
-        <li><span class="ic neu">${ic('report')}</span><div><b>Supervisor</b><small>Acompanha tudo, sem ações administrativas</small></div></li>
-        <li><span class="ic neu">${ic('qr')}</span><div><b>Condutor</b><small>O próprio veículo, checklists e abastecimentos</small></div></li>
-      </ul>
-      <p class="small muted">Não tem acesso? Peça ao administrador da frota. A senha provisória é trocada no primeiro login.</p>${APP_VERSION ? `<p class="small muted">Versão ${APP_VERSION}</p>` : ''}</div></div>`;
+      <p class="small muted" id="srv-note">${SERVER_OK === false ? 'Não foi possível falar com o servidor. Verifique a conexão com a internet.' : ''}</p>
+      ${APP_VERSION ? `<p class="tiny muted" style="text-align:center">v${APP_VERSION}</p>` : ''}
+    </div></div>`;
 }
 function mountCloudLogin() {
   if (SERVER_OK === null) CLOUD.reachable().then(ok => { SERVER_OK = ok; const n = $('#srv-note'); if (n && !ok) n.textContent = 'Não foi possível falar com o servidor. Verifique a conexão com a internet.'; });
@@ -420,8 +422,8 @@ PAGES.senha = {
       const { error } = await CLOUD.client().auth.updateUser({ password: d.p1 });
       if (error) return err(/different|same/i.test(error.message) ? 'Escolha uma senha diferente da atual.' : friendlyError(error));
       try { await CLOUD.rpc('password_changed'); } catch (x) { }
-      CLOUD.profile.must_change_password = false; RECOVERY = false;
-      toast('Senha salva.'); go(homePage());
+      const wasFirst = CLOUD.profile.must_change_password; CLOUD.profile.must_change_password = false; RECOVERY = false;
+      toast('Senha salva.'); go(wasFirst ? homePage() : 'perfil');
     });
   }
 };
