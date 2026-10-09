@@ -1228,7 +1228,7 @@ function vStatus(v) {
   const c = activeCustody(v.id);
   if (c) {
     const loc = S.locations[v.id];
-    if (loc && v.tracker) { if (loc.speed > 5) return 'deslocamento'; if (!loc.ignition) return 'parado'; }
+    if (loc && nowTs() - loc.at < 10 * MIN && loc.speed > 10) return 'deslocamento';
     return 'em_uso';
   }
   return 'disponivel';
@@ -1336,7 +1336,7 @@ const CRITERIA = {
   conservacao: { l: 'Conservação do veículo', d: 'Avarias não comunicadas e limpeza' },
   abastecimento: { l: 'Abastecimentos', d: 'Registros completos com cupom e km' },
   infracoes: { l: 'Sem infrações', d: 'Multas no período' },
-  procedimentos: { l: 'Procedimentos', d: 'Transferências, obra vinculada e telemetria' }
+  procedimentos: { l: 'Procedimentos', d: 'Transferências, obra vinculada e velocidade' }
 };
 function driverScore(did, from = startOfMonth(nowTs()), to = nowTs()) {
   const cfg = S.settings.score; const C = cfg.criteria; const P = cfg.penalties; const d = drv(did);
@@ -1370,7 +1370,7 @@ function driverScore(did, from = startOfMonth(nowTs()), to = nowTs()) {
     conservacao: `${avarias} avaria(s) não comunicada(s) · ${dirty} limpeza ruim`,
     abastecimento: fuels.length ? `${okFuel} de ${fuels.length} completos` : 'Sem abastecimentos',
     infracoes: fines.length ? `${fines.length} multa(s)` : 'Nenhuma multa',
-    procedimentos: `${forced} forçada(s) · ${noProj} sem obra · ${tel} alerta(s) do rastreador`
+    procedimentos: `${forced} forçada(s) · ${noProj} sem obra · ${tel} excesso(s) de velocidade`
   };
   const parts = Object.entries(C).filter(([, c]) => c.on).map(([k, c]) => {
     let v;
@@ -1475,10 +1475,10 @@ function fleetCounts() {
 
 /* ----- última localização registrada (celular do condutor no checklist) ----- */
 function lastLocation(vid) {
-  // posição mais recente entre o rastreador (Traccar) e o celular do condutor no checklist
+  // posição mais recente: envio automático do celular do condutor ou localização registrada no checklist
   const k = S.checklists.filter(x => x.vehicleId === vid && x.location).sort((a, b) => b.at - a.at)[0];
   const t = S.locations[vid]; const v = veh(vid);
-  const fromT = t && v?.tracker && S.settings.traccar?.mode !== 'off' ? { lat: t.lat, lng: t.lng, at: t.at, source: 'rastreador', what: `Rastreador${t.speed > 3 ? ` · ${t.speed} km/h` : t.ignition ? ' · ligado' : ' · parado'}`, driverId: null } : null;
+  const fromT = t ? { lat: t.lat, lng: t.lng, at: t.at, source: 'celular', what: `GPS do condutor${t.speed > 3 ? ` · ${t.speed} km/h` : ''}`, driverId: null } : null;
   const fromK = k ? { lat: k.location.lat, lng: k.location.lng, at: k.at, source: k.location.source, what: `Checklist ${CK_TYPES[k.type].toLowerCase()}`, driverId: k.driverId } : null;
   if (fromT && (!fromK || fromT.at >= fromK.at)) return fromT;
   return fromK || fromT;
@@ -1488,10 +1488,10 @@ function lastLocation(vid) {
 /* ----- localização ----- */
 function currentLocation(vid) {
   const l = S.locations[vid]; if (!l) return null;
-  return { lat: l.lat, lng: l.lng, source: 'rastreador', at: l.at };
+  return { lat: l.lat, lng: l.lng, source: l.source || 'celular', at: l.at };
 }
 function nearestPlace(l) {
-  if (!l) return 'Sem rastreador';
+  if (!l) return 'Sem localização';
   let best = null, bd = 1e9;
   S.projects.forEach(p => { if (p.lat == null || p.lng == null) return; const d = Math.hypot(p.lat - l.lat, (p.lng - l.lng) * .92) * 111; if (d < bd) { bd = d; best = p; } });
   if (!best) return l.address || 'Posição recebida';
@@ -1594,6 +1594,7 @@ function render() {
     root.innerHTML = `<div class="app">${sidebar()}${SIDE_OPEN ? '<div class="scrim" data-act="side-close"></div>' : ''}<div class="main">${topbar(pg)}<div class="body-wrap ${rb ? 'with-rb' : ''}"><div class="content">${body}</div>${rb ? `<aside class="rightbar">${rb}</aside>` : ''}</div></div></div>`;
   }
   pg.mount?.(ROUTE.p);
+  if (CUR.role === 'condutor') GPS.refresh();
 }
 const homePage = () => CUR.role === 'condutor' ? 'inicio' : 'dashboard';
 
@@ -1749,16 +1750,16 @@ const lastRecordedKm = vid => {
   const ks = [...S.checklists.filter(k => k.vehicleId === vid && k.km).map(k => k.km), ...S.fuel.filter(f => f.vehicleId === vid).map(f => f.km), ...S.custody.filter(c => c.vehicleId === vid).map(c => c.endKm || c.startKm)];
   return ks.length ? Math.max(...ks) : 0;
 };
-const suggestedKm = v => (v.tracker && S.locations[v.id]) ? S.locations[v.id].km : v.odometer;
+const suggestedKm = v => v.odometer;
 
 function captureLocation(v) {
   const tl = currentLocation(v.id);
-  if (tl) DRAFT.geo = { lat: tl.lat, lng: tl.lng, source: 'rastreador' };
+  if (tl && nowTs() - tl.at < 15 * MIN) DRAFT.geo = { lat: tl.lat, lng: tl.lng, source: 'celular' };
   try {
     navigator.geolocation?.getCurrentPosition(p => { if (DRAFT) { DRAFT.geo = { lat: p.coords.latitude, lng: p.coords.longitude, source: 'celular' }; const el = $('#geo-txt'); if (el) el.textContent = geoText(DRAFT.geo); } }, () => { }, { timeout: 5000, maximumAge: 60000 });
   } catch (e) { }
 }
-const geoText = g => g ? `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)} (${g.source === 'celular' ? 'GPS do celular' : 'rastreador'})` : 'Indisponível neste aparelho';
+const geoText = g => g ? `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)} (GPS do celular)` : 'Indisponível neste aparelho';
 
 /* ---------- regras de posse ---------- */
 function receiveCheck(v, did) {
@@ -1813,7 +1814,7 @@ PAGES.inicio = {
     return `<div class="drv">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div><p class="muted small">${cap(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}</p><h1>Olá, ${esc(d.name.split(' ')[0])}</h1></div>
         <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${ring(sc.total, true)}</button></div>
-      ${banners}${card}
+      ${banners}${card}${v ? `<div>${gpsChip()}</div>` : ''}
       <div class="tiles">
         ${T('scanner', 'qr', 'Escanear veículo', 'Ler o QR Code do carro', 'primary scan')}
         ${T('diario', 'check', 'Checklist diário', daily ? `Feito às ${fmtTime(daily.at)}` : 'Poucos segundos', daily ? 't-green' : '', v && !daily ? '<span class="flag pill warn">pendente</span>' : v ? '<span class="flag pill ok">ok</span>' : '')}
@@ -1983,7 +1984,7 @@ function fullChecklistBody(v) {
   }).join('');
   return `
     <div class="panel"><div class="panel-h"><h3>Quilometragem e combustível</h3></div><div class="panel-b form-grid">
-      <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}" aria-describedby="km-h"><small id="km-h">${v.tracker ? 'Sugerida pelo rastreador. Confira no painel.' : `Último registro: ${km(lastRecordedKm(v.id))}`}</small></label>
+      <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}" aria-describedby="km-h"><small id="km-h">Último registro: ${km(lastRecordedKm(v.id))}. Confira no painel.</small></label>
       <div class="field"><span>Nível de combustível</span><div class="seg">${FUEL_LEVELS.map(f => `<label><input type="radio" name="fuel" value="${f}" ${D.fuel === f ? 'checked' : ''}><span>${f}</span></label>`).join('')}</div></div>
     </div></div>
     <div class="panel"><div class="panel-h"><h3>Itens do veículo</h3><button type="button" class="btn sm" data-act="ck-allok">Marcar todos como OK</button></div><div class="panel-b" style="padding-block:4px">${items}</div></div>
@@ -2156,7 +2157,7 @@ PAGES.diario = {
       <div class="yn"><button type="button" class="${sim ? 'on-ok' : ''}" data-act="d-ans" data-v="sim">Sim</button><button type="button" class="${nao ? 'on-bad' : ''}" data-act="d-ans" data-v="nao">Não</button></div>
       ${D.answer ? `
       <div class="panel"><div class="panel-b stack" style="gap:12px">
-        <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}"><small>${v.tracker ? 'Sugerida pelo rastreador. Confira no painel.' : 'Ou envie a foto do painel abaixo.'}</small></label>
+        <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}"><small>Confira no painel ou envie a foto abaixo.</small></label>
         ${singlePhoto('painel_d', 'Foto do painel (opcional)')}
       </div></div>` : ''}
       ${sim ? `<div class="panel"><div class="panel-b stack" style="gap:10px">
@@ -2540,7 +2541,7 @@ function buildMap(el, vehicles, opts = {}) {
 const vehicleIcon = (v, st) => L.divIcon({ className: '', html: `<div class="vpin"><i style="background:${statusHex(V_STATUS[st].c)}"></i><b>${v.plate}</b></div>`, iconSize: [0, 0] });
 function vehiclePopup(v, loc) {
   const st = vStatus(v); const c = activeCustody(v.id); const seg = currentSegment(c); const t = S.locations[v.id];
-  return `<div class="map-pop"><b>${v.plate}</b> · ${esc(v.model)}<br>${stTag(st)}<br>${c ? `${esc(drv(c.driverId).name)} · ${seg ? esc(prj(seg.projectId).code) : 'sem obra'}<br>` : ''}<span class="muted">${esc(loc.what)} · ${fmtShort(loc.at)}</span>${t?.source === 'traccar' && v.tracker ? `<br><span class="muted">Hodômetro ${nf(v.odometer)} km · ignição ${t.ignition ? 'ligada' : 'desligada'}</span>` : ''}<br><button class="link" data-go="veiculo" data-id="${v.id}">Abrir veículo</button></div>`;
+  return `<div class="map-pop"><b>${v.plate}</b> · ${esc(v.model)}<br>${stTag(st)}<br>${c ? `${esc(drv(c.driverId).name)} · ${seg ? esc(prj(seg.projectId).code) : 'sem obra'}<br>` : ''}<span class="muted">${esc(loc.what)} · ${fmtShort(loc.at)}</span><br><button class="link" data-go="veiculo" data-id="${v.id}">Abrir veículo</button></div>`;
 }
 const mapLegend = () => `<div class="map-legend">${['em_uso', 'disponivel', 'aguardando_transferencia', 'manutencao', 'bloqueado'].map(k => `<span class="st"><span class="dot ${V_STATUS[k].c}"></span>${V_STATUS[k].l}</span>`).join('')}<span class="st"><span class="ppin" style="transform:none;display:inline-block;width:11px;height:11px"></span>Obra</span></div>`;
 
@@ -2632,7 +2633,6 @@ function vehicleForm(v = {}) {
       <label class="field"><span>Ocupantes (lugares)</span><input class="inp num" name="seats" type="number" min="1" max="20" value="${v.seats || 5}"></label>
       <label class="field"><span>Quilometragem atual</span><input class="inp num" name="odometer" inputmode="numeric" value="${v.odometer ?? ''}"></label>
       <label class="field"><span>Consumo de referência (km/l)</span><input class="inp num" name="avgKmL" inputmode="decimal" value="${v.avgKmL ? nf(v.avgKmL, 1) : '10'}"></label>
-      <label class="field"><span>Rastreador</span><select class="inp" name="tracker"><option value="1" ${v.tracker !== false ? 'selected' : ''}>Instalado</option><option value="0" ${v.tracker === false ? 'selected' : ''}>Não</option></select></label>
     </div>
     <div class="field"><span>Tipo de frota</span><div class="seg"><label><input type="radio" name="ownership" value="propria" ${!loc ? 'checked' : ''}><span>Frota própria</span></label><label><input type="radio" name="ownership" value="locada" ${loc ? 'checked' : ''}><span>${ic('key')} Locada</span></label></div></div>
     <div id="rent-box" class="panel" style="box-shadow:none;background:var(--surface2)" ${loc ? '' : 'hidden'}><div class="panel-b form-grid" style="padding-top:14px">
@@ -2665,7 +2665,7 @@ ACTIONS['veh-save'] = a => {
     if (parseDate(d.dueDate) <= parseDate(d.pickupDate)) return err('O prazo de devolução deve ser depois da retirada.');
     rental = { ...(edit?.rental || { history: [] }), company: d.company, contract: d.contract, pickupDate: parseDate(d.pickupDate), dueDate: parseDate(d.dueDate), monthly: numv(d.monthly) || 0, status: 'ativa' };
   }
-  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: d.tracker === '1', ownership: d.ownership, rental };
+  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: edit?.tracker ?? false, ownership: d.ownership, rental };
   if (edit) { Object.assign(edit, fields); log('cadastro', `Cadastro do veículo atualizado por ${CUR.name}`, { vehicleId: edit.id }); save(); closeModal(); toast('Veículo atualizado.'); return render(); }
   const id = uid('veh');
   S.vehicles.push({ id, plate: p, ...fields, maintenance: false, active: true });
@@ -2764,7 +2764,7 @@ PAGES.veiculo = {
       <div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="veiculo" data-id="${id}" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div>
     </div>`;
   },
-  mount({ id }) { const el = $('#veh-map'); if (el) { const m = buildMap(el, [veh(id)], { projects: true, fitVehiclesOnly: true, zoom: 13 }); if (veh(id).traccarId && S.settings.traccar.mode !== 'off') drawTodayRoute(m, id); } PAGES.veiculo._mountPlan?.(id); }
+  mount({ id }) { const el = $('#veh-map'); if (el) { const m = buildMap(el, [veh(id)], { projects: true, fitVehiclesOnly: true, zoom: 13 }); drawTodayRoute(m, id); } PAGES.veiculo._mountPlan?.(id); }
 };
 ACTIONS['iss-resolve'] = a => {
   const i = byId(S.issues, a.dataset.id);
@@ -3124,7 +3124,7 @@ function metricsForm(M) {
     <div class="panel"><div class="panel-h"><h2>Descontos por ocorrência</h2></div><div class="panel-b form-grid three">
       ${pen('atraso', 'Checklist diário atrasado', '% do crédito perdido')}${pen('avaria', 'Avaria não comunicada')}${pen('limpeza', 'Veículo entregue sujo')}
       ${pen('leve', 'Multa leve')}${pen('media', 'Multa média')}${pen('grave', 'Multa grave')}${pen('gravissima', 'Multa gravíssima')}
-      ${pen('forcada', 'Transferência forçada')}${pen('semObra', 'Posse sem obra')}${pen('telemetria', 'Alerta de condução (rastreador)')}
+      ${pen('forcada', 'Transferência forçada')}${pen('semObra', 'Posse sem obra')}${pen('telemetria', 'Excesso de velocidade (GPS)')}
     </div></div>
     <div class="panel"><div class="panel-h"><h2>Valor do prêmio</h2><div class="seg"><label><input type="radio" name="mode" value="faixas" ${cfg.mode === 'faixas' ? 'checked' : ''} ${dis}><span>Por faixas</span></label><label><input type="radio" name="mode" value="proporcional" ${cfg.mode === 'proporcional' ? 'checked' : ''} ${dis}><span>Proporcional</span></label></div></div>
       <div class="panel-b">
@@ -3163,240 +3163,116 @@ function mountMetrics() {
 ACTIONS['tier-add'] = () => { $('#tiers').insertAdjacentHTML('beforeend', tierRow({ min: 60, value: 50 }, 0)); };
 ACTIONS['tier-del'] = a => { a.closest('.tier').remove(); };
 
-/* ===================== Integração Traccar (rastreamento) =====================
-   Servidor real: REST /api/* com "Authorization: Bearer <token>" e WebSocket /api/socket?token=<token>.
-   O navegador nunca fala direto com o Traccar: tudo passa pela função traccar-proxy (servidor). */
-const KNOT = 1.852;
-const ALARM_LABEL = { overspeed: 'Excesso de velocidade', hardBraking: 'Frenagem brusca', hardAcceleration: 'Aceleração brusca', hardCornering: 'Curva brusca', sos: 'Botão de pânico', powerCut: 'Rastreador desligado da bateria', tampering: 'Violação do rastreador' };
-const TELEMETRY_ALARMS = ['overspeed', 'hardBraking', 'hardAcceleration', 'hardCornering'];
+/* ===================== Localização pelo celular do condutor (sem rastreador externo) =====================
+   Enquanto o condutor está com um veículo e o gestaovia aberto no celular, o navegador envia a posição:
+   - última posição do veículo (vehicle_last_location), a cada intervalo configurado ou ao andar ~300 m;
+   - histórico do trajeto (vehicle_positions), usado para desenhar o caminho do dia;
+   - alerta de excesso de velocidade (tracker_events) quando o GPS mede velocidade acima do limite.
+   Limite natural da web: com a tela bloqueada ou o app fechado o navegador deixa de enviar. */
+const ALARM_LABEL = { overspeed: 'Excesso de velocidade' };
+const TELEMETRY_ALARMS = ['overspeed'];
+const GPS_DEF = () => ({ enabled: true, intervalSec: 120, speedLimit: 100, maxAccuracy: 150 });
+const gpsCfg = () => S.settings.gps || (S.settings.gps = GPS_DEF());
+const distKm = (a, b) => Math.hypot(a.lat - b.lat, (a.lng - b.lng) * Math.cos(a.lat * Math.PI / 180)) * 111.2;
 
-const TC = {
-  state: 'off',        // off | connecting | live | polling | error
-  msg: '', devices: [], lastMsg: 0, ws: null, timer: null, sim: null, routes: {},
-  cfg() { return S.settings.traccar; },
-  vehicleOfDevice(deviceId) { return S.vehicles.find(v => v.traccarId === deviceId) || null; },
-
-  /* ---------- servidor real ---------- */
-  async req(path, params) {
-    if (APP_MODE === 'cloud') return CLOUD.fn('traccar-proxy', { action: path === '/devices' ? 'devices' : 'positions', ...(params || {}) });
-    const c = this.cfg(); const base = c.url.replace(/\/+$/, '');
-    const q = params ? '?' + new URLSearchParams(params).toString() : '';
-    const r = await fetch(`${base}/api${path}${q}`, { headers: { Authorization: `Bearer ${c.token}`, Accept: 'application/json' } });
-    if (r.status === 401) throw new Error('Token recusado pelo Traccar (401). Gere um novo token em Configurações › Preferências › Token.');
-    if (!r.ok) throw new Error(`Traccar respondeu ${r.status}.`);
-    return r.json();
+const GPS = {
+  watch: null, last: null, prev: null, state: 'off', msg: '', lastOver: {},
+  myCustody() { const d = myDriver(); return d ? driverCustodies(d.id)[0] || null : null; },
+  start() {
+    if (CUR?.role !== 'condutor' || !gpsCfg().enabled) return this.stop('off');
+    if (!this.myCustody()) return this.stop('sem_veiculo');
+    if (!navigator.geolocation) return this.stop('indisponivel');
+    if (this.watch != null) return;
+    this.state = 'aguardando'; this.paint();
+    this.watch = navigator.geolocation.watchPosition(p => this.onPos(p), e => {
+      this.state = e.code === 1 ? 'negado' : 'erro'; this.msg = e.message || ''; this.paint();
+    }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 60000 });
   },
-  async start() {
-    this.stop();
-    const c = this.cfg(); if (!c || c.mode === 'off') { this.state = 'off'; return; }
-    if (APP_MODE === 'cloud') {
-      if (!CLOUD.on || CUR?.role === 'condutor' || c.mode !== 'servidor') { this.state = 'off'; return; }
-      try { this.server = await CLOUD.rpc('traccar_status'); } catch (e) { this.server = null; }
-      if (!this.server?.hasToken || !this.server?.url) { this.state = 'error'; this.msg = 'O administrador ainda não informou o servidor e o token.'; return; }
-    } else if (!c.url || !c.token) { this.state = 'error'; this.msg = 'Informe o endereço do servidor e o token.'; return; }
-    this.state = 'connecting'; this.msg = 'Conectando…'; this.paint();
-    try {
-      this.devices = await this.req('/devices');
-      this.applyDevices(this.devices);
-      this.applyPositions(await this.req('/positions'));
-      if (c.live && APP_MODE !== 'cloud') this.openSocket(); else this.startPolling(APP_MODE === 'cloud' ? `Pelo servidor do gestaovia, a cada ${c.pollSec} s` : undefined);
-    } catch (e) {
-      this.state = 'error';
-      this.msg = e instanceof TypeError ? 'Não foi possível alcançar o servidor. Confira o endereço (https), o web.origin no traccar.xml e se a rede permite a conexão.' : e.message;
-      this.paint();
-    }
+  stop(state = 'off') { if (this.watch != null) { try { navigator.geolocation.clearWatch(this.watch); } catch (e) { } } this.watch = null; this.state = state; this.paint(); },
+  refresh() { if (this.myCustody() && gpsCfg().enabled && CUR?.role === 'condutor') this.start(); else this.stop(this.myCustody() ? 'off' : 'sem_veiculo'); },
+  onPos(p) {
+    const c = this.myCustody(); if (!c) return this.stop('sem_veiculo');
+    const cfg = gpsCfg(); const { latitude: lat, longitude: lng, accuracy, speed } = p.coords; const at = p.timestamp || nowTs();
+    if (accuracy && accuracy > cfg.maxAccuracy) { this.state = 'impreciso'; this.paint(); return; }
+    const here = { lat, lng, at };
+    // velocidade: a medida pelo GPS do aparelho; sem ela, estimada entre duas leituras
+    let kmh = speed != null && !isNaN(speed) ? speed * 3.6 : null;
+    if (kmh == null && this.prev && at > this.prev.at) { const h = (at - this.prev.at) / 36e5; if (h > 0) kmh = distKm(this.prev, here) / h; }
+    this.prev = here; this.state = 'ativo'; this.paint();
+    const v = veh(c.vehicleId); if (!v) return;
+    if (kmh != null && speed != null && kmh > cfg.speedLimit && (!accuracy || accuracy <= 50)) this.overspeed(v, c, here, Math.round(kmh));
+    const due = !this.last || this.last.vid !== v.id || at - this.last.at >= cfg.intervalSec * 1000 || (distKm(this.last, here) > .3 && at - this.last.at > 20000);
+    if (!due) return;
+    this.last = { ...here, vid: v.id };
+    const spd = kmh != null ? Math.round(kmh) : null;
+    S.locations[v.id] = { lat, lng, speed: spd, ignition: null, km: v.odometer, at, source: 'celular' };
+    // grava primeiro a posse/posição pendentes (o banco confere se o veículo está com o condutor)
+    if (CLOUD.on) CLOUD.flush().then(() => CLOUD.client().from('vehicle_positions').insert({ vehicle_id: v.id, driver_id: c.driverId, lat, lng, speed: spd, km: v.odometer, at: new Date(at).toISOString(), source: 'celular' }).then(({ error }) => { if (error) { this.msg = friendlyError(error); } }));
   },
-  openSocket() {
-    const c = this.cfg(); const url = c.url.replace(/\/+$/, '').replace(/^http/, 'ws') + '/api/socket?token=' + encodeURIComponent(c.token);
-    try {
-      const ws = new WebSocket(url); this.ws = ws;
-      ws.onopen = () => { this.state = 'live'; this.msg = 'Tempo real (WebSocket)'; this.paint(); };
-      ws.onmessage = ev => { try { this.onData(JSON.parse(ev.data)); } catch (e) { } };
-      ws.onerror = () => { if (this.ws === ws) { this.ws = null; this.startPolling('WebSocket indisponível; usando consulta periódica.'); } };
-      ws.onclose = () => { if (this.ws === ws && this.state === 'live') { this.ws = null; this.startPolling('Conexão em tempo real caiu; usando consulta periódica.'); } };
-    } catch (e) { this.startPolling('WebSocket indisponível; usando consulta periódica.'); }
+  overspeed(v, c, here, kmh) {
+    if (nowTs() - (this.lastOver[v.id] || 0) < 10 * MIN) return; // no máximo um alerta a cada 10 min por veículo
+    this.lastOver[v.id] = nowTs();
+    S.trackerEvents.push({ id: uid(), extId: null, vehicleId: v.id, driverId: c.driverId, type: 'overspeed', at: here.at, speed: kmh, lat: here.lat, lng: here.lng });
+    log('telemetria', `Excesso de velocidade (${kmh} km/h) medido pelo GPS do celular`, { vehicleId: v.id, driverId: c.driverId, at: here.at });
+    notify('gestao', `${v.plate}: excesso de velocidade a ${kmh} km/h · ${drv(c.driverId)?.name || ''}.`, { level: 'warn', link: { page: 'veiculo', id: v.id } });
+    save();
   },
-  startPolling(note) {
-    clearInterval(this.timer); const c = this.cfg();
-    this.state = 'polling'; this.msg = note || `Consulta a cada ${c.pollSec} s`; this.paint();
-    this.timer = setInterval(async () => { try { this.applyPositions(await this.req('/positions')); } catch (e) { this.state = 'error'; this.msg = e.message; this.paint(); } }, Math.max(10, c.pollSec) * 1000);
-  },
-  stop() { clearInterval(this.timer); this.timer = null; if (this.ws) { const w = this.ws; this.ws = null; try { w.close(); } catch (e) { } } clearInterval(this.sim); this.sim = null; },
-  async testConnection(url, token) {
-    if (APP_MODE === 'cloud') return CLOUD.fn('traccar-proxy', { action: 'test', url, token });
-    const base = url.replace(/\/+$/, '');
-    const r = await fetch(`${base}/api/session?token=${encodeURIComponent(token)}`, { credentials: 'omit' });
-    if (!r.ok) throw new Error(r.status === 404 || r.status === 401 ? 'Token inválido para este servidor.' : `Traccar respondeu ${r.status}.`);
-    const user = await r.json();
-    const d = await fetch(`${base}/api/devices`, { headers: { Authorization: `Bearer ${token}` } }).then(x => x.json());
-    return { user: user.name || user.email, devices: d };
-  },
-  async route(vid, from, to) {
-    const v = veh(vid); if (!v?.traccarId) return [];
-    const key = `${vid}:${startOfDay(from)}`;
-    if (this.routes[key] && nowTs() - this.routes[key].at < 60000) return this.routes[key].pts;
-    try { const pts = await this.req('/positions', { deviceId: v.traccarId, from: new Date(from).toISOString(), to: new Date(to).toISOString() }); this.routes[key] = { at: nowTs(), pts }; return pts; }
-    catch (e) { return []; }
-  },
-
-  /* ---------- aplicação dos dados (mesmo formato do Traccar) ---------- */
-  onData(d) {
-    this.lastMsg = nowTs();
-    if (d.devices) this.applyDevices(d.devices);
-    if (d.positions) this.applyPositions(d.positions);
-    if (d.events) this.applyEvents(d.events);
-  },
-  applyDevices(list) {
-    list.forEach(dv => { const i = this.devices.findIndex(x => x.id === dv.id); if (i >= 0) this.devices[i] = dv; else this.devices.push(dv); });
-    // vínculo automático: nome do dispositivo igual à placa
-    this.devices.forEach(dv => { const v = S.vehicles.find(x => !x.traccarId && x.plate === String(dv.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '')); if (v) { v.traccarId = dv.id; v.traccarUniqueId = dv.uniqueId; v.tracker = true; } });
-  },
-  applyPositions(list) {
-    const c = this.cfg(); let changed = false;
-    list.forEach(p => {
-      const v = this.vehicleOfDevice(p.deviceId); if (!v || p.valid === false) return;
-      const at = Date.parse(p.fixTime || p.deviceTime || p.serverTime);
-      const prev = S.locations[v.id]; if (prev && prev.at > at && prev.source === 'traccar') return;
-      const a = p.attributes || {};
-      const km = a.odometer ? a.odometer / 1000 : a.totalDistance ? a.totalDistance / 1000 : null;
-      S.locations[v.id] = { lat: p.latitude, lng: p.longitude, speed: Math.round((p.speed || 0) * KNOT), course: p.course, ignition: a.ignition ?? (p.speed > 1), motion: a.motion, km: km ? Math.round(km) : v.odometer, at, address: p.address || '', source: 'traccar', positionId: p.id };
-      if (c.odometer && km && km > v.odometer && km - v.odometer < 5000) v.odometer = Math.round(km);
-      if (this.routes[`${v.id}:${startOfDay(at)}`]) this.routes[`${v.id}:${startOfDay(at)}`].pts.push(p);
-      changed = true;
-    });
-    if (changed) { this.lastMsg = nowTs(); this.live(); }
-  },
-  applyEvents(list) {
-    list.forEach(e => {
-      const v = this.vehicleOfDevice(e.deviceId); if (!v) return;
-      const at = Date.parse(e.eventTime);
-      const kind = e.type === 'alarm' ? (e.attributes?.alarm || 'alarm') : e.type === 'deviceOverspeed' ? 'overspeed' : e.type;
-      if (!ALARM_LABEL[kind]) return; // ignição, entrada em cerca etc. não geram alerta
-      if (S.trackerEvents.some(x => x.extId === e.id && e.id)) return;
-      const c = custodyAt(v.id, at);
-      const sp = e.attributes?.speed ? Math.round(e.attributes.speed * KNOT) : S.locations[v.id]?.speed;
-      const ev = { id: uid('tev'), extId: e.id || null, vehicleId: v.id, driverId: c?.driverId || null, type: kind, at, speed: sp || null, lat: S.locations[v.id]?.lat, lng: S.locations[v.id]?.lng };
-      S.trackerEvents.push(ev);
-      log('telemetria', `${ALARM_LABEL[kind]}${sp ? ` (${sp} km/h)` : ''} registrado pelo rastreador`, { vehicleId: v.id, driverId: ev.driverId, at, userId: 'sistema' });
-      if (['overspeed', 'sos', 'powerCut', 'tampering'].includes(kind)) notify('gestao', `${v.plate}: ${ALARM_LABEL[kind]}${sp ? ` a ${sp} km/h` : ''}${ev.driverId ? ` · ${drv(ev.driverId).name}` : ''}.`, { level: kind === 'overspeed' ? 'warn' : 'bad', link: { page: 'veiculo', id: v.id } });
-    });
-    this.live();
-  },
-  /* atualização visual sem recarregar a página */
-  live() {
-    if (!CUR || CUR.role === 'condutor') return;
-    liveUpdateMaps();
-    const b = $('#tc-badge'); if (b) b.outerHTML = tcBadge();
-    clearTimeout(this._sv); this._sv = setTimeout(save, 4000);
-  },
-  paint() { const b = $('#tc-badge'); if (b) b.outerHTML = tcBadge(); const s = $('#tc-status'); if (s) s.outerHTML = tcStatusBox(); }
+  paint() { const el = $('#gps-chip'); if (el) el.outerHTML = gpsChip(); }
 };
-
-/* ---------- mapa ao vivo ---------- */
-function liveUpdateMaps() {
-  MAPS.forEach(map => {
-    Object.entries(map._vm || {}).forEach(([vid, m]) => {
-      const v = veh(vid); const loc = lastLocation(vid); if (!loc) return;
-      m.setLatLng([loc.lat, loc.lng]);
-      const st = vStatus(v); if (m._st !== st) { m._st = st; m.setIcon(vehicleIcon(v, st)); }
-      if (m.isPopupOpen()) m.setPopupContent(vehiclePopup(v, loc));
-    });
-    if (map._route && map._routeVid) { const l = S.locations[map._routeVid]; if (l && l.source === 'traccar') map._route.addLatLng([l.lat, l.lng]); }
-  });
+function gpsChip() {
+  if (CUR?.role !== 'condutor') return '';
+  const m = { ativo: ['ok', 'Localização ativa'], aguardando: ['warn', 'Procurando sinal de GPS…'], impreciso: ['warn', 'GPS com pouca precisão'], negado: ['bad', 'Localização bloqueada: permita nas configurações do navegador'], erro: ['bad', 'GPS indisponível no momento'], indisponivel: ['bad', 'Este aparelho não informa localização'] }[GPS.state];
+  if (!m) return '<span id="gps-chip"></span>';
+  return `<span id="gps-chip" class="st small" style="white-space:normal"><span class="dot ${m[0]}"></span>${m[1]}</span>`;
 }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && CUR?.role === 'condutor') { GPS.stop(GPS.state); GPS.refresh(); } });
+
+/* ---------- gestão: quantos veículos enviaram posição recentemente ---------- */
 function tcBadge() {
-  const c = S.settings.traccar; const map = { off: ['gray', 'Rastreador desligado'], connecting: ['warn', 'Conectando ao Traccar…'], live: ['ok', 'Traccar · ao vivo'], polling: ['neu', 'Traccar · consulta periódica'], error: ['bad', 'Traccar · sem conexão'] }[TC.state] || ['gray', ''];
-  return `<button id="tc-badge" class="pill ${map[0] === 'gray' ? '' : map[0] === 'neu' ? 'blue' : map[0]}" ${isStaff() && CUR.role === 'admin' ? 'data-go="configuracoes" data-tab="integ"' : ''} style="border:none;cursor:${CUR.role === 'admin' ? 'pointer' : 'default'}" title="${esc(TC.msg)}"><span class="dot ${map[0]}" style="width:7px;height:7px;box-shadow:none"></span>${map[1]}${TC.lastMsg ? ` · ${fmtTime(TC.lastMsg)}` : ''}</button>`;
+  const on = gpsCfg().enabled; const recent = Object.values(S.locations || {}).filter(l => nowTs() - l.at < 15 * MIN).length;
+  return `<span id="tc-badge" class="pill ${on && recent ? 'ok' : ''}" title="Posições enviadas pelo celular dos condutores">${ic('pin')} ${on ? `${recent} com posição nos últimos 15 min` : 'Localização desligada'}</span>`;
 }
 
-/* ---------- tela de configuração ---------- */
-function tcStatusBox() {
-  const c = S.settings.traccar;
-  const cls = { live: 'ok', polling: 'neu', connecting: 'warn', error: 'bad', off: '' }[TC.state] || '';
-  return `<div id="tc-status" class="note ${cls}">${ic('road')}<div><b>${{ live: 'Conectado', polling: 'Conectado (consulta periódica)', connecting: 'Conectando…', error: 'Sem conexão', off: 'Integração desligada' }[TC.state]}</b>${TC.msg ? ` · ${esc(TC.msg)}` : ''}${TC.lastMsg ? `<div class="small">Última posição recebida às ${fmtTime(TC.lastMsg)} · ${S.vehicles.filter(v => v.traccarId).length} veículo(s) vinculados</div>` : ''}${c.mode === 'servidor' && APP_MODE !== 'cloud' ? '<div class="small">No visualizador do Claude a conexão externa é bloqueada. Teste publicado no seu domínio (Hostinger).</div>' : ''}</div></div>`;
+/* ---------- trajeto do dia (histórico gravado pelo celular) ---------- */
+async function drawTodayRoute(map, vid) {
+  if (!map || !window.L || !CLOUD.on) return;
+  const { data } = await CLOUD.client().from('vehicle_positions').select('lat,lng,at,speed').eq('vehicle_id', vid).gte('at', new Date(startOfDay(nowTs())).toISOString()).order('at').limit(3000);
+  const pts = (data || []).map(p => ({ lat: +p.lat, lng: +p.lng, at: Date.parse(p.at) }));
+  if (!MAPS.includes(map) || pts.length < 2) return;
+  const line = L.polyline(pts.map(p => [p.lat, p.lng]), { color: cssVar('--blue'), weight: 4, opacity: .75 }).addTo(map);
+  L.circleMarker([pts[0].lat, pts[0].lng], { radius: 5, color: '#fff', weight: 2, fillColor: cssVar('--green'), fillOpacity: 1 }).bindTooltip(`Início ${fmtTime(pts[0].at)}`).addTo(map);
+  map.fitBounds(line.getBounds(), { padding: [20, 20], animate: false, maxZoom: 14 });
+  const kmTot = pts.reduce((s, p, i) => i ? s + distKm(pts[i - 1], p) : 0, 0);
+  const el = $('#route-info'); if (el) el.textContent = `Trajeto de hoje · ${nf(kmTot, 0)} km · ${pts.length} posições`;
 }
-function traccarSettings() {
-  const c = S.settings.traccar;
-  const devs = TC.devices.length ? TC.devices : [];
-  const rows = S.vehicles.filter(v => v.active).map(v => {
-    const l = S.locations[v.id]; const opts = devs.map(d => `<option value="${d.id}" ${v.traccarId === d.id ? 'selected' : ''}>${esc(d.name)} · ${esc(d.uniqueId)}</option>`).join('');
-    return `<tr><td>${plate(v.plate)}</td><td>${devs.length ? `<select class="inp tc-map" data-vid="${v.id}" style="min-height:34px;padding:4px 8px"><option value="">Sem rastreador</option>${opts}</select>` : (v.traccarId ? `<span class="small">ID ${v.traccarId} · ${esc(v.traccarUniqueId || '')}</span>` : '<span class="muted small">—</span>')}</td>
-      <td class="small">${l && l.source === 'traccar' ? `${fmtShort(l.at)} · ${l.speed} km/h · ignição ${l.ignition ? 'ligada' : 'desligada'}` : '<span class="muted">sem posição</span>'}</td></tr>`;
+
+/* ---------- configuração (administrador) ---------- */
+function gpsSettings() {
+  const c = gpsCfg(); const recent = S.vehicles.filter(v => v.active !== false).map(v => {
+    const l = S.locations[v.id];
+    return `<tr><td>${plate(v.plate)}</td><td class="small">${l ? `${fmtShort(l.at)}${l.speed != null ? ` · ${l.speed} km/h` : ''}` : '<span class="muted">sem posição</span>'}</td><td class="small">${l ? esc(nearestPlace(l)) : '—'}</td></tr>`;
   });
-  const recent = S.trackerEvents.slice().sort((a, b) => b.at - a.at).slice(0, 8);
+  const ev = S.trackerEvents.slice().sort((a, b) => b.at - a.at).slice(0, 8);
   return `<div class="panel-b stack" style="padding-top:14px">
-    ${tcStatusBox()}
-    <form id="tc-form" class="stack" style="gap:14px">
-      <div class="field"><span>Origem das posições</span><div class="seg">
-        <label><input type="radio" name="mode" value="servidor" ${c.mode === 'servidor' ? 'checked' : ''}><span>Servidor Traccar</span></label>
-        <label><input type="radio" name="mode" value="off" ${c.mode === 'off' ? 'checked' : ''}><span>Desligado</span></label></div></div>
-      <div class="form-grid" id="tc-server" ${c.mode === 'servidor' ? '' : 'hidden'}>
-        <label class="field"><span>Endereço do servidor</span><input class="inp" name="url" value="${esc(c.url)}" placeholder="https://rastreio.suaempresa.com.br"></label>
-        <label class="field"><span>Token de acesso</span><input class="inp" name="token" type="password" value="${APP_MODE === 'cloud' ? '' : esc(c.token)}" placeholder="${APP_MODE === 'cloud' && TC.server?.hasToken ? 'Token guardado no servidor (deixe em branco para manter)' : 'Gerado no Traccar em Preferências › Token'}" autocomplete="off">${APP_MODE === 'cloud' ? '<small>Fica guardado só no servidor. O navegador nunca recebe o token de volta.</small>' : ''}</label>
-        ${APP_MODE === 'cloud' ? `<div class="field full" id="tc-hook"><span>Encaminhamento de posições (traccar.xml)</span>${tcWebhookBox()}</div>` : ''}
-      </div>
-      <div class="form-grid three">
-        <label class="field"><span>Velocidade máxima (km/h)</span><input class="inp num" name="speedLimit" value="${c.speedLimit}"><small>Acima disso conta como excesso</small></label>
-        <label class="field"><span>Consulta periódica (s)</span><input class="inp num" name="pollSec" value="${c.pollSec}"><small>Usada se o tempo real cair</small></label>
-        <div class="field"><span>Opções</span>${APP_MODE === 'cloud' ? '' : `<label class="row small" style="gap:8px"><span class="toggle"><input type="checkbox" name="live" ${c.live ? 'checked' : ''}><i></i></span>Tempo real (WebSocket)</label>`}<label class="row small" style="gap:8px"><span class="toggle"><input type="checkbox" name="odometer" ${c.odometer ? 'checked' : ''}><i></i></span>Atualizar hodômetro pelo rastreador</label></div>
-      </div>
-      <p class="err" id="tc-err"></p>
-      <div class="row"><button class="btn ok">Salvar e conectar</button><button type="button" class="btn" data-act="tc-test">Testar conexão</button></div>
+    <div class="note">${ic('pin')}<div>A localização vem do <b>GPS do celular do condutor</b> enquanto ele está com um veículo e o gestaovia aberto. Não depende de rastreador nem de serviço externo. Com a tela bloqueada ou o app fechado, o navegador para de enviar; a posição volta a ser enviada quando o condutor abre o app.</div></div>
+    <form id="gps-form" class="form-grid three">
+      <label class="field"><span>Envio de localização</span><select class="inp" name="enabled"><option value="1" ${c.enabled ? 'selected' : ''}>Ligado</option><option value="0" ${!c.enabled ? 'selected' : ''}>Desligado</option></select></label>
+      <label class="field"><span>Enviar a cada (minutos)</span><input class="inp num" name="interval" inputmode="numeric" value="${nf(c.intervalSec / 60, 0)}"><small>Também envia ao andar cerca de 300 m</small></label>
+      <label class="field"><span>Velocidade máxima (km/h)</span><input class="inp num" name="speedLimit" inputmode="numeric" value="${c.speedLimit}"><small>Acima disso gera alerta e conta na premiação</small></label>
+      <div class="full"><button class="btn ok">Salvar</button></div>
     </form>
-    <div><h3 style="margin-bottom:8px">Veículos e dispositivos</h3>${tbl(['Veículo', 'Dispositivo no Traccar', 'Última posição'], rows)}<p class="small muted" style="margin-top:8px">Dispositivos com o nome igual à placa são vinculados automaticamente. O identificador (IMEI) é o mesmo cadastrado no Traccar.</p></div>
-    <div><h3 style="margin-bottom:8px">Últimos alertas de condução</h3>${recent.length ? `<ul class="att" style="padding:0">${recent.map(e => `<li data-go="veiculo" data-id="${e.vehicleId}"><span class="ic ${e.type === 'overspeed' ? 'urg' : 'warn'}">${ic('gauge')}</span><div><b>${veh(e.vehicleId).plate} · ${ALARM_LABEL[e.type]}${e.speed ? ` · ${e.speed} km/h` : ''}</b><small>${e.driverId ? esc(drv(e.driverId).name) : 'Sem condutor na posse'}</small></div><span class="when">${fmtShort(e.at)}</span></li>`).join('')}</ul>` : empty('Nenhum alerta ainda.')}</div>
+    <div><h3 style="margin-bottom:8px">Última posição de cada veículo</h3>${tbl(['Veículo', 'Recebida', 'Local'], recent)}</div>
+    <div><h3 style="margin-bottom:8px">Últimos alertas de velocidade</h3>${ev.length ? `<ul class="att" style="padding:0">${ev.map(e => `<li data-go="veiculo" data-id="${e.vehicleId}"><span class="ic urg">${ic('gauge')}</span><div><b>${veh(e.vehicleId)?.plate || '—'} · ${ALARM_LABEL[e.type] || e.type}${e.speed ? ` · ${e.speed} km/h` : ''}</b><small>${e.driverId ? esc(drv(e.driverId)?.name || '') : 'Sem condutor'}</small></div><span class="when">${fmtShort(e.at)}</span></li>`).join('')}</ul>` : empty('Nenhum alerta ainda.')}</div>
   </div>`;
 }
-function mountTraccarSettings() {
-  const f = $('#tc-form'); if (!f) return;
-  f.addEventListener('change', e => { if (e.target.name === 'mode') $('#tc-server').hidden = e.target.value !== 'servidor'; });
-  if (APP_MODE === 'cloud' && CUR.role === 'admin') CLOUD.rpc('traccar_status').then(st => { TC.server = st; const h = $('#tc-hook'); if (h) h.innerHTML = '<span>Encaminhamento de posições (traccar.xml)</span>' + tcWebhookBox(); const t = f.querySelector('[name=token]'); if (t && st?.hasToken) t.placeholder = 'Token guardado no servidor (deixe em branco para manter)'; }).catch(() => { });
-  f.addEventListener('submit', async e => {
-    e.preventDefault(); const d = formData(f); const c = S.settings.traccar;
-    if (d.mode === 'servidor') { if (!/^https?:\/\//.test(d.url)) return $('#tc-err').textContent = 'Informe o endereço completo, começando com https://'; if (!d.token && !(APP_MODE === 'cloud' && TC.server?.hasToken)) return $('#tc-err').textContent = 'Informe o token de acesso do Traccar.'; }
-    if (APP_MODE === 'cloud' && d.mode === 'servidor') {
-      try { TC.server = await CLOUD.rpc('set_traccar_config', { p_url: d.url, p_token: d.token || null }); }
-      catch (x) { return $('#tc-err').textContent = friendlyError(x); }
-      d.token = '';
-    }
-    Object.assign(c, { mode: d.mode, url: d.url || c.url, speedLimit: +d.speedLimit || 100, pollSec: +d.pollSec || 30, live: !!f.querySelector('[name=live]')?.checked, odometer: !!f.querySelector('[name=odometer]').checked });
-    if (APP_MODE !== 'cloud') c.token = d.token || c.token; else delete c.token;
-    log('config', `Integração Traccar configurada por ${CUR.name} (${d.mode})`, {}); save(); TC.start().then(() => render()); toast('Configuração salva.'); render();
+function mountGpsSettings() {
+  const f = $('#gps-form'); if (!f) return;
+  f.addEventListener('submit', e => {
+    e.preventDefault(); const d = formData(f); const c = gpsCfg();
+    const mins = Math.max(1, Math.min(60, parseInt(d.interval, 10) || 2)); const lim = Math.max(40, Math.min(200, parseInt(d.speedLimit, 10) || 100));
+    Object.assign(c, { enabled: d.enabled === '1', intervalSec: mins * 60, speedLimit: lim });
+    log('config', `Localização pelo celular ${c.enabled ? 'ligada' : 'desligada'} (a cada ${mins} min, limite ${lim} km/h) por ${CUR.name}`, {}); save(); toast('Configuração salva.'); render();
   });
-  $$('.tc-map').forEach(s => s.addEventListener('change', () => {
-    const v = veh(s.dataset.vid); const dv = TC.devices.find(x => String(x.id) === s.value);
-    S.vehicles.forEach(o => { if (dv && o.traccarId === dv.id && o !== v) o.traccarId = null; });
-    v.traccarId = dv ? dv.id : null; v.traccarUniqueId = dv ? dv.uniqueId : null; v.tracker = !!dv;
-    log('config', `Rastreador ${dv ? dv.name + ' vinculado ao' : 'desvinculado do'} ${v.plate}`, { vehicleId: v.id }); save(); toast('Vínculo salvo.');
-  }));
-}
-ACTIONS['tc-test'] = async () => {
-  const f = $('#tc-form'); const d = formData(f); const err = $('#tc-err');
-  if (d.mode !== 'servidor') { err.textContent = ''; return toast('Integração desligada.'); }
-  err.textContent = 'Testando…';
-  try { const r = await TC.testConnection(d.url, d.token); err.textContent = ''; toast(`Conectado como ${r.user}. ${r.devices.length} dispositivo(s) encontrados.`); TC.devices = r.devices; }
-  catch (e) { err.textContent = e instanceof TypeError ? 'Sem resposta do servidor. Confira o endereço, o HTTPS e o web.origin no traccar.xml.' : e.message; }
-};
-
-function tcWebhookBox() {
-  const st = TC.server; if (!st) return '<span class="small muted">Carregando…</span>';
-  const url = CFG.supabaseUrl.replace(/\/$/, '') + '/functions/v1/traccar-webhook';
-  if (!st.webhookSecret) return '<span class="small muted">Visível somente para o administrador.</span>';
-  const xml = `<entry key='forward.enable'>true</entry>\n<entry key='forward.type'>json</entry>\n<entry key='forward.url'>${url}</entry>\n<entry key='forward.header'>Authorization: Bearer ${st.webhookSecret}</entry>\n<entry key='event.forward.enable'>true</entry>\n<entry key='event.forward.url'>${url}</entry>\n<entry key='event.forward.header'>Authorization: Bearer ${st.webhookSecret}</entry>`;
-  return `<textarea class="inp mono small" readonly rows="7" onfocus="this.select()" style="min-height:130px">${esc(xml)}</textarea><small>Cole no traccar.xml do servidor e reinicie o Traccar. As posições e alertas passam a ser gravados no banco mesmo com o gestaovia fechado. Este segredo só aparece para o administrador.</small>`;
-}
-
-/* ---------- trajeto do dia no detalhe do veículo ---------- */
-async function drawTodayRoute(map, vid) {
-  if (!map || !window.L) return;
-  const pts = await TC.route(vid, startOfDay(nowTs()), nowTs());
-  if (!MAPS.includes(map) || pts.length < 2) return;
-  const line = L.polyline(pts.map(p => [p.latitude, p.longitude]), { color: cssVar('--blue'), weight: 4, opacity: .75 }).addTo(map);
-  L.circleMarker([pts[0].latitude, pts[0].longitude], { radius: 5, color: '#fff', weight: 2, fillColor: cssVar('--green'), fillOpacity: 1 }).bindTooltip(`Início ${fmtTime(Date.parse(pts[0].fixTime))}`).addTo(map);
-  map._route = line; map._routeVid = vid;
-  map.fitBounds(line.getBounds(), { padding: [20, 20], animate: false, maxZoom: 14 });
-  const km = pts.reduce((s, p, i) => i ? s + Math.hypot(p.latitude - pts[i - 1].latitude, (p.longitude - pts[i - 1].longitude) * .92) * 111 : 0, 0);
-  const el = $('#route-info'); if (el) el.textContent = `Trajeto de hoje · ${nf(km * 1.2, 0)} km · ${pts.length} posições`;
 }
 
 /* ===================== Documentação do veículo: CRLV e IPVA ===================== */
@@ -3688,8 +3564,8 @@ ACTIONS['ck-pdf'] = async a => { a.disabled = true; const old = a.innerHTML; a.t
 
 /* ===================== Nuvem: Supabase (login, dados por perfil, arquivos) =====================
    No navegador ficam SOMENTE o endereço do projeto e a chave publicável (pública por definição).
-   Quem pode ver e alterar cada registro é decidido no banco (RLS). Chaves de serviço e o token do
-   Traccar ficam no servidor (funções admin-users, traccar-proxy e traccar-webhook). */
+   Quem pode ver e alterar cada registro é decidido no banco (RLS). A chave de serviço fica só no
+   servidor (função admin-users). */
 const CFG = window.VIALINK_CONFIG || {};
 const BUCKET = 'vialink-arquivos';
 const APP_MODE = 'cloud';
@@ -3734,7 +3610,7 @@ SPEC.forEach(sp => {
   sp.tsSet = new Set(sp.ts || []);
 });
 function toRow(sp, o) {
-  if (sp.single) { const data = JSON.parse(JSON.stringify(o)); if (data.traccar) delete data.traccar.token; return { id: 1, data }; }
+  if (sp.single) { const data = JSON.parse(JSON.stringify(o)); return { id: 1, data }; }
   const row = {}; const extra = {};
   for (const [k, v] of Object.entries(o)) {
     if (k.startsWith('_') || v === undefined) continue;
@@ -3760,15 +3636,14 @@ const listOf = sp => sp.single ? [S.settings] : sp.asMap ? Object.entries(S.loca
 const WRITES = {
   admin: null, gestor: null,
   supervisor: new Set(['audit', 'notifications', 'locations']),
-  condutor: new Set(['custody', 'transfers', 'checklists', 'issues', 'fuel', 'notifications', 'audit', 'locations', 'vehicles'])
+  condutor: new Set(['custody', 'transfers', 'checklists', 'issues', 'fuel', 'notifications', 'audit', 'locations', 'vehicles', 'trackerEvents'])
 };
 
 const DEFAULT_SETTINGS = () => ({
   dailyDeadline: '10:00', transferAlertHours: 4, oneVehiclePerDriver: true, requirePhotos: true,
   maint: { attentionKm: 1500, urgentKm: 500, attentionDays: 30, urgentDays: 7 }, fuelDeviationPct: 15,
   score: { criteria: { checklist: { on: true, weight: 30 }, conservacao: { on: true, weight: 20 }, abastecimento: { on: true, weight: 15 }, infracoes: { on: true, weight: 20 }, procedimentos: { on: true, weight: 15 } }, penalties: { atraso: 50, avaria: 5, limpeza: 2, leve: 3, media: 5, grave: 8, gravissima: 12, forcada: 5, semObra: 5, telemetria: 2 }, mode: 'faixas', minScore: 70, maxBonus: 300, tiers: [{ min: 90, value: 300 }, { min: 80, value: 200 }, { min: 70, value: 100 }] },
-  rental: { warnDays: 30, urgentDays: 7 }, tracker: { enabled: true, provider: 'Traccar', endpoint: '', interval: 60 },
-  traccar: { mode: 'off', url: '', live: false, pollSec: 30, odometer: true, speedLimit: 100 }, docs: { warnDays: 30, urgentDays: 7 }
+  rental: { warnDays: 30, urgentDays: 7 }, gps: GPS_DEF(), docs: { warnDays: 30, urgentDays: 7 }
 });
 function fillDefaults(dst, def) { for (const [k, v] of Object.entries(def)) { if (dst[k] === undefined || dst[k] === null) dst[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof dst[k] === 'object') fillDefaults(dst[k], v); } return dst; }
 
@@ -3812,13 +3687,13 @@ const CLOUD = {
       this.on = true; LOGIN_BUSY = false; LOGIN_MSG = '';
       this.startPolling();
       if (prof.must_change_password || RECOVERY) go('senha'); else go(homePage());
-      if (CUR.role !== 'condutor') TC.start().then(() => TC.paint());
+      if (CUR.role === 'condutor') GPS.refresh();
     } catch (e) {
       LOGIN_BUSY = false; LOGIN_MSG = 'Não foi possível carregar os dados: ' + friendlyError(e); render();
     }
   },
   async leave(msg) {
-    this.on = false; clearInterval(this.poll); clearTimeout(this.timer); clearTimeout(this.retryT); TC.stop();
+    this.on = false; clearInterval(this.poll); clearTimeout(this.timer); clearTimeout(this.retryT); GPS.stop();
     this.base = {}; this.signed = {}; CUR = null; S = null; LOGIN_MSG = msg || '';
     try { await this.client().auth.signOut(); } catch (e) { }
     ROUTE = { page: 'login', p: {} }; render();
@@ -3847,7 +3722,7 @@ const CLOUD = {
     const D = { version: 6, cloud: true, locations: {}, users: [] };
     SPEC.forEach((sp, i) => {
       const rows = lists[i];
-      if (sp.single) { D.settings = fillDefaults(rows[0] ? fromRow(sp, rows[0]) : {}, DEFAULT_SETTINGS()); return; }
+      if (sp.single) { D.settings = fillDefaults(rows[0] ? fromRow(sp, rows[0]) : {}, DEFAULT_SETTINGS()); delete D.settings.traccar; delete D.settings.tracker; return; }
       const objs = rows.map(r => fromRow(sp, r));
       if (sp.sort) objs.sort((a, b) => (a[sp.sort] || 0) - (b[sp.sort] || 0));
       if (sp.asMap) objs.forEach(o => { const { id, ...l } = o; D.locations[id] = l; }); else D[sp.key] = objs;
@@ -3855,7 +3730,6 @@ const CLOUD = {
     D.users = (prof.data || []).map(p => ({ id: p.id, name: p.name, email: p.email, role: p.role, driverId: p.driver_id, active: p.active, mustChange: p.must_change_password, owner: !!p.is_owner }));
     // condutor: nomes dos colegas sem dados pessoais (CNH, telefone)
     (dir.data || []).forEach(d => { if (!D.drivers.some(x => x.id === d.id)) D.drivers.push({ id: d.id, name: d.name, active: d.active, _ro: true }); });
-    if (!['servidor', 'off'].includes(D.settings.traccar?.mode)) D.settings.traccar.mode = 'off';
     S = D;
     // inicializações preguiçosas do aplicativo feitas antes da foto de referência
     S.vehicles.forEach(v => docsOf(v)); docSet();
@@ -4486,13 +4360,13 @@ const DB_ENTITIES = [
   ['checklists', 'Checklists diários e completos com fotos', () => S.checklists], ['issues', 'Problemas informados e resolução', () => S.issues],
   ['fuel_records', 'Abastecimentos', () => S.fuel], ['maintenance_plans', 'Plano preventivo por veículo', () => S.plans], ['maintenance_records', 'Serviços realizados e custos', () => S.maintRecords],
   ['tolls', 'Pedágios', () => S.tolls], ['fines', 'Multas e anexos', () => S.fines],
-  ['vehicle_last_location', 'Última posição de cada veículo', () => Object.keys(S.locations)], ['tracker_events', 'Alertas do rastreador', () => S.trackerEvents],
+  ['vehicle_last_location', 'Última posição de cada veículo (GPS do condutor)', () => Object.keys(S.locations)], ['tracker_events', 'Alertas de velocidade', () => S.trackerEvents],
   ['notifications', 'Alertas para condutores e gestão', () => S.notifications], ['audit_logs', 'Auditoria de todas as ações', () => S.audit]
 ];
 PAGES.configuracoes = {
   title: 'Configurações',
   render({ tab = 'regras' }) {
-    const st = S.settings; const tabs = [['regras', 'Regras da frota'], ['obras', 'Obras e centros de custo'], ['usuarios', 'Usuários e perfis'], ['integ', 'Rastreamento (Traccar)'], ['dados', 'Banco de dados']].filter(([k]) => CUR.role === 'admin' || ['regras', 'obras'].includes(k));
+    const st = S.settings; const tabs = [['regras', 'Regras da frota'], ['obras', 'Obras e centros de custo'], ['usuarios', 'Usuários e perfis'], ['localizacao', 'Localização'], ['dados', 'Banco de dados']].filter(([k]) => CUR.role === 'admin' || ['regras', 'obras'].includes(k));
     if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
     let body = '';
     if (tab === 'regras') body = `<form class="panel-b form-grid" id="cfg-form" data-sec="regras">
@@ -4507,19 +4381,18 @@ PAGES.configuracoes = {
       <div class="full"><button class="btn ok">Salvar regras</button></div></form>`;
     if (tab === 'usuarios') body = cloudUsersTab();
     if (tab === 'obras') body = projectsTab();
-    if (tab === 'integ') body = traccarSettings();
+    if (tab === 'localizacao') body = gpsSettings();
     if (tab === 'dados') body = `<div class="panel-b stack">${syncBadge()}<p class="muted">Os dados ficam no Supabase (PostgreSQL) com regras de acesso por perfil (RLS). Fotos e documentos ficam num armazenamento privado; os links abertos no aplicativo expiram em 1 hora.</p>
       ${tbl(['Tabela', 'Conteúdo', '>Registros visíveis'], DB_ENTITIES.map(([t, d, f]) => `<tr><td class="mono small">${t}</td><td class="small">${d}</td><td class="r">${nf(f().length)}</td></tr>`))}
       </div>`;
     return `<div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="configuracoes" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div>`;
   },
   mount() {
-    mountTraccarSettings();
+    mountGpsSettings();
     const f = $('#cfg-form');
     f?.addEventListener('submit', e => {
       e.preventDefault(); const d = formData(f); const st = S.settings; const n = x => parseFloat(String(x).replace(',', '.'));
       if (f.dataset.sec === 'regras') { st.dailyDeadline = d.dailyDeadline; st.transferAlertHours = n(d.transferAlertHours); st.oneVehiclePerDriver = d.oneVehiclePerDriver === '1'; st.requirePhotos = d.requirePhotos === '1'; Object.assign(st.maint, { attentionKm: n(d.attentionKm), urgentKm: n(d.urgentKm), attentionDays: n(d.attentionDays), urgentDays: n(d.urgentDays) }); st.fuelDeviationPct = n(d.fuelDeviationPct); st.rental = { warnDays: n(d.rentWarn), urgentDays: n(d.rentUrg) }; }
-      if (f.dataset.sec === 'integ') { Object.assign(st.tracker, { enabled: d.enabled === '1', provider: d.provider, endpoint: d.endpoint, interval: n(d.interval) }); }
       log('config', `Configurações alteradas (${f.dataset.sec}) por ${CUR.name}`, {}); save(); toast('Configurações salvas.');
     });
   }
