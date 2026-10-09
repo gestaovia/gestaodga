@@ -96,10 +96,10 @@ ACTIONS['mp-del'] = a => { S.plans = S.plans.filter(p => p.id !== a.dataset.id);
 
 /* ---------- Pedágios ---------- */
 function tollTable(list) {
-  return tbl(['Data e hora', 'Placa', 'Local', '>Valor', 'Condutor no horário', 'Obra', 'Centro de custo', 'Correspondência', ...(isManager() ? [''] : [])], list.sort((a, b) => b.at - a.at).slice(0, 200).map(t => {
+  return tbl(['Data e hora', 'Placa', 'Local', '>Valor', 'Condutor no horário', 'Obra', 'Correspondência', ...(isManager() ? [''] : [])], list.sort((a, b) => b.at - a.at).slice(0, 200).map(t => {
     const m = tollMatch(t);
     return `<tr><td class="nowrap">${fmtShort(t.at)}</td><td>${plate(t.plate)}</td><td class="small">${esc(t.place)}</td><td class="r">${money(t.value)}</td>
-      <td>${m.driverId ? drvLink(m.driverId) : '<span class="muted">—</span>'}</td><td>${m.projectId ? esc(prj(m.projectId).code) : '<span class="muted">—</span>'}</td><td class="small">${m.ccId ? ccOf(m.ccId).code : '—'}</td>
+      <td>${m.driverId ? drvLink(m.driverId) : '<span class="muted">—</span>'}</td><td>${m.projectId ? esc(prj(m.projectId).code) : '<span class="muted">—</span>'}</td>
       <td>${m.how === 'auto' ? pill('Automática', 'ok') : m.how === 'manual' ? pill('Ajuste manual', '') : pill('Sem correspondência', 'warn')}</td>
       ${isManager() ? `<td>${m.how !== 'auto' ? `<button class="btn sm" data-act="toll-adj" data-id="${t.id}">Ajustar</button>` : ''}</td>` : ''}</tr>`;
   }), 'Nenhuma passagem.');
@@ -165,7 +165,7 @@ ACTIONS['toll-adj'] = a => {
 ACTIONS['toll-adj-ok'] = a => {
   const t = byId(S.tolls, a.dataset.id); const d = formData($('#adjform'));
   if (d.reason.length < 5) return $('#adj-err').textContent = 'Informe o motivo do ajuste.';
-  t.manual = { driverId: d.driverId, projectId: d.projectId, ccId: prj(d.projectId).ccId, reason: d.reason, by: CUR.id, at: nowTs(), vehicleId: vehicleByPlate(t.plate)?.id };
+  t.manual = { driverId: d.driverId, projectId: d.projectId, ccId: null, reason: d.reason, by: CUR.id, at: nowTs(), vehicleId: vehicleByPlate(t.plate)?.id };
   log('pedagio', `Pedágio de ${fmtShort(t.at)} (${money(t.value)}) atribuído manualmente a ${drv(d.driverId).name} / ${prj(d.projectId).code}: ${d.reason}`, { vehicleId: t.manual.vehicleId, driverId: d.driverId });
   save(); closeModal(); toast('Ajuste registrado na auditoria.'); render();
 };
@@ -237,51 +237,11 @@ ACTIONS['fine-file-open'] = a => {
   window.open(url, '_blank', 'noopener');
 };
 
-/* ---------- Relatórios ---------- */
-let REP_CACHE = null;
-PAGES.relatorios = {
-  title: 'Relatórios',
-  render({ per = 'mes' }) {
-    const n = nowTs(); const ranges = { mes: [startOfMonth(n), n + 1, 'Este mês'], ant: [startOfMonth(startOfMonth(n) - DAY), startOfMonth(n), 'Mês anterior'], d60: [n - 60 * DAY, n + 1, 'Últimos 60 dias'] };
-    const [from, to] = ranges[per]; const rows = periodCosts(from, to);
-    const kinds = ['Combustível', 'Pedágios', 'Multas', 'Manutenção', 'Documentação'];
-    const pivot = (key, label, kmFn) => {
-      const ids = [...new Set(rows.map(r => r[key] || '_'))];
-      const data = ids.map(id => { const rs = rows.filter(r => (r[key] || '_') === id); const o = { id, label: label(id) }; kinds.forEach(k => o[k] = sum(rs.filter(r => r.kind === k), r => r.value)); o.total = sum(rs, r => r.value); o.km = kmFn ? kmFn(id) : null; return o; }).sort((a, b) => b.total - a.total);
-      return data;
-    };
-    const byV = pivot('vehicleId', id => veh(id)?.plate || 'Não identificado', id => kmInPeriod(from, to, c => c.vehicleId === id));
-    const byP = pivot('projectId', id => prj(id)?.code || 'Sem obra');
-    const byD = pivot('driverId', id => drv(id)?.name || 'Sem condutor (manutenção e não identificados)', id => kmInPeriod(from, to, c => c.driverId === id));
-    REP_CACHE = { byV, byP, byD, kinds };
-    const table = (data, first, withKm, key) => `<div class="panel"><div class="panel-h"><h3>Custo por ${first.toLowerCase()}</h3><button class="btn sm" data-act="rep-copy" data-k="${key}">Copiar tabela</button></div>${tbl([first, ...kinds.map(k => '>' + k), ...(withKm ? ['>Km', '>Custo/km'] : []), '>Total'], data.map(o => `<tr><td class="nowrap">${esc(o.label)}</td>${kinds.map(k => `<td class="r">${o[k] ? money(o[k]) : '<span class="muted">—</span>'}</td>`).join('')}${withKm ? `<td class="r">${nf(o.km)}</td><td class="r">${o.km > 0 ? money(o.total / o.km) : '—'}</td>` : ''}<td class="r"><b>${money(o.total)}</b></td></tr>`).concat([`<tr><td><b>Total</b></td>${kinds.map(k => `<td class="r"><b>${money(sum(data, o => o[k]))}</b></td>`).join('')}${withKm ? `<td class="r"><b>${nf(sum(data, o => o.km))}</b></td><td></td>` : ''}<td class="r"><b>${money(sum(data, o => o.total))}</b></td></tr>`]))}</div>`;
-    return `<div class="page-head">      <div class="filters">${Object.entries(ranges).map(([k, r]) => `<button class="chip ${per === k ? 'on' : ''}" data-go="relatorios" data-per="${k}">${r[2]}</button>`).join('')}</div></div>
-      <div class="stack">${table(byP, 'Obra', false, 'byP')}${table(byV, 'Veículo', true, 'byV')}${table(byD, 'Condutor', true, 'byD')}</div>`;
-  }
-};
-ACTIONS['rep-copy'] = async a => {
-  const data = REP_CACHE[a.dataset.k]; const k = REP_CACHE.kinds;
-  const csv = ['Item;' + k.join(';') + ';Total', ...data.map(o => [o.label, ...k.map(x => nf(o[x], 2)), nf(o.total, 2)].join(';'))].join('\n');
-  try { await navigator.clipboard.writeText(csv); toast('Tabela copiada. Cole no Excel.'); }
-  catch (e) { openModal({ title: 'Copiar tabela', body: `<textarea class="inp mono" style="min-height:220px" readonly onfocus="this.select()">${esc(csv)}</textarea>` }); }
-};
-
 /* ---------- Configurações ---------- */
-const DB_ENTITIES = [
-  ['profiles', 'Usuários e perfil de acesso', () => S.users], ['drivers', 'Condutores: CNH, categoria, validade, contato', () => S.drivers.filter(x => !x._ro)],
-  ['vehicles', 'Veículos, locação, CRLV e IPVA', () => S.vehicles], ['qr_codes', 'QR Codes dos veículos (ativos e revogados)', () => S.qrcodes],
-  ['custody', 'Posse: quem responde pelo veículo, início, fim, km e obras', () => S.custody], ['transfers', 'Transferências e seus estados', () => S.transfers],
-  ['cost_centers', 'Centros de custo', () => S.costCenters], ['projects', 'Obras', () => S.projects],
-  ['checklists', 'Checklists diários e completos com fotos', () => S.checklists], ['issues', 'Problemas informados e resolução', () => S.issues],
-  ['fuel_records', 'Abastecimentos', () => S.fuel], ['maintenance_plans', 'Plano preventivo por veículo', () => S.plans], ['maintenance_records', 'Serviços realizados e custos', () => S.maintRecords],
-  ['tolls', 'Pedágios', () => S.tolls], ['fines', 'Multas e anexos', () => S.fines],
-  ['vehicle_last_location', 'Última posição de cada veículo (GPS do condutor)', () => Object.keys(S.locations)], ['tracker_events', 'Alertas de velocidade', () => S.trackerEvents],
-  ['notifications', 'Alertas para condutores e gestão', () => S.notifications], ['audit_logs', 'Auditoria de todas as ações', () => S.audit]
-];
 PAGES.configuracoes = {
   title: 'Configurações',
   render({ tab = 'regras' }) {
-    const st = S.settings; const tabs = [['regras', 'Regras da frota'], ['organizacao', 'Organização'], ['obras', 'Obras e centros de custo'], ['usuarios', 'Usuários e perfis'], ['localizacao', 'Localização'], ['dados', 'Banco de dados']].filter(([k]) => CUR.role === 'admin' || ['regras', 'obras'].includes(k));
+    const st = S.settings; const tabs = [['regras', 'Regras da frota'], ['organizacao', 'Organização'], ['obras', 'Obras'], ['usuarios', 'Usuários e perfis'], ['localizacao', 'Localização']].filter(([k]) => CUR.role === 'admin' || ['regras', 'obras'].includes(k));
     if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
     let body = '';
     if (tab === 'regras') body = `<form class="panel-b form-grid" id="cfg-form" data-sec="regras">
@@ -298,9 +258,6 @@ PAGES.configuracoes = {
     if (tab === 'obras') body = projectsTab();
     if (tab === 'localizacao') body = gpsSettings();
     if (tab === 'organizacao') body = orgSettings();
-    if (tab === 'dados') body = `<div class="panel-b stack">${syncBadge()}<p class="muted">Os dados ficam no Supabase (PostgreSQL) com regras de acesso por perfil (RLS). Fotos e documentos ficam num armazenamento privado; os links abertos no aplicativo expiram em 1 hora.</p>
-      ${tbl(['Tabela', 'Conteúdo', '>Registros visíveis'], DB_ENTITIES.map(([t, d, f]) => `<tr><td class="mono small">${t}</td><td class="small">${d}</td><td class="r">${nf(f().length)}</td></tr>`))}
-      </div>`;
     return `<div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="configuracoes" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div>`;
   },
   mount() {
@@ -318,38 +275,16 @@ PAGES.configuracoes = {
 const coordTxt = p => p.lat != null && p.lng != null ? `${nf(p.lat, 5)}, ${nf(p.lng, 5)}` : '<span class="muted">sem local</span>';
 function projectsTab() {
   const man = isManager();
-  const ccRows = S.costCenters.slice().sort((a, b) => String(a.code).localeCompare(String(b.code), 'pt-BR', { numeric: true })).map(c => `<tr style="${c.active === false ? 'opacity:.6' : ''}"><td class="mono"><b>${esc(c.code)}</b></td><td>${esc(c.name)}</td><td class="r">${S.projects.filter(p => p.ccId === c.id).length}</td><td>${c.active === false ? pill('Inativo') : pill('Ativo', 'ok')}</td><td class="r">${man ? `<button class="btn sm" data-act="cc-edit" data-id="${c.id}">${ic('edit')}Editar</button>` : ''}</td></tr>`);
-  const pRows = S.projects.slice().sort((a, b) => (b.active - a.active) || String(a.code).localeCompare(String(b.code), 'pt-BR', { numeric: true })).map(p => `<tr style="${p.active ? '' : 'opacity:.6'}"><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td class="small">${ccLabel(p.ccId)}</td><td class="small mono">${coordTxt(p)}</td><td>${S.vehicles.filter(v => currentSegment(activeCustody(v.id))?.projectId === p.id).map(v => plate(v.plate)).join(' ') || '<span class="muted">—</span>'}</td><td>${p.active ? pill('Ativa', 'ok') : pill('Encerrada')}</td><td class="r">${man ? `<button class="btn sm" data-act="prj-edit" data-id="${p.id}">${ic('edit')}Editar</button>` : ''}</td></tr>`);
-  return `<div class="panel-b row" style="justify-content:space-between"><h3>Centros de custo</h3>${man ? `<button class="btn pri" data-act="cc-edit">${ic('plus')}Novo centro de custo</button>` : ''}</div>
-    ${tbl(['Código', 'Descrição', '>Obras', 'Situação', ''], ccRows, 'Nenhum centro de custo. Cadastre o primeiro para depois criar as obras.')}
-    <div class="panel-b row" style="justify-content:space-between;border-top:1px solid var(--line)"><h3>Obras</h3>${man ? `<button class="btn pri" data-act="prj-edit" ${S.costCenters.some(c => c.active !== false) ? '' : 'disabled title="Cadastre antes um centro de custo"'}>${ic('plus')}Nova obra</button>` : ''}</div>
-    ${tbl(['Obra', 'Descrição', 'Centro de custo', 'Local (lat, long)', 'Veículos agora', 'Situação', ''], pRows, 'Nenhuma obra cadastrada.')}
+  const pRows = S.projects.slice().sort((a, b) => (b.active - a.active) || String(a.code).localeCompare(String(b.code), 'pt-BR', { numeric: true })).map(p => `<tr style="${p.active ? '' : 'opacity:.6'}"><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td class="small mono">${coordTxt(p)}</td><td>${S.vehicles.filter(v => currentSegment(activeCustody(v.id))?.projectId === p.id).map(v => plate(v.plate)).join(' ') || '<span class="muted">—</span>'}</td><td>${p.active ? pill('Ativa', 'ok') : pill('Encerrada')}</td><td class="r">${man ? `<button class="btn sm" data-act="prj-edit" data-id="${p.id}">${ic('edit')}Editar</button>` : ''}</td></tr>`);
+  return `<div class="panel-b row" style="justify-content:space-between"><div><h3>Obras</h3><p class="small muted">O número da obra é o centro de custo: todos os custos e relatórios são agrupados por ele.</p></div>${man ? `<button class="btn pri" data-act="prj-edit">${ic('plus')}Nova obra</button>` : ''}</div>
+    ${tbl(['Obra (centro de custo)', 'Descrição', 'Local (lat, long)', 'Veículos agora', 'Situação', ''], pRows, 'Nenhuma obra cadastrada.')}
     <p class="panel-b small muted">O local da obra (latitude e longitude) aparece no mapa e serve para identificar quando o veículo está no canteiro. No Google Maps, clique com o botão direito no local e copie as coordenadas.</p>`;
 }
-ACTIONS['cc-edit'] = a => {
-  const c = a.dataset.id ? byId(S.costCenters, a.dataset.id) : null;
-  openModal({
-    title: c ? 'Editar centro de custo' : 'Novo centro de custo',
-    body: `<form id="cc-form" class="form-grid"><label class="field"><span>Código</span><input class="inp" name="code" value="${esc(c?.code || '')}" placeholder="1015"></label><label class="field"><span>Descrição</span><input class="inp" name="name" value="${esc(c?.name || '')}" placeholder="Obras de Subestação"></label>
-      ${c ? `<label class="field"><span>Situação</span><select class="inp" name="active"><option value="1" ${c.active !== false ? 'selected' : ''}>Ativo</option><option value="0" ${c.active === false ? 'selected' : ''}>Inativo</option></select></label>` : ''}<p class="err full" id="cc-err"></p></form>`,
-    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="cc-save" data-id="${c?.id || ''}">Salvar</button>`
-  });
-};
-ACTIONS['cc-save'] = a => {
-  const d = formData($('#cc-form')); const err = t => $('#cc-err').textContent = t;
-  if (!d.code || !d.name) return err('Informe código e descrição.');
-  if (S.costCenters.some(x => x.id !== a.dataset.id && String(x.code).toLowerCase() === d.code.toLowerCase())) return err('Já existe um centro de custo com este código.');
-  let c = a.dataset.id ? byId(S.costCenters, a.dataset.id) : null;
-  if (c) Object.assign(c, { code: d.code, name: d.name, active: d.active !== '0' });
-  else { c = { id: uid(), code: d.code, name: d.name, active: true }; S.costCenters.push(c); }
-  log('config', `Centro de custo ${d.code} – ${d.name} ${a.dataset.id ? 'alterado' : 'cadastrado'} por ${CUR.name}`, {}); save(); closeModal(); toast('Centro de custo salvo.'); render();
-};
 ACTIONS['prj-edit'] = a => {
   const p = a.dataset.id ? byId(S.projects, a.dataset.id) : null;
   openModal({
     title: p ? 'Editar obra' : 'Nova obra',
-    body: `<form id="prj-form" class="form-grid"><label class="field"><span>Código</span><input class="inp" name="code" value="${esc(p?.code || '')}" placeholder="Obra 40"></label>
-      <label class="field"><span>Centro de custo</span><select class="inp" name="ccId">${S.costCenters.filter(c => c.active !== false || c.id === p?.ccId).map(c => `<option value="${c.id}" ${c.id === p?.ccId ? 'selected' : ''}>${esc(c.code)} – ${esc(c.name)}</option>`).join('')}</select></label>
+    body: `<form id="prj-form" class="form-grid"><label class="field"><span>Número da obra (centro de custo)</span><input class="inp" name="code" value="${esc(p?.code || '')}" placeholder="Ex.: 1015"></label>
       <label class="field full"><span>Descrição</span><input class="inp" name="name" value="${esc(p?.name || '')}" placeholder="Cliente, local ou escopo"></label>
       <label class="field full"><span>Local: latitude, longitude (opcional)</span><input class="inp mono" name="coords" value="${p && p.lat != null ? `${p.lat}, ${p.lng}` : ''}" placeholder="-22.90561, -47.06070" inputmode="text"><small><button type="button" class="link small" data-act="prj-here">Usar a minha localização atual</button></small></label>
       ${p ? `<label class="field"><span>Situação</span><select class="inp" name="active"><option value="1" ${p.active ? 'selected' : ''}>Ativa</option><option value="0" ${!p.active ? 'selected' : ''}>Encerrada</option></select></label>` : ''}
@@ -364,7 +299,6 @@ ACTIONS['prj-here'] = () => {
 ACTIONS['prj-save'] = a => {
   const d = formData($('#prj-form')); const err = t => $('#prj-err').textContent = t;
   if (!d.code || !d.name) return err('Informe código e descrição.');
-  if (!d.ccId) return err('Escolha o centro de custo.');
   if (S.projects.some(x => x.id !== a.dataset.id && String(x.code).toLowerCase() === d.code.toLowerCase())) return err('Já existe uma obra com este código.');
   let lat = null, lng = null;
   if (d.coords) {
@@ -374,8 +308,8 @@ ACTIONS['prj-save'] = a => {
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return err('Coordenadas fora do intervalo válido.');
   }
   let p = a.dataset.id ? byId(S.projects, a.dataset.id) : null;
-  if (p) Object.assign(p, { code: d.code, name: d.name, ccId: d.ccId, lat, lng, active: d.active !== '0' });
-  else { p = { id: uid(), code: d.code, name: d.name, ccId: d.ccId, lat, lng, active: true }; S.projects.push(p); }
+  if (p) Object.assign(p, { code: d.code, name: d.name, lat, lng, active: d.active !== '0' });
+  else { p = { id: uid(), code: d.code, name: d.name, ccId: null, lat, lng, active: true }; S.projects.push(p); }
   log('config', `Obra ${d.code} ${a.dataset.id ? 'alterada' : 'cadastrada'} por ${CUR.name}`, {}); save(); closeModal(); toast('Obra salva.'); render();
 };
 

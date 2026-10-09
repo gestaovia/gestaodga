@@ -158,6 +158,11 @@ function metricsForm(M) {
         <div id="mode-faixas" ${cfg.mode === 'faixas' ? '' : 'hidden'}><div class="stack" id="tiers" style="gap:8px">${cfg.tiers.map((t, i) => tierRow(t, i, dis)).join('')}</div>${M ? `<button type="button" class="btn sm" data-act="tier-add" style="margin-top:10px">${ic('plus')}Faixa</button>` : ''}</div>
         <div id="mode-prop" class="form-grid" ${cfg.mode === 'proporcional' ? '' : 'hidden'}><label class="field"><span>Pontuação mínima</span><input class="inp num" id="p-min" value="${cfg.minScore}" ${dis}></label><label class="field"><span>Prêmio com 100 pontos (R$)</span><input class="inp num" id="p-max" value="${cfg.maxBonus}" ${dis}></label></div>
       </div></div>
+    <div class="panel"><div class="panel-h"><h2>Fechamento para o RH</h2></div><div class="panel-b form-grid three">
+      <label class="field"><span>Fechamento automático</span><select class="inp" id="cl-auto" ${dis}><option value="1" ${closingCfg().auto ? 'selected' : ''}>Ligado</option><option value="0" ${!closingCfg().auto ? 'selected' : ''}>Desligado</option></select></label>
+      <label class="field"><span>Dia do fechamento</span><input class="inp num" id="cl-day" type="number" min="1" max="28" value="${closingCfg().day || 5}" ${dis}><small>Neste dia o mês anterior é fechado e vai para o relatório do RH</small></label>
+      <div class="field"><span>Como funciona</span><small class="muted">O fechamento guarda a pontuação e o prêmio de cada condutor. É feito no primeiro acesso da gestão a partir do dia escolhido, ou manualmente em Relatórios › Fechamento da premiação.</small></div>
+    </div></div>
     <p class="err" id="met-err"></p>
     ${M ? '<div class="row"><button class="btn ok lg">Salvar métricas</button></div>' : '<p class="muted small">Somente o gestor de frota ou o administrador altera as métricas.</p>'}
   </form>`;
@@ -183,7 +188,8 @@ function mountMetrics() {
     const mode = f.querySelector('input[name=mode]:checked').value;
     const tiers = $$('.tier', f).map(r => ({ min: num(r.querySelector('.t-min').value), value: num(r.querySelector('.t-val').value) })).filter(t => t.min >= 0 && t.value >= 0 && !isNaN(t.min) && !isNaN(t.value)).sort((a, b) => b.min - a.min);
     if (mode === 'faixas' && !tiers.length) return $('#met-err').textContent = 'Cadastre ao menos uma faixa.';
-    Object.assign(cfg, { criteria: crit, penalties: pen, mode, tiers, minScore: num($('#p-min').value) || 0, maxBonus: num($('#p-max').value) || 0 });
+    const day = Math.max(1, Math.min(28, parseInt($('#cl-day').value, 10) || 5));
+    Object.assign(cfg, { criteria: crit, penalties: pen, mode, tiers, minScore: num($('#p-min').value) || 0, maxBonus: num($('#p-max').value) || 0, closing: { auto: $('#cl-auto').value === '1', day } });
     log('config', `Métricas de premiação alteradas por ${CUR.name}`, {}); save(); toast('Métricas salvas. Ranking recalculado.'); go('bonificacao');
   });
 }

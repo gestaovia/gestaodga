@@ -55,7 +55,7 @@ async function checklistPDF(id) {
     ['Veículo', `${v.brand} ${v.model} · ${v.year}`], ['Placa', v.plate],
     ['Condutor', who], ['Quilometragem', `${nf(k.km)} km`],
     ['Combustível', k.fuelLevel || '—'], ['Obra', seg ? `${prj(seg.projectId).code} · ${prj(seg.projectId).name}` : '—'],
-    ['Centro de custo', seg ? `${ccOf(seg.ccId).code} – ${ccOf(seg.ccId).name}` : '—'], ['Localização', k.location ? `${k.location.lat.toFixed(5)}, ${k.location.lng.toFixed(5)} (${k.location.source === 'celular' ? 'GPS do celular' : 'rastreador'})` : '—']
+    ['Localização', k.location ? `${k.location.lat.toFixed(5)}, ${k.location.lng.toFixed(5)} (${k.location.source === 'celular' ? 'GPS do celular' : 'rastreador'})` : '—']
   ];
   if (t) rows.push(['Transferência', `${drv(t.fromDriverId)?.name || '—'} para ${drv(t.toDriverId)?.name || 'pátio'}`], ['Situação', T_LABEL[t.status]]);
   const cw = (W - 2 * M) / 2;

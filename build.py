@@ -7,7 +7,7 @@ import json, pathlib, re, sys
 ROOT = pathlib.Path(__file__).resolve().parent
 SRC = ROOT / 'src'
 ORDER = ['01-core.js', '02-logic.js', '03-shell.js', '04-driver.js', '05-manager.js', '07-calendar.js',
-         '08-gps.js', '09-docs.js', '10-pdf.js', '11-cloud.js', '12-perfil.js', '06-modules.js']
+         '08-gps.js', '09-docs.js', '10-pdf.js', '11-cloud.js', '12-perfil.js', '13-relatorios.js', '06-modules.js']
 
 cfg = json.loads((ROOT / 'config.json').read_text(encoding='utf-8'))
 VERSION = (ROOT / 'VERSION').read_text(encoding='utf-8').strip() if (ROOT / 'VERSION').exists() else ''
@@ -25,6 +25,15 @@ bm = (SRC / 'basemap.json').read_text(encoding='utf-8')
 js = '\n'.join((SRC / f).read_text(encoding='utf-8') for f in ORDER)
 
 import base64
+b64 = lambda f: 'data:image/png;base64,' + base64.b64encode((ROOT / 'icons' / f).read_bytes()).decode()
+FAV32, FAV192 = b64('icon-32.png'), b64('icon-192.png')
+# manifest do app instalável (PWA) com a versão nos ícones, para o celular trocar o ícone em cada versão
+(ROOT / 'manifest.webmanifest').write_text(json.dumps({
+    'id': './', 'name': 'GestaoVia', 'short_name': 'GestaoVia', 'description': 'Sistema de Controle de Frotas', 'lang': 'pt-BR',
+    'start_url': './', 'scope': './', 'display': 'standalone', 'orientation': 'any', 'background_color': '#F4EFE4', 'theme_color': '#0AF797',
+    'icons': [{'src': f'icons/icon-{n}.png?v={VERSION}', 'sizes': f'{n}x{n}', 'type': 'image/png', 'purpose': 'any'} for n in (192, 512)]
+           + [{'src': f'icons/maskable-{n}.png?v={VERSION}', 'sizes': f'{n}x{n}', 'type': 'image/png', 'purpose': 'maskable'} for n in (192, 512)]
+}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 LOGO = 'data:image/png;base64,' + base64.b64encode((ROOT / 'icons' / 'icon-128.png').read_bytes()).decode()
 SB = public['supabaseUrl'].rstrip('/')
 CSP = ("default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; "
@@ -36,11 +45,11 @@ head = f'''<title>GestaoVia | Sistema de Controle de Frotas</title>
 <meta name="description" content="GestaoVia: controle de frotas com posse por QR Code, checklists, mapa, manutenção e premiação.">
 <meta http-equiv="Content-Security-Policy" content="{CSP}">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<link rel="icon" href="favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
-<link rel="apple-touch-icon" href="icons/icon-180.png"><link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="{FAV32}"><link rel="icon" type="image/png" sizes="192x192" href="{FAV192}">
+<link rel="apple-touch-icon" href="icons/icon-180.png?v={VERSION}"><link rel="manifest" href="manifest.webmanifest?v={VERSION}">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="GestaoVia">
 ''' + '''<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Playfair+Display:wght@700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=Geist+Mono:wght@500;700&display=swap">
 <script>try{var t=localStorage.getItem('vialink-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>

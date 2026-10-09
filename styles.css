@@ -15,9 +15,9 @@
   --scrim:rgba(30,30,30,.45);
   --map-land:#E3DDCF; --map-mun:#F1ECE2; --map-line:#D2CBBB; --map-urban:#E6E0D3; --map-road:#FAF7F0; --map-road-case:#CFC8B8; --map-label:#5E5A52;
   --r:6px; --r-sm:4px;
-  --font-sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
-  --font-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
-  --font-serif:'Playfair Display',Georgia,serif;
+  --font-sans:'Geist','Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --font-serif:var(--font-sans);
   --sidebar-w:236px; --rightbar-w:264px;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -73,7 +73,7 @@ svg[viewBox="0 0 24 24"]{width:16px;height:16px;stroke:currentColor;fill:none;st
 .note>svg{width:17px;height:17px;margin-top:1px}
 html{font-size:14px}
 html,body{height:100%}
-body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--text);line-height:1.45;letter-spacing:.01em;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;text-size-adjust:100%;overflow-x:hidden}
+body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--text);line-height:1.45;letter-spacing:0;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;text-size-adjust:100%;overflow-x:hidden}
 h1,h2,h3,h4{margin:0;text-wrap:balance}
 h1{font-size:1.35rem;font-weight:700} h2{font-size:1.05rem;font-weight:700} h3{font-size:.95rem;font-weight:600} h4{font-size:.85rem;font-weight:600}
 p{margin:0}
@@ -92,7 +92,7 @@ button{cursor:pointer}
 .brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px}
 .brand-mark{width:34px;height:34px;border-radius:var(--r-sm);background:var(--primary);display:flex;align-items:center;justify-content:center;color:var(--primary-fg);flex-shrink:0}
 .brand-mark svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8}
-.brand b{font-family:var(--font-serif);font-size:1.15rem;font-weight:700;letter-spacing:0;line-height:1.1;display:block}
+.brand b{font-family:var(--font-sans);font-size:1.08rem;font-weight:700;letter-spacing:-.01em;line-height:1.1;display:block}
 .brand span{color:var(--text2);font-size:.72rem;display:block}
 .nav{flex:1;padding:6px 10px;display:flex;flex-direction:column}
 .nav-group{font-size:.68rem;font-weight:700;letter-spacing:.08em;color:var(--text3);text-transform:uppercase;padding:14px 12px 6px}

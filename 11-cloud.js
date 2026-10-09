@@ -38,6 +38,7 @@ const SPEC = [
   { key: 'trackerEvents', table: 'tracker_events', cols: ['id', 'extId', 'vehicleId', 'driverId', 'type', 'at', 'speed', 'lat', 'lng'], ts: ['at'], sort: 'at' },
   { key: 'notifications', table: 'notifications', cols: ['id', 'to', 'text', 'at', 'read', 'level', 'link'], ts: ['at'], ren: { to: 'to_target' }, sort: 'at' },
   { key: 'audit', table: 'audit_logs', cols: ['id', 'at', 'type', 'text', 'vehicleId', 'driverId', 'userId', 'data'], ts: ['at'], sort: 'at', limit: 6000 },
+  { key: 'closings', table: 'bonus_closings', cols: ['id', 'month', 'closedAt', 'closedBy', 'auto', 'rows', 'total'], ts: ['closedAt'] },
   { key: 'settings', table: 'app_settings', single: true }
 ];
 SPEC.forEach(sp => {
@@ -127,6 +128,7 @@ const CLOUD = {
       if (prof.must_change_password || RECOVERY) go('senha');
       else if (back?.page && PAGES[back.page] && back.page !== 'login' && back.page !== 'senha') go(back.page, back.p || {}, { noPush: true });
       else go(homePage());
+      try { autoCloseCheck(); } catch (e) { }
       if (CUR.role === 'condutor') GPS.refresh();
     } catch (e) {
       LOGIN_BUSY = false; BOOTING = false; LOGIN_MSG = 'Não foi possível carregar os dados: ' + friendlyError(e); render();

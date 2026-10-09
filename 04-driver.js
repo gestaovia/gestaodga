@@ -317,7 +317,6 @@ PAGES.receber = {
       ${tInfo}${ckHeader(v)}
       <div class="panel"><div class="panel-h"><h3>Obra e finalidade</h3><span class="muted small">Obrigatório para iniciar a posse</span></div><div class="panel-b form-grid">
         <label class="field full"><span>Obra</span><select class="inp" name="projectId" id="f-proj"><option value="">Selecione a obra</option>${projectOptions(DRAFT.projectId)}</select></label>
-        <label class="field"><span>Centro de custo</span><select class="inp" name="ccId" id="f-cc"><option value="">Automático pela obra</option>${ccOptions(DRAFT.ccId)}</select></label>
         <label class="field"><span>Atividade ou finalidade</span><select class="inp" name="purpose">${purposeOptions(DRAFT.purpose)}</select></label>
       </div></div>
       ${fullChecklistBody(v)}
@@ -327,19 +326,18 @@ PAGES.receber = {
   },
   mount({ vid }) {
     const f = $('#ckform'); if (!f) return; bindDraft(f);
-    $('#f-proj').addEventListener('change', e => { const p = prj(e.target.value); if (p) { DRAFT.ccId = p.ccId; $('#f-cc').value = p.ccId; } });
     f.addEventListener('submit', e => {
       e.preventDefault();
       const v = veh(vid); const { e: errs, km: k } = validateFull(v);
-      if (!DRAFT.projectId) errs.unshift('Selecione a obra ou centro de custo.');
+      if (!DRAFT.projectId) errs.unshift('Selecione a obra.');
       if (errs.length) return showErrors(errs);
       const rc = receiveCheck(v, CUR.driverId); if (!rc.ok) return showErrors([rc.msg]);
       const did = CUR.driverId; const p = prj(DRAFT.projectId);
-      const c = { id: uid('cus'), vehicleId: vid, driverId: did, start: nowTs() + 1, end: null, startKm: k, endKm: null, receiveChecklistId: null, deliverChecklistId: null, segments: [{ at: nowTs(), projectId: p.id, ccId: DRAFT.ccId || p.ccId, purpose: DRAFT.purpose, by: did }], closedReason: null, transferId: rc.t?.id || null };
+      const c = { id: uid('cus'), vehicleId: vid, driverId: did, start: nowTs() + 1, end: null, startKm: k, endKm: null, receiveChecklistId: null, deliverChecklistId: null, segments: [{ at: nowTs(), projectId: p.id, ccId: null, purpose: DRAFT.purpose, by: did }], closedReason: null, transferId: rc.t?.id || null };
       const ck = saveFullChecklist('recebimento', v, did, c.id, k);
       c.receiveChecklistId = ck.id; S.custody.push(c);
       log('posse_inicio', `${drv(did).name} recebeu o veículo. Posse iniciada`, { vehicleId: vid, driverId: did, at: nowTs() + 1 });
-      log('obra', `Vinculado à ${p.code} · ${ccOf(DRAFT.ccId || p.ccId).code} · ${DRAFT.purpose}`, { vehicleId: vid, driverId: did, at: nowTs() + 2 });
+      log('obra', `Vinculado à ${p.code} · ${DRAFT.purpose}`, { vehicleId: vid, driverId: did, at: nowTs() + 2 });
       if (rc.t) {
         rc.t.receiveChecklistId = ck.id; rc.t.toCustodyId = c.id; setTransfer(rc.t, 'concluida', 'Checklist de recebimento aprovado; posse transferida');
         log('transferencia', `Transferência concluída: ${drv(rc.t.fromDriverId).name} → ${drv(did).name}`, { vehicleId: vid, driverId: did, at: nowTs() + 3 });
@@ -556,7 +554,7 @@ PAGES.checklist_full = {
 /* ---------- Troca de obra durante a posse ---------- */
 function changeProject(c, projectId, ccId, purpose) {
   const p = prj(projectId);
-  c.segments.push({ at: nowTs(), projectId, ccId: ccId || p.ccId, purpose, by: CUR.driverId || CUR.id });
+  c.segments.push({ at: nowTs(), projectId, ccId: null, purpose, by: CUR.driverId || CUR.id });
   log('obra', `Alteração para ${p.code}${purpose ? ' · ' + purpose : ''}`, { vehicleId: c.vehicleId, driverId: c.driverId });
 }
 PAGES.obra = {
@@ -571,7 +569,6 @@ PAGES.obra = {
         <div><p class="label" style="margin-bottom:4px">Histórico da posse</p>${c.segments.slice(-6).map(s => `<div class="row small"><span class="mono num">${fmtShort(s.at)}</span><span>${esc(prj(s.projectId).code)}</span><span class="muted">${esc(s.purpose || '')}</span></div>`).join('') || '<span class="muted small">Sem obra registrada</span>'}</div></div>
       <div class="panel"><div class="panel-b stack" style="gap:12px">
         <label class="field"><span>Nova obra</span><select class="inp" name="projectId" id="o-proj" required><option value="">Selecione</option>${projectOptions('')}</select></label>
-        <label class="field"><span>Centro de custo</span><select class="inp" name="ccId" id="o-cc">${ccOptions(seg?.ccId)}</select></label>
         <label class="field"><span>Finalidade</span><select class="inp" name="purpose">${purposeOptions(seg?.purpose)}</select></label>
       </div></div>
       <div class="note bad" id="ck-err" hidden></div>
@@ -579,7 +576,6 @@ PAGES.obra = {
   },
   mount({ vid }) {
     const f = $('#oform'); if (!f) return;
-    $('#o-proj').addEventListener('change', e => { const p = prj(e.target.value); if (p) $('#o-cc').value = p.ccId; });
     f.addEventListener('submit', e => {
       e.preventDefault(); const d = formData(f); const c = activeCustody(vid);
       if (!d.projectId) return showErrors(['Selecione a obra.']);
@@ -668,7 +664,7 @@ PAGES.meu_veiculo = {
       <div class="veh-card"><div class="top-line">${plate(v.plate, true)}${stTag(vStatus(v))}</div>
         <dl class="kv"><dt>Veículo</dt><dd>${esc(v.brand)} ${esc(v.model)} · ${v.year}</dd>
         <dt>Posse iniciada</dt><dd>${fmtDT(c.start)}</dd><dt>Km inicial</dt><dd class="num">${km(c.startKm)}</dd><dt>Km atual</dt><dd class="num">${km(v.odometer)}</dd>
-        <dt>Obra</dt><dd>${seg ? projFull(seg.projectId) : projLabel(null)}</dd><dt>Centro de custo</dt><dd>${seg ? ccLabel(seg.ccId) : '—'}</dd>
+        <dt>Obra</dt><dd>${seg ? projFull(seg.projectId) : projLabel(null)}</dd>
         <dt>Checklist hoje</dt><dd>${daily ? `Feito às ${fmtTime(daily.at)}` : '<span class="st"><span class="dot warn"></span>Pendente</span>'}</dd>
         <dt>Próxima manutenção</dt><dd>${mt.next ? `${esc(mt.next.p.item)} em ${nf(mt.next.s.remKm)} km ${mLvl(mt.next.s.lvl)}` : '—'}</dd></dl></div>
       ${t ? `<div class="note warn">Transferência em andamento para ${esc(drv(t.toDriverId).name)}: ${T_LABEL[t.status]}.</div>` : ''}
