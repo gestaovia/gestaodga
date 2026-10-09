@@ -244,13 +244,13 @@ PAGES.veiculo = {
     const v = veh(id); if (!v) return empty('Veículo não encontrado.');
     const c = activeCustody(id); const seg = currentSegment(c); const t = activeTransfer(id); const mt = vehicleMaint(id); const loc = lastLocation(id); const rs = rentalState(v);
     const qr = S.qrcodes.find(q => q.vehicleId === id && q.active); const iss = openIssues(id); const dly = dailyDoneToday(id); const M = isManager(); const st = vStatus(v);
-    const tabs = [['tl', 'Linha do tempo'], ['posses', 'Posses'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['mnt', 'Plano de manutenção'], ['docs', 'Documentos'], ['tf', 'Pedágios e multas']];
+    const tabs = [['tl', 'Linha do tempo'], ['posses', 'Posses'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['mnt', 'Manutenção'], ['docs', 'Documentos'], ['tf', 'Pedágios e multas']];
     let body = '';
     if (tab === 'tl') { const all = S.audit.filter(a => a.vehicleId === id).sort((a, b) => b.at - a.at); const n = +(ROUTE.p.n || 25); body = `<div class="panel-b" style="padding-top:12px">${timelineHTML(all.slice(0, n))}${all.length > n ? `<button class="btn sm" data-go="veiculo" data-id="${id}" data-n="${n + 50}">Mostrar mais (${all.length - n})</button>` : ''}</div>`; }
     if (tab === 'posses') body = tbl(['Condutor', 'Início', 'Fim', 'Duração', '>Km rodados', 'Obras'], S.custody.filter(x => x.vehicleId === id).sort((a, b) => b.start - a.start).map(x => `<tr><td>${drvLink(x.driverId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td class="nowrap">${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || v.odometer) - x.startKm)}</td><td>${[...new Set(x.segments.map(s => prj(s.projectId).code))].join(', ') || pill('Sem obra', 'urg')}</td></tr>`));
     if (tab === 'ck') body = checklistTable(S.checklists.filter(k => k.vehicleId === id));
     if (tab === 'fuel') body = fuelTable(S.fuel.filter(f => f.vehicleId === id));
-    if (tab === 'mnt') body = planEditor(v);
+    if (tab === 'mnt') body = `${planEditor(v)}<div class="panel-h"><h3>Serviços realizados</h3></div>${maintRecordsTable(S.maintRecords.filter(r => r.vehicleId === id), { noVeh: true })}`;
     if (tab === 'docs') body = docsTab(v);
     if (tab === 'tf') body = `<div class="panel-h"><h3>Pedágios</h3></div>${tollTable(S.tolls.filter(x => x.plate === v.plate))}<div class="panel-h"><h3>Multas</h3></div>${fineTable(S.fines.filter(x => x.plate === v.plate))}`;
     return `<div class="stack">
@@ -258,7 +258,7 @@ PAGES.veiculo = {
         <div class="row" style="gap:16px">${plate(v.plate, true)}<div><h2 style="font-size:1.15rem">${esc(v.brand)} ${esc(v.model)}</h2><div class="row" style="gap:8px;margin-top:6px">${stTag(st)}${ownTag(v)}${seatsTag(v)}${docBadge(v) ? `<button style="border:none;background:none;padding:0" data-go="veiculo" data-id="${id}" data-tab="docs">${docBadge(v)}</button>` : ''}<span class="muted small">${v.year} · ${v.fuelType}</span></div></div></div>
         <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button>` : ''}${M && !v.maintenance && openIssues(id).some(i => !i.canRun) ? `<button class="btn ok" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : M && !v.maintenance && !c ? `<button class="btn" data-go="checklist_full" data-vid="${id}" data-type="manut_entrada">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}</div>
       </div></div>
-      ${iss.map(i => `<div class="note ${i.severity === 'critica' || !i.canRun ? 'bad' : 'warn'}">${ic('alert')}<div style="flex:1"><b>${esc(i.type)} · ${SEVERITY[i.severity].l}</b> — ${esc(i.desc)}<div class="small">${esc(drv(i.driverId)?.name || '')} · ${fmtShort(i.at)}</div></div>${M ? `<button class="btn sm" data-act="iss-resolve" data-id="${i.id}">Resolver</button>` : ''}</div>`).join('')}
+      ${iss.map(i => `<div class="note ${i.severity === 'critica' || !i.canRun ? 'bad' : 'warn'}">${ic('alert')}<div style="flex:1"><b>${esc(i.type)} · ${SEVERITY[i.severity].l}</b> — ${esc(i.desc)}<div class="small">${esc(drv(i.driverId)?.name || '')} · ${fmtShort(i.at)}</div></div>${i.severity === 'critica' || !i.canRun ? `<button class="btn sm danger" data-go="seguro" data-vid="${id}">${ic('shield')}Acionar seguro</button>` : ''}${M ? `<button class="btn sm" data-act="iss-resolve" data-id="${i.id}">Resolver</button>` : ''}</div>`).join('')}
       ${t ? `<div class="note warn">${ic('swap')}<div style="flex:1"><b>Transferência:</b> ${esc(drv(t.fromDriverId).name)} → ${esc(drv(t.toDriverId).name)} · ${T_LABEL[t.status]}</div><button class="btn sm" data-go="transferencia" data-id="${t.id}">Abrir</button></div>` : ''}
       <div class="kpis">
         ${kpi('Quilometragem', nf(v.odometer), 'gauge', '', '', 'km')}
@@ -278,6 +278,7 @@ PAGES.veiculo = {
           : `<div class="panel"><div class="panel-h"><h3>QR Code</h3></div><div class="panel-b row" style="align-items:flex-start;gap:14px"><div class="qr-img">${qrSvg(qr.token)}</div><div class="stack" style="gap:8px;flex:1;min-width:120px"><span class="tiny muted" style="word-break:break-all">${qr.token}</span>${M ? `<button class="btn sm" data-act="qr-new" data-id="${id}">Gerar novo</button>` : ''}</div></div></div>`}
       </div>
       ${v.ownership === 'locada' ? `<div class="panel"><div class="panel-h"><h3>QR Code</h3></div><div class="panel-b row" style="gap:14px"><div class="qr-img">${qrSvg(qr.token)}</div><span class="tiny muted" style="word-break:break-all;max-width:240px">${qr.token}</span>${M ? `<button class="btn sm" data-act="qr-new" data-id="${id}">Gerar novo</button>` : ''}</div></div>` : ''}
+      <div class="grid2">${insurancePanel(v)}${v.maintenance ? `<div class="panel"><div class="panel-h"><h3>Na oficina</h3>${M ? `<button class="btn sm" data-act="mnt-entry-edit" data-id="${id}">${ic('edit')}Editar</button>` : ''}</div><div class="panel-b"><dl class="pairs"><div><dt>Oficina</dt><dd>${esc(shopName(v.maintenanceWorkshopId, 'Não informada'))}</dd></div><div><dt>Desde</dt><dd>${fmtDT(v.maintenanceSince)}</dd></div><div><dt>Motivo</dt><dd>${esc(v.maintenanceNote || '—')}</dd></div>${shopOf(v.maintenanceWorkshopId)?.phone ? `<div><dt>Telefone</dt><dd><a href="tel:${esc(onlyDigits(shopOf(v.maintenanceWorkshopId).phone))}">${esc(shopOf(v.maintenanceWorkshopId).phone)}</a></dd></div>` : ''}</dl></div></div>` : ''}</div>
       <div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="veiculo" data-id="${id}" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div>
     </div>`;
   },
@@ -396,7 +397,7 @@ PAGES.condutores = {
     return `<div class="page-head"><div class="filters">${[['ativos', 'Ativos'], ['inativos', 'Inativos'], ['todos', 'Todos']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="condutores" data-f="${k}">${l}<span class="n">${n(k)}</span></button>`).join('')}</div>${isManager() ? `<button class="btn pri" data-act="drv-new">${ic('plus')}Cadastrar condutor</button>` : ''}</div>
       <div class="cards">${list.map(({ d, c, sc }) => {
       const v = c && veh(c.vehicleId); const seg = currentSegment(c); const cnhDays = Math.floor((d.cnhExp - nowTs()) / DAY); const on = driverActive(d);
-      return `<div class="vcard" data-go="condutor" data-id="${d.id}" style="${on ? '' : 'opacity:.6'}"><div class="h"><div class="person"><span class="avatar lg" style="${on ? '' : 'background:var(--border2);color:var(--text3)'}">${initials(d.name)}</span><div><b>${esc(d.name)}</b><small>CNH ${d.cnhCat}${cnhDays < 0 ? ' · <span style="color:var(--red)">CNH vencida</span>' : cnhDays < 60 ? ` · <span style="color:var(--yellow)">vence em ${cnhDays} dias</span>` : ''}</small></div></div>${on ? ring(sc.total, true) : pill('Inativo')}</div>
+      return `<div class="vcard" data-go="condutor" data-id="${d.id}" style="${on ? '' : 'opacity:.6'}"><div class="h"><div class="person"><span class="avatar lg" style="${on ? '' : 'background:var(--border2);color:var(--text3)'}">${initials(d.name)}</span><div><b>${esc(d.name)}</b><small>CNH ${d.cnhCat}${cnhDays < 0 ? ' · <span style="color:var(--red)">CNH vencida</span>' : cnhDays < 60 ? ` · <span style="color:var(--yellow)">vence em ${cnhDays} dias</span>` : ''}</small></div></div>${!on ? pill('Inativo') : sc.eligible ? ring(sc.total, true) : pill('sem posse no período')}</div>
         <div class="foot">${v ? `${plate(v.plate)}<span class="small">${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</span>` : `<span class="muted">${on ? 'Sem veículo' : `Inativo desde ${fmtDate(d.inactiveAt)}`}</span><span></span>`}</div></div>`;
     }).join('') || empty('Nenhum condutor neste filtro.')}</div>`;
   }
@@ -458,8 +459,8 @@ ACTIONS['drv-toggle-ok'] = a => {
 };
 PAGES.condutor = {
   title: p => drv(p.id)?.name || 'Condutor',
-  render({ id, tab = 'posses' }) {
-    const d = drv(id); const c = driverCustodies(id)[0]; const sc = driverScore(id); const from = startOfMonth(nowTs());
+  render({ id, tab = 'posses', per }) {
+    const d = drv(id); const c = driverCustodies(id)[0]; const pk = per || curPeriod(); const sc = driverScore(id, pk); const clRow = closingOf(pk)?.rows.find(r => r.driverId === id); const from = startOfMonth(nowTs());
     const cs = S.custody.filter(x => x.driverId === id).sort((a, b) => b.start - a.start);
     const kmM = kmInPeriod(from, nowTs() + 1, x => x.driverId === id);
     const fines = S.fines.filter(f => fineMatch(f).driverId === id);
@@ -472,18 +473,14 @@ PAGES.condutor = {
     if (tab === 'fuel') body = fuelTable(S.fuel.filter(f => f.driverId === id));
     if (tab === 'multas') body = fineTable(fines);
     if (tab === 'ocor') body = tbl(['Data', 'Veículo', 'Tipo', 'Descrição', 'Situação'], [...iss.map(i => `<tr><td class="nowrap">${fmtShort(i.at)}</td><td>${vehLink(i.vehicleId)}</td><td>${esc(i.type)} ${pill(SEVERITY[i.severity].l, SEVERITY[i.severity].c)}</td><td>${esc(i.desc)}</td><td>${i.status === 'aberta' ? pill('Aberta', 'warn') : pill('Resolvida', 'ok')}</td></tr>`), ...avar.map(k => `<tr><td class="nowrap">${fmtShort(k.at)}</td><td>${vehLink(k.vehicleId)}</td><td>Checklist de ${CK_TYPES[k.type].toLowerCase()}</td><td>${esc(k.avarias || 'Itens avaliados como ruins')}</td><td>${pill('Registrada')}</td></tr>`)], 'Nenhuma ocorrência.');
-    if (tab === 'score') body = `<div class="panel-b">${scoreBreakdown(sc)}</div>`;
+    if (tab === 'score') body = `<div class="panel-b stack"><div class="row" style="gap:8px"><button class="icon-btn" data-go="condutor" data-id="${id}" data-tab="score" data-per="${shiftMonth(pk, -1)}" aria-label="Período anterior">${ic('back')}</button><b style="text-transform:capitalize;min-width:150px;text-align:center">${monthName(pk)}</b><button class="icon-btn" data-go="condutor" data-id="${id}" data-tab="score" data-per="${shiftMonth(pk, 1)}" aria-label="Próximo período" ${pk >= curPeriod() ? 'disabled' : ''}>${ic('chev')}</button>${clRow ? pill('fechado · valores guardados', 'ok') : ''}</div>${clRow ? statementHTML({ ...clRow, key: pk, total: clRow.score, partial: false, eligible: true }, { title: 'Extrato fechado' }) : statementHTML(sc, { manage: isManager(), did: id, key: pk, closed: !!closingOf(pk) })}</div>`;
     if (tab === 'tl') body = `<div class="panel-b" style="padding-top:12px">${timelineHTML(S.audit.filter(a => a.driverId === id).sort((a, b) => b.at - a.at).slice(0, 40))}</div>`;
     return `<div class="stack">
       <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between"><div class="person">${av(d, 'lg')}<div><h2>${esc(d.name)}</h2><small>CNH ${d.cnhCat} · validade ${fmtDate(d.cnhExp)} · ${esc(d.phone)}</small></div></div>
         <div class="row">${!driverActive(d) ? pill(`Inativo desde ${fmtDate(d.inactiveAt)}`) : c ? `${plate(veh(c.vehicleId).plate)}<span class="small muted">desde ${fmtShort(c.start)}</span>` : '<span class="pill">Sem veículo</span>'}
         ${isManager() ? `<button class="btn sm" data-act="drv-edit" data-id="${id}">${ic('edit')}Editar</button><button class="btn sm ${driverActive(d) ? 'danger' : 'pri'}" data-act="drv-toggle" data-id="${id}">${driverActive(d) ? 'Inativar' : 'Reativar'}</button>` : ''}</div></div></div>
       ${!driverActive(d) && d.inactiveReason ? `<div class="note">${ic('user')}<div>Motivo da inativação: ${esc(d.inactiveReason)}</div></div>` : ''}
-      <div class="kpis">${kpi('Pontuação do mês', nf(sc.total, 0), 'trophy', 's-' + scoreTone(sc.total), `data-go="condutor" data-id="${id}" data-tab="score"`)}${kpi('Prêmio previsto', money(sc.bonus), 'star', sc.bonus ? 'c-green' : '')}${kpi('Km no mês', nf(kmM), 'road')}${kpi('Checklists', `${sc.done}/${sc.req}`, 'check')}${kpi('Multas', fines.length, 'fine', fines.length ? 'c-red' : '')}</div>
+      <div class="kpis">${kpi('Pontuação do período', sc.eligible ? nf(sc.total, 0) : '—', 'trophy', sc.eligible ? 's-' + scoreTone(sc.total) : '', `data-go="condutor" data-id="${id}" data-tab="score"`)}${kpi('Prêmio previsto', money(sc.bonus), 'star', sc.bonus ? 'c-green' : '')}${kpi('Km no mês', nf(kmM), 'road')}${kpi('Dias com posse', `${sc.possDays}/${sc.bizDays}`, 'check')}${kpi('Multas', fines.length, 'fine', fines.length ? 'c-red' : '')}</div>
       <div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="condutor" data-id="${id}" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div></div>`;
   }
 };
-function scoreBreakdown(sc) {
-  return `<div class="stack" style="gap:12px">${sc.parts.map(p => `<div><div class="row" style="justify-content:space-between;margin-bottom:6px"><div><b>${p.l}</b><div class="tiny muted">${esc(p.info)}</div></div><b class="num">${nf(p.v, 1)} / ${p.max}</b></div>${barCell(p.v, p.max, 's-' + pctTone(p.v, p.max))}</div>`).join('')}
-    <div class="row" style="justify-content:space-between;border-top:1px solid var(--border2);padding-top:12px"><div class="row">${ring(sc.total)}<div><b>Índice de conformidade</b><div class="tiny muted">${sc.tier ? `Faixa ≥ ${sc.tier.min} pontos` : `Abaixo de ${Math.min(...S.settings.score.tiers.map(t => t.min))} pontos`}</div></div></div><b style="font-size:1.2rem;color:${sc.bonus ? 'var(--green)' : 'var(--text3)'}">${money(sc.bonus)}</b></div></div>`;
-}

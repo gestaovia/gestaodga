@@ -22,14 +22,15 @@ function stable(v) {
 const SPEC = [
   { key: 'costCenters', table: 'cost_centers', cols: ['id', 'code', 'name', 'active'] },
   { key: 'projects', table: 'projects', cols: ['id', 'code', 'name', 'ccId', 'lat', 'lng', 'active'] },
+  { key: 'workshops', table: 'workshops', cols: ['id', 'name', 'cnpj', 'phone', 'contact', 'email', 'address', 'city', 'services', 'active', 'createdAt'], ts: ['createdAt'] },
   { key: 'drivers', table: 'drivers', cols: ['id', 'name', 'cnh', 'cnhCat', 'cnhExp', 'phone', 'active', 'inactiveAt', 'inactiveReason', 'telemetry', 'createdAt'], ts: ['cnhExp', 'inactiveAt', 'createdAt'] },
-  { key: 'vehicles', table: 'vehicles', cols: ['id', 'plate', 'brand', 'model', 'year', 'fuelType', 'avgKmL', 'odometer', 'tracker', 'seats', 'ownership', 'rental', 'docs', 'maintenance', 'maintenanceSince', 'maintenanceNote', 'active', 'traccarId', 'traccarUniqueId'], ts: ['maintenanceSince'] },
+  { key: 'vehicles', table: 'vehicles', cols: ['id', 'plate', 'brand', 'model', 'year', 'fuelType', 'avgKmL', 'odometer', 'tracker', 'seats', 'ownership', 'rental', 'docs', 'maintenance', 'maintenanceSince', 'maintenanceNote', 'active', 'traccarId', 'traccarUniqueId', 'insurance'], ts: ['maintenanceSince'] },
   { key: 'qrcodes', table: 'qr_codes', cols: ['id', 'vehicleId', 'token', 'active', 'createdAt', 'revokedAt'], ts: ['createdAt', 'revokedAt'] },
   { key: 'custody', table: 'custody', cols: ['id', 'vehicleId', 'driverId', 'start', 'end', 'startKm', 'endKm', 'receiveChecklistId', 'deliverChecklistId', 'segments', 'closedReason', 'transferId', 'imported'], ts: ['start', 'end'], ren: { start: 'started_at', end: 'ended_at' }, sort: 'start' },
   { key: 'transfers', table: 'transfers', cols: ['id', 'vehicleId', 'fromDriverId', 'toDriverId', 'status', 'requestedAt', 'forced', 'justification', 'requestedBy', 'fromCustodyId', 'toCustodyId', 'deliverChecklistId', 'receiveChecklistId', 'events'], ts: ['requestedAt'], sort: 'requestedAt' },
-  { key: 'checklists', table: 'checklists', cols: ['id', 'type', 'vehicleId', 'driverId', 'userId', 'custodyId', 'at', 'km', 'fuelLevel', 'items', 'ok', 'problem', 'avarias', 'notes', 'photos', 'projectId', 'location', 'late'], ts: ['at'], sort: 'at' },
+  { key: 'checklists', table: 'checklists', cols: ['id', 'type', 'vehicleId', 'driverId', 'userId', 'custodyId', 'at', 'km', 'fuelLevel', 'items', 'ok', 'problem', 'avarias', 'notes', 'photos', 'projectId', 'location', 'late', 'serverAt'], ts: ['at', 'serverAt'], sort: 'at' },
   { key: 'issues', table: 'issues', cols: ['id', 'vehicleId', 'driverId', 'at', 'type', 'desc', 'severity', 'canRun', 'photo', 'status', 'source', 'location', 'resolvedAt', 'resolvedBy', 'resolution'], ts: ['at', 'resolvedAt'], ren: { desc: 'description' }, sort: 'at' },
-  { key: 'fuel', table: 'fuel_records', cols: ['id', 'vehicleId', 'driverId', 'custodyId', 'projectId', 'at', 'km', 'liters', 'total', 'fuelType', 'station', 'receipt', 'location'], ts: ['at'], sort: 'at' },
+  { key: 'fuel', table: 'fuel_records', cols: ['id', 'vehicleId', 'driverId', 'custodyId', 'projectId', 'at', 'km', 'liters', 'total', 'fuelType', 'station', 'receipt', 'location', 'serverAt'], ts: ['at', 'serverAt'], sort: 'at' },
   { key: 'plans', table: 'maintenance_plans', cols: ['id', 'vehicleId', 'item', 'everyKm', 'everyDays', 'lastKm', 'lastDate'], ts: ['lastDate'] },
   { key: 'maintRecords', table: 'maintenance_records', cols: ['id', 'vehicleId', 'at', 'items', 'cost', 'shop', 'km', 'type'], ts: ['at'], sort: 'at' },
   { key: 'tolls', table: 'tolls', cols: ['id', 'plate', 'at', 'place', 'value', 'invoice', 'manual'], ts: ['at'], sort: 'at' },
@@ -39,6 +40,7 @@ const SPEC = [
   { key: 'notifications', table: 'notifications', cols: ['id', 'to', 'text', 'at', 'read', 'level', 'link'], ts: ['at'], ren: { to: 'to_target' }, sort: 'at' },
   { key: 'audit', table: 'audit_logs', cols: ['id', 'at', 'type', 'text', 'vehicleId', 'driverId', 'userId', 'data'], ts: ['at'], sort: 'at', limit: 6000 },
   { key: 'closings', table: 'bonus_closings', cols: ['id', 'month', 'closedAt', 'closedBy', 'auto', 'rows', 'total'], ts: ['closedAt'] },
+  { key: 'bonusAdj', table: 'bonus_adjustments', cols: ['id', 'driverId', 'period', 'kind', 'modality', 'key', 'points', 'at', 'vehicleId', 'reason', 'createdBy', 'createdAt', 'voidedAt', 'voidedBy', 'voidReason'], ts: ['at', 'createdAt', 'voidedAt'], sort: 'createdAt' },
   { key: 'settings', table: 'app_settings', single: true }
 ];
 SPEC.forEach(sp => {
@@ -81,7 +83,8 @@ const DEFAULT_SETTINGS = () => ({
   dailyDeadline: '10:00', transferAlertHours: 4, oneVehiclePerDriver: true, requirePhotos: true,
   maint: { attentionKm: 1500, urgentKm: 500, attentionDays: 30, urgentDays: 7 }, fuelDeviationPct: 15,
   score: { criteria: { checklist: { on: true, weight: 30 }, conservacao: { on: true, weight: 20 }, abastecimento: { on: true, weight: 15 }, infracoes: { on: true, weight: 20 }, procedimentos: { on: true, weight: 15 } }, penalties: { atraso: 50, avaria: 5, limpeza: 2, leve: 3, media: 5, grave: 8, gravissima: 12, forcada: 5, semObra: 5, telemetria: 2 }, mode: 'faixas', minScore: 70, maxBonus: 300, tiers: [{ min: 90, value: 300 }, { min: 80, value: 200 }, { min: 70, value: 100 }] },
-  rental: { warnDays: 30, urgentDays: 7 }, gps: GPS_DEF(), docs: { warnDays: 30, urgentDays: 7 }
+  rental: { warnDays: 30, urgentDays: 7 }, gps: GPS_DEF(), docs: { warnDays: 30, urgentDays: 7 },
+  bonus: { startPeriod: null, versions: [], closing: { auto: true }, holidays: [], odoSince: null }
 });
 function fillDefaults(dst, def) { for (const [k, v] of Object.entries(def)) { if (dst[k] === undefined || dst[k] === null) dst[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof dst[k] === 'object') fillDefaults(dst[k], v); } return dst; }
 
@@ -146,7 +149,10 @@ const CLOUD = {
   async fetchAll(sp) {
     const sb = this.client(); const out = [];
     // condutor: lista de veículos só com identificação (sem locação, documentos e custos)
-    if (sp.key === 'vehicles' && this.profile?.role === 'condutor') { const { data, error } = await sb.rpc('vehicle_directory'); if (error) throw error; return data || []; } const step = 1000; const cap = sp.limit || 50000;
+    if (sp.key === 'vehicles' && this.profile?.role === 'condutor') {
+      const [{ data, error }, em] = await Promise.all([sb.rpc('vehicle_directory'), sb.rpc('vehicle_emergency')]); if (error) throw error;
+      const ins = new Map((em.data || []).map(r => [r.id, r.insurance])); return (data || []).map(r => ({ ...r, insurance: ins.get(r.id) || null }));
+    } const step = 1000; const cap = sp.limit || 50000;
     for (let from = 0; from < cap; from += step) {
       let q = sb.from(sp.table).select('*');
       q = sp.limit ? q.order('at', { ascending: false }) : q.order('id');

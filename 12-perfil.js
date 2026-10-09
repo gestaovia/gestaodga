@@ -141,8 +141,9 @@ ACTIONS['maint-direct'] = a => {
     title: `Enviar ${v.plate} para manutenção`,
     body: `<p>${iss.length ? `Problema informado: <b>${esc(iss[0].type)}</b> — ${esc(iss[0].desc)}` : 'Veículo bloqueado.'}</p>
       ${c ? `<div class="note warn">${ic('alert')}<div>A posse de <b>${esc(drv(c.driverId)?.name || '')}</b> será encerrada agora, sem checklist de entrega. O condutor é avisado.</div></div>` : ''}
-      <form id="md-form" class="form-grid">
-        <label class="field full"><span>Oficina e motivo</span><input class="inp" name="shop" placeholder="Ex.: Oficina X – freios"></label>
+      ${activeShops().length ? '' : noShopsNote()}<form id="md-form" class="form-grid">
+        <label class="field full"><span>Oficina credenciada</span>${shopSelect('workshopId', '')}</label>
+        <label class="field full"><span>Motivo</span><input class="inp" name="shop" placeholder="Ex.: freios sem resposta" value="${esc(iss[0] ? iss[0].type : '')}"></label>
         <label class="field"><span>Quilometragem</span><input class="inp num" name="km" inputmode="numeric" value="${nf(Math.max(v.odometer || 0, lastRecordedKm(v.id)))}"></label>
         <p class="err full" id="md-err"></p></form>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="maint-direct-ok" data-id="${v.id}">Enviar para manutenção</button>`
@@ -151,7 +152,8 @@ ACTIONS['maint-direct'] = a => {
 ACTIONS['maint-direct-ok'] = a => {
   const v = veh(a.dataset.id); const d = formData($('#md-form')); const err = t => $('#md-err').textContent = t;
   if (!isManager()) return err('Somente a gestão envia para manutenção.');
-  if ((d.shop || '').length < 3) return err('Informe a oficina e o motivo.');
+  if (!shopOk(d.workshopId)) return err('Escolha uma oficina credenciada.');
+  if ((d.shop || '').length < 3) return err('Informe o motivo.');
   const k = parseInt(onlyDigits(d.km), 10) || v.odometer;
   const c = activeCustody(v.id);
   if (c) {
@@ -161,7 +163,7 @@ ACTIONS['maint-direct-ok'] = a => {
     notify(c.driverId, `O ${v.plate} foi enviado para manutenção pela gestão (${CUR.name}). Sua posse foi encerrada.`, { level: 'warn' });
     log('posse_fim', `Posse de ${drv(c.driverId)?.name || ''} encerrada pela gestão: veículo bloqueado enviado para manutenção`, { vehicleId: v.id, driverId: c.driverId });
   }
-  v.odometer = Math.max(v.odometer, k); v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = d.shop;
-  log('manutencao', `Entrada em manutenção sem checklist (veículo bloqueado por problema crítico): ${d.shop}`, { vehicleId: v.id });
+  v.odometer = Math.max(v.odometer, k); v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = d.shop; v.maintenanceWorkshopId = d.workshopId;
+  log('manutencao', `Entrada em manutenção na ${shopName(d.workshopId)} sem checklist (veículo bloqueado por problema crítico): ${d.shop}`, { vehicleId: v.id });
   save(); closeModal(); toast('Veículo enviado para manutenção.'); render();
 };

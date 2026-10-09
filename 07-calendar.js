@@ -55,7 +55,7 @@ ACTIONS['cal-ev'] = a => {
   const k = a.dataset.k, id = a.dataset.id;
   if (k === 'doc') { closeModal(); return go('veiculo', { id, tab: 'docs' }); }
   if (k === 'rent') { const v = veh(id); const rs = rentalState(v); return openModal({ title: `Locação · ${v.plate}`, body: `<div class="pairs"><div><dt>Locadora</dt><dd>${esc(v.rental.company)}</dd></div><div><dt>Contrato</dt><dd>${esc(v.rental.contract || '—')}</dd></div><div><dt>Retirada</dt><dd>${fmtDate(v.rental.pickupDate)}</dd></div><div><dt>Prazo</dt><dd>${fmtDate(v.rental.dueDate)} ${rs ? `(${rs.days < 0 ? 'vencida' : rs.days + ' dias'})` : ''}</dd></div></div>`, foot: `<button class="btn" data-go="veiculo" data-id="${v.id}">Abrir veículo</button>${isManager() ? `<button class="btn pri" data-act="rent-renew" data-id="${v.id}">Renovar</button>` : ''}` }); }
-  if (k === 'done') { const r = byId(S.maintRecords, id); return openModal({ title: `Manutenção realizada · ${veh(r.vehicleId).plate}`, body: `<div class="pairs"><div><dt>Data</dt><dd>${fmtDate(r.at)}</dd></div><div><dt>Km</dt><dd>${nf(r.km)}</dd></div><div><dt>Serviços</dt><dd>${esc(r.items.join(', '))}</dd></div><div><dt>Custo</dt><dd>${money(r.cost)}</dd></div><div><dt>Oficina</dt><dd>${esc(r.shop || '—')}</dd></div></div>` }); }
+  if (k === 'done') { const r = byId(S.maintRecords, id); return openModal({ title: `Manutenção realizada · ${veh(r.vehicleId).plate}`, body: `<div class="pairs"><div><dt>Data</dt><dd>${fmtDate(r.at)}</dd></div><div><dt>Km</dt><dd>${nf(r.km)}</dd></div><div><dt>Serviços</dt><dd>${esc(r.items.join(', '))}</dd></div><div><dt>Custo</dt><dd>${money(r.cost)}</dd></div><div><dt>Oficina</dt><dd>${esc(recShop(r))}</dd></div></div>${r.notes ? `<p class="small muted">${esc(r.notes)}</p>` : ''}`, foot: isManager() ? `<button class="btn" data-act="mr-edit" data-id="${r.id}">${ic('edit')}Editar ou excluir</button>` : '' }); }
   const p = byId(S.plans, id); const v = veh(p.vehicleId); const d = planDue(p);
   openModal({
     title: `${p.item} · ${v.plate}`, body: `<div class="row">${mLvl(d.lvl)}<span class="muted small">${d.basis === 'km' ? `Estimada pelo uso médio de ${nf(avgDailyKm(v.id))} km/dia` : 'Pela data definida no plano'}</span></div>
@@ -66,16 +66,19 @@ ACTIONS['cal-ev'] = a => {
 ACTIONS['mp-done'] = a => {
   const p = byId(S.plans, a.dataset.id); const v = veh(p.vehicleId);
   openModal({
-    title: `Registrar ${p.item.toLowerCase()} · ${v.plate}`, body: `<div class="form-grid"><label class="field"><span>Data</span><input class="inp" type="date" id="md-date" value="${dateInput(nowTs())}"></label><label class="field"><span>Quilometragem</span><input class="inp num" id="md-km" value="${v.odometer}"></label><label class="field"><span>Custo (R$)</span><input class="inp num" id="md-cost" inputmode="decimal"></label><label class="field"><span>Oficina</span><input class="inp" id="md-shop"></label></div><p class="err" id="md-err"></p>`,
+    title: `Registrar ${p.item.toLowerCase()} · ${v.plate}`, body: `<div class="form-grid"><label class="field"><span>Data</span><input class="inp" type="date" id="md-date" value="${dateInput(nowTs())}"></label><label class="field"><span>Quilometragem</span><input class="inp num" id="md-km" value="${v.odometer}"></label><label class="field"><span>Custo (R$)</span><input class="inp num" id="md-cost" inputmode="decimal"></label><label class="field"><span>Oficina credenciada</span>${shopSelect('md-shop', '', p.item)}</label></div>${activeShops().length ? '' : noShopsNote()}<p class="err" id="md-err"></p>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="mp-done-ok" data-id="${p.id}">Registrar</button>`
   });
 };
 ACTIONS['mp-done-ok'] = a => {
   const p = byId(S.plans, a.dataset.id); const v = veh(p.vehicleId); const kmv = +$('#md-km').value.replace(/\D/g, ''); const dt = parseDate($('#md-date').value);
   if (!kmv || !dt) return $('#md-err').textContent = 'Informe data e quilometragem.';
+  const ws = $('#md-shop').value; if (!shopOk(ws)) return $('#md-err').textContent = 'Escolha a oficina credenciada onde o serviço foi feito.';
+  if (dt > nowTs()) return $('#md-err').textContent = 'A data não pode ser futura.';
   const cost = parseFloat($('#md-cost').value.replace(/\./g, '').replace(',', '.')) || 0;
+  const prev = planSnapshot(v.id, [p.item]);
   p.lastKm = kmv; p.lastDate = dt; v.odometer = Math.max(v.odometer, kmv);
-  S.maintRecords.push({ id: uid('mr'), vehicleId: v.id, at: dt + 12 * 36e5, items: [p.item], cost, shop: $('#md-shop').value, km: kmv, type: 'preventiva' });
+  S.maintRecords.push({ id: uid('mr'), vehicleId: v.id, at: dt + 12 * 36e5, items: [p.item], cost, shop: shopName(ws), workshopId: ws, km: kmv, type: 'preventiva', planPrev: prev });
   log('manutencao', `${p.item} realizada (${nf(kmv)} km)${cost ? ' · ' + money(cost) : ''}`, { vehicleId: v.id });
   save(); closeModal(); toast(`${p.item} registrada. Próxima recalculada.`); render();
 };
@@ -121,77 +124,3 @@ ACTIONS['plan-save'] = a => {
   save(); toast('Plano salvo. Calendário atualizado.'); render();
 };
 
-/* ===================== Premiação ===================== */
-PAGES.bonificacao = {
-  title: 'Premiação',
-  render({ tab = 'ranking' }) {
-    const M = isManager();
-    const tabs = `<div class="tabs"><button class="${tab === 'ranking' ? 'on' : ''}" data-go="bonificacao">Ranking do mês</button><button class="${tab === 'metricas' ? 'on' : ''}" data-go="bonificacao" data-tab="metricas">Métricas${M ? '' : ' (leitura)'}</button></div>`;
-    if (tab === 'metricas') return `<div class="stack">${tabs}${metricsForm(M)}</div>`;
-    const list = S.drivers.filter(d => d.active !== false).map(d => ({ d, sc: driverScore(d.id) })).sort((a, b) => b.sc.total - a.sc.total);
-    const top = list.slice(0, 3);
-    const medal = ['var(--primary)', 'var(--text3)', 'var(--border)'];
-    return `<div class="stack">${tabs}
-      <div class="kpis">${kpi('Média da equipe', nf(sum(list, x => x.sc.total) / list.length, 0), 'gauge', 'c-blue', '', 'pontos')}${kpi('Premiados', `${list.filter(x => x.sc.bonus).length}/${list.length}`, 'trophy', 'c-green')}${kpi('Prêmios previstos', money(sum(list, x => x.sc.bonus)), 'star')}${kpi('Mês', new Date().toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''), 'cal', '', '', 'parcial')}</div>
-      <div class="grid3">${top.map(({ d, sc }, i) => `<div class="vcard" data-go="condutor" data-id="${d.id}" data-tab="score" style="align-items:center;text-align:center;border-top:4px solid ${medal[i]}"><span class="pill ${i ? '' : 'blue'}">${i + 1}º lugar</span>${av(d, 'lg')}<b>${esc(d.name)}</b>${ring(sc.total)}<b style="font-size:1.15rem;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b></div>`).join('')}</div>
-      <div class="panel"><div class="panel-h"><h2>Todos os condutores</h2></div>
-        <div class="vlist">${list.map(({ d, sc }, i) => `<div class="vrow" data-go="condutor" data-id="${d.id}" data-tab="score" style="grid-template-columns:28px auto 1fr auto auto"><b class="muted num">${i + 1}º</b>${ring(sc.total, true)}<div class="who2"><b>${esc(d.name)}</b><div class="row" style="gap:3px;flex-wrap:nowrap;margin-top:5px">${sc.parts.map(p => `<div class="bar s-${pctTone(p.v, p.max)}" style="flex:${p.max};min-width:12px" title="${esc(p.l)}: ${nf(p.v, 1)}/${p.max}"><i style="width:${p.v / p.max * 100}%"></i></div>`).join('') || '<div class="panel-b muted">Nenhum condutor ativo.</div>'}</div></div><span class="pill ${sc.tier ? 'ok' : ''}">${sc.tier ? `≥ ${sc.tier.min}` : 'sem faixa'}</span><b class="num" style="min-width:86px;text-align:right;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b></div>`).join('')}</div></div>
-    </div>`;
-  },
-  mount({ tab }) { if (tab === 'metricas') mountMetrics(); }
-};
-function metricsForm(M) {
-  const cfg = S.settings.score; const P = cfg.penalties; const dis = M ? '' : 'disabled';
-  const pen = (k, l, suf = 'pts') => `<label class="field"><span>${l}</span><div class="row" style="flex-wrap:nowrap;gap:6px"><input class="inp num" data-pen="${k}" value="${P[k]}" style="width:90px" ${dis}><span class="small muted">${suf}</span></div></label>`;
-  return `<form id="met-form" class="stack">
-    <div class="panel"><div class="panel-h"><h2>Critérios e pesos</h2><span class="pill" id="w-sum"></span></div><div class="panel-b"><div class="cards">
-      ${Object.entries(cfg.criteria).map(([k, c]) => `<div class="vcard" style="cursor:default;gap:10px" data-crit="${k}"><div class="h"><div><b>${CRITERIA[k].l}</b><div class="tiny muted" style="margin-top:3px">${CRITERIA[k].d}</div></div><label class="toggle"><input type="checkbox" class="cr-on" ${c.on ? 'checked' : ''} ${dis} aria-label="Usar ${CRITERIA[k].l}"><i></i></label></div>
-        <div class="row" style="flex-wrap:nowrap"><input type="range" class="cr-w" min="0" max="60" step="5" value="${c.weight}" style="flex:1;accent-color:var(--blue)" ${dis} aria-label="Peso"><b class="num cr-wv" style="min-width:52px;text-align:right">${c.weight} pts</b></div></div>`).join('')}
-    </div><div class="row" style="margin-top:12px;gap:3px;flex-wrap:nowrap" id="w-bar"></div></div></div>
-    <div class="panel"><div class="panel-h"><h2>Descontos por ocorrência</h2></div><div class="panel-b form-grid three">
-      ${pen('atraso', 'Checklist diário atrasado', '% do crédito perdido')}${pen('avaria', 'Avaria não comunicada')}${pen('limpeza', 'Veículo entregue sujo')}
-      ${pen('leve', 'Multa leve')}${pen('media', 'Multa média')}${pen('grave', 'Multa grave')}${pen('gravissima', 'Multa gravíssima')}
-      ${pen('forcada', 'Transferência forçada')}${pen('semObra', 'Posse sem obra')}${pen('telemetria', 'Excesso de velocidade (GPS)')}
-    </div></div>
-    <div class="panel"><div class="panel-h"><h2>Valor do prêmio</h2><div class="seg"><label><input type="radio" name="mode" value="faixas" ${cfg.mode === 'faixas' ? 'checked' : ''} ${dis}><span>Por faixas</span></label><label><input type="radio" name="mode" value="proporcional" ${cfg.mode === 'proporcional' ? 'checked' : ''} ${dis}><span>Proporcional</span></label></div></div>
-      <div class="panel-b">
-        <div id="mode-faixas" ${cfg.mode === 'faixas' ? '' : 'hidden'}><div class="stack" id="tiers" style="gap:8px">${cfg.tiers.map((t, i) => tierRow(t, i, dis)).join('')}</div>${M ? `<button type="button" class="btn sm" data-act="tier-add" style="margin-top:10px">${ic('plus')}Faixa</button>` : ''}</div>
-        <div id="mode-prop" class="form-grid" ${cfg.mode === 'proporcional' ? '' : 'hidden'}><label class="field"><span>Pontuação mínima</span><input class="inp num" id="p-min" value="${cfg.minScore}" ${dis}></label><label class="field"><span>Prêmio com 100 pontos (R$)</span><input class="inp num" id="p-max" value="${cfg.maxBonus}" ${dis}></label></div>
-      </div></div>
-    <div class="panel"><div class="panel-h"><h2>Fechamento para o RH</h2></div><div class="panel-b form-grid three">
-      <label class="field"><span>Fechamento automático</span><select class="inp" id="cl-auto" ${dis}><option value="1" ${closingCfg().auto ? 'selected' : ''}>Ligado</option><option value="0" ${!closingCfg().auto ? 'selected' : ''}>Desligado</option></select></label>
-      <label class="field"><span>Dia do fechamento</span><input class="inp num" id="cl-day" type="number" min="1" max="28" value="${closingCfg().day || 5}" ${dis}><small>Neste dia o mês anterior é fechado e vai para o relatório do RH</small></label>
-      <div class="field"><span>Como funciona</span><small class="muted">O fechamento guarda a pontuação e o prêmio de cada condutor. É feito no primeiro acesso da gestão a partir do dia escolhido, ou manualmente em Relatórios › Fechamento da premiação.</small></div>
-    </div></div>
-    <p class="err" id="met-err"></p>
-    ${M ? '<div class="row"><button class="btn ok lg">Salvar métricas</button></div>' : '<p class="muted small">Somente o gestor de frota ou o administrador altera as métricas.</p>'}
-  </form>`;
-}
-const tierRow = (t, i, dis = '') => `<div class="row tier" style="flex-wrap:nowrap"><span class="small muted" style="min-width:70px">A partir de</span><input class="inp num t-min" value="${t.min}" style="width:80px" ${dis}><span class="small muted">pontos</span><span class="small muted" style="margin-left:10px">prêmio R$</span><input class="inp num t-val" value="${t.value}" style="width:100px" ${dis}>${dis ? '' : `<button type="button" class="icon-btn" data-act="tier-del" aria-label="Remover faixa">×</button>`}</div>`;
-function mountMetrics() {
-  const f = $('#met-form'); if (!f) return;
-  const colors = ['var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--text3)'];
-  const upd = () => {
-    let total = 0; const parts = [];
-    $$('[data-crit]', f).forEach((c, i) => { const on = c.querySelector('.cr-on').checked; const w = +c.querySelector('.cr-w').value; c.querySelector('.cr-wv').textContent = w + ' pts'; c.style.opacity = on ? 1 : .5; if (on) { total += w; parts.push([w, colors[i], CRITERIA[c.dataset.crit].l]); } });
-    const el = $('#w-sum'); el.textContent = `Soma: ${total} / 100`; el.className = 'pill ' + (total === 100 ? 'ok' : 'bad');
-    $('#w-bar').innerHTML = parts.map(([w, c, l]) => `<div title="${l}" style="flex:${w};height:10px;border-radius:2px;background:${c}"></div>`).join('');
-  };
-  f.addEventListener('input', upd); f.addEventListener('change', e => { if (e.target.name === 'mode') { $('#mode-faixas').hidden = e.target.value !== 'faixas'; $('#mode-prop').hidden = e.target.value !== 'proporcional'; } upd(); });
-  upd();
-  f.addEventListener('submit', e => {
-    e.preventDefault(); const cfg = S.settings.score; const num = x => parseFloat(String(x).replace(/\./g, '').replace(',', '.'));
-    const crit = {}; let total = 0;
-    $$('[data-crit]', f).forEach(c => { const on = c.querySelector('.cr-on').checked; const w = +c.querySelector('.cr-w').value; crit[c.dataset.crit] = { on, weight: w }; if (on) total += w; });
-    if (total !== 100) return $('#met-err').textContent = `A soma dos pesos dos critérios ativos é ${total}. Ajuste para 100.`;
-    const pen = {}; $$('[data-pen]', f).forEach(i => pen[i.dataset.pen] = Math.max(0, num(i.value) || 0));
-    const mode = f.querySelector('input[name=mode]:checked').value;
-    const tiers = $$('.tier', f).map(r => ({ min: num(r.querySelector('.t-min').value), value: num(r.querySelector('.t-val').value) })).filter(t => t.min >= 0 && t.value >= 0 && !isNaN(t.min) && !isNaN(t.value)).sort((a, b) => b.min - a.min);
-    if (mode === 'faixas' && !tiers.length) return $('#met-err').textContent = 'Cadastre ao menos uma faixa.';
-    const day = Math.max(1, Math.min(28, parseInt($('#cl-day').value, 10) || 5));
-    Object.assign(cfg, { criteria: crit, penalties: pen, mode, tiers, minScore: num($('#p-min').value) || 0, maxBonus: num($('#p-max').value) || 0, closing: { auto: $('#cl-auto').value === '1', day } });
-    log('config', `Métricas de premiação alteradas por ${CUR.name}`, {}); save(); toast('Métricas salvas. Ranking recalculado.'); go('bonificacao');
-  });
-}
-ACTIONS['tier-add'] = () => { $('#tiers').insertAdjacentHTML('beforeend', tierRow({ min: 60, value: 50 }, 0)); };
-ACTIONS['tier-del'] = a => { a.closest('.tier').remove(); };

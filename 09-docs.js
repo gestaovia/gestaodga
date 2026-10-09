@@ -17,6 +17,7 @@ function docItems(v) {
     const nextY = new Date().getFullYear() + 1;
     if (new Date().getMonth() === 11 && !d.ipva.some(y => y.year === nextY)) out.push({ kind: 'ipva_new', label: `Registrar IPVA ${nextY}`, due: new Date(nextY, 0, 10).getTime(), ...dueLevel(new Date(nextY, 0, 10).getTime()) });
   }
+  out.push(...insuranceItems(v));
   return out.sort((a, b) => (a.due ?? 0) - (b.due ?? 0));
 }
 function docAttention() {

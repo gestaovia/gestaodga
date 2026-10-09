@@ -549,3 +549,28 @@ img,video,canvas{max-width:100%}
 .avatar.img img{width:100%;height:100%;object-fit:cover;display:block}
 .avatar.xl{width:72px;height:72px;border-radius:12px;font-size:1.4rem}
 .top .icon-btn .avatar{width:100%;height:100%;border-radius:inherit}
+
+/* v1.5 · marca GestaoVia sempre visível */
+.org-line{display:flex;align-items:center;gap:8px;margin:0 12px 6px;padding:7px 8px;border-radius:6px;background:var(--surface2);font-size:.78rem;color:var(--text2);font-weight:600;min-width:0}
+.org-line span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.org-logo.sm{width:22px;height:22px;border-radius:4px}
+.brand-c{display:flex;align-items:center;gap:9px;min-width:0}.brand-c .brand-logo{width:32px;height:32px;border-radius:8px}
+.brand-c b{display:block;font-size:.95rem;line-height:1.1}.brand-c small{display:block;font-size:.72rem;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.top-logo{display:none;width:28px;height:28px;border-radius:7px}
+@media (max-width:1000px){.top-logo{display:block}}
+/* v1.5 · premiação, seguro, manutenção */
+.mods{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.mod-card{display:flex;flex-direction:column;gap:7px;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface)}
+.pill.mod-A,.pill.mod-B,.pill.mod-C{font-weight:800;min-width:22px;justify-content:center}
+.pill.mod-A{background:color-mix(in srgb,var(--violet) 18%,transparent);color:var(--violet)}
+.pill.mod-B{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--blue)}
+.pill.mod-C{background:color-mix(in srgb,var(--u-orange) 20%,transparent);color:var(--u-orange)}
+tr.abonado td{opacity:.62}
+.tbl.calc td{padding:7px 12px}.tbl.calc td:first-child{color:var(--text2)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.ins-crit{border:1.5px solid var(--red)}
+.ins-calls .btn{justify-content:flex-start;text-decoration:none}
+a.btn{text-decoration:none}
+details>summary{list-style:none}details>summary::-webkit-details-marker{display:none}
+.mod-card>.row>b.num{white-space:nowrap}
+.ins-calls .btn{flex-wrap:wrap;height:auto;min-height:48px;white-space:normal;text-align:left}

@@ -126,74 +126,8 @@ function kmInPeriod(from, to, filter = () => true) {
 }
 function groupSum(rows, key) { const m = {}; rows.forEach(r => { const k = r[key] || '_'; m[k] = (m[k] || 0) + r.value; }); return m; }
 
-/* ----- índice de conformidade do condutor (métricas configuradas pelo gestor) ----- */
-const CRITERIA = {
-  checklist: { l: 'Checklists e registros', d: 'Checklists diários feitos no prazo' },
-  conservacao: { l: 'Conservação do veículo', d: 'Avarias não comunicadas e limpeza' },
-  abastecimento: { l: 'Abastecimentos', d: 'Registros completos com cupom e km' },
-  infracoes: { l: 'Sem infrações', d: 'Multas no período' },
-  procedimentos: { l: 'Procedimentos', d: 'Transferências, obra vinculada e velocidade' }
-};
-function driverScore(did, from = startOfMonth(nowTs()), to = nowTs()) {
-  const cfg = S.settings.score; const C = cfg.criteria; const P = cfg.penalties; const d = drv(did);
-  const cs = S.custody.filter(c => c.driverId === did && c.start < to && (!c.end || c.end > from));
-  let req = 0, done = 0, late = 0;
-  cs.forEach(c => {
-    for (let day = startOfDay(Math.max(c.start, from)); day <= startOfDay(Math.min(c.end || to, to)); day += DAY) {
-      if (new Date(day).getDay() === 0) continue;
-      req++;
-      const k = S.checklists.find(k => k.custodyId === c.id && ['diario', 'recebimento'].includes(k.type) && startOfDay(k.at) === day);
-      if (k) { done++; if (k.late) late++; }
-    }
-  });
-  const ratio = { checklist: req ? Math.max(0, (done - late * (P.atraso / 100)) / req) : 1 };
-  const fulls = S.checklists.filter(k => k.driverId === did && k.at >= from && k.at < to && k.items);
-  const dirty = fulls.filter(k => k.items.limpeza === 'ruim').length;
-  const avarias = d.telemetry?.avarias || 0;
-  const fuels = S.fuel.filter(f => f.driverId === did && f.at >= from && f.at < to);
-  const okFuel = fuels.filter(f => f.receipt && f.km && f.liters && f.total).length;
-  const fines = S.fines.filter(f => f.at >= from && f.at < to && fineMatch(f).driverId === did);
-  const forced = S.transfers.filter(t => t.forced && t.fromDriverId === did && t.requestedAt >= from).length;
-  const noProj = cs.filter(c => !c.segments.length).length;
-  const tel = (S.trackerEvents || []).filter(e => e.driverId === did && e.at >= from && e.at < to && TELEMETRY_ALARMS.includes(e.type)).length;
-  const pen = {
-    conservacao: avarias * P.avaria + dirty * P.limpeza,
-    infracoes: sum(fines, f => P[f.gravity] ?? P.media),
-    procedimentos: forced * P.forcada + noProj * P.semObra + tel * P.telemetria
-  };
-  const info = {
-    checklist: req ? `${done} de ${req} diários · ${late} com atraso` : 'Sem posse no período',
-    conservacao: `${avarias} avaria(s) não comunicada(s) · ${dirty} limpeza ruim`,
-    abastecimento: fuels.length ? `${okFuel} de ${fuels.length} completos` : 'Sem abastecimentos',
-    infracoes: fines.length ? `${fines.length} multa(s)` : 'Nenhuma multa',
-    procedimentos: `${forced} forçada(s) · ${noProj} sem obra · ${tel} excesso(s) de velocidade`
-  };
-  const parts = Object.entries(C).filter(([, c]) => c.on).map(([k, c]) => {
-    let v;
-    if (k === 'checklist') v = c.weight * ratio.checklist;
-    else if (k === 'abastecimento') v = fuels.length ? c.weight * okFuel / fuels.length : c.weight;
-    else v = Math.max(0, c.weight - pen[k]);
-    return { k, l: CRITERIA[k].l, v, max: c.weight, info: info[k] };
-  });
-  const maxT = sum(parts, p => p.max) || 100;
-  const total = sum(parts, p => p.v) / maxT * 100;
-  // sem posse de veículo no período não há prêmio (não basta não ter ocorrências)
-  const elig = cs.length > 0;
-  return { total, bonus: elig ? bonusFor(total) : 0, tier: elig ? tierFor(total) : null, eligible: elig, parts, req, done, late, fines };
-}
-function tierFor(score) { const t = [...S.settings.score.tiers].sort((a, b) => b.min - a.min).find(t => score >= t.min); return t || null; }
-function bonusFor(score) {
-  const cfg = S.settings.score;
-  if (cfg.mode === 'faixas') return tierFor(score)?.value || 0;
-  return score >= cfg.minScore ? cfg.maxBonus * score / 100 : 0;
-}
-/* cor da pontuação: verde (faixa máxima), amarelo, laranja (faixa mínima), vermelho (sem prêmio).
-   Usa as 3 primeiras faixas configuradas; sem elas, 90/80/70. */
-function scoreCuts() {
-  const t = (S.settings.score.tiers || []).map(x => +x.min).filter(n => n > 0).sort((a, b) => b - a);
-  return t.length >= 3 ? t.slice(0, 3) : [90, 80, 70];
-}
-function scoreTone(s) { const [a, b, c] = scoreCuts(); return s >= a ? 'ok' : s >= b ? 'warn' : s >= c ? 'urg' : 'bad'; }
+/* cor da pontuação: verde (90+, faixa do adicional), amarelo (70+), laranja (50+), vermelho */
+function scoreTone(s) { return s >= 90 ? 'ok' : s >= 70 ? 'warn' : s >= 50 ? 'urg' : 'bad'; }
 const SCORE_VAR = { ok: '--u-green', warn: '--u-yellow', urg: '--u-orange', bad: '--u-red' };
 const scoreColor = s => `var(${SCORE_VAR[scoreTone(s)]})`;
 const pctTone = (v, max) => scoreTone(max ? v / max * 100 : 0);
@@ -224,7 +158,7 @@ function planDue(p) {
 /* ----- lista "Atenção necessária" ----- */
 function attentionItems() {
   const out = [];
-  const [dh, dm] = S.settings.dailyDeadline.split(':').map(Number);
+  const [dh, dm] = deadlineNow().split(':').map(Number);
   const pastDeadline = new Date().getHours() * 60 + new Date().getMinutes() > dh * 60 + dm;
   S.issues.filter(i => i.status === 'aberta').forEach(i => {
     const v = veh(i.vehicleId);
@@ -233,7 +167,7 @@ function attentionItems() {
   S.vehicles.forEach(v => {
     const c = activeCustody(v.id);
     if (c && !c.segments.length) out.push({ c: 'urg', r: 7, icon: 'pin', title: `${v.plate} sem obra`, sub: drv(c.driverId).name, text: `Veículo ${v.plate} está sem obra vinculada.`, at: c.start, go: { page: 'veiculo', id: v.id } });
-    if (needsDaily(v)) out.push({ c: pastDeadline ? 'urg' : 'warn', r: pastDeadline ? 5 : 3, icon: 'check', title: `${v.plate} sem checklist hoje`, sub: `${drv(c.driverId).name}${pastDeadline ? ` · prazo ${S.settings.dailyDeadline}` : ''}`, text: `Veículo ${v.plate} está sem checklist hoje.`, at: null, go: { page: 'veiculo', id: v.id } });
+    if (needsDaily(v)) out.push({ c: pastDeadline ? 'urg' : 'warn', r: pastDeadline ? 5 : 3, icon: 'check', title: `${v.plate} sem checklist hoje`, sub: `${drv(c.driverId).name}${pastDeadline ? ` · prazo ${deadlineNow()}` : ''}`, text: `Veículo ${v.plate} está sem checklist hoje.`, at: null, go: { page: 'veiculo', id: v.id } });
     vehicleMaint(v.id).items.filter(x => ['urgente', 'vencido'].includes(x.s.lvl)).forEach(({ p, s }) => {
       const sub = s.lvl === 'vencido' ? (s.remKm != null && s.remKm <= 0 ? `Vencida há ${nf(-s.remKm)} km` : `Vencida há ${-s.remDays} dias`) : (s.remKm != null && s.remKm <= S.settings.maint.urgentKm ? `Faltam ${nf(s.remKm)} km` : `Faltam ${s.remDays} dias`);
       out.push({ c: M_LEVEL[s.lvl].c, r: s.lvl === 'vencido' ? 8 : 4, icon: 'wrench', title: `${v.plate} · ${p.item}`, sub, text: `Veículo ${v.plate}: ${p.item} — ${sub.toLowerCase()}.`, at: null, go: { page: 'calendario', vid: v.id } });

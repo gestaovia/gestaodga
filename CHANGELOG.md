@@ -7,6 +7,20 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.5.0 — 09/10/2026
+- **Premiação conforme o Regulamento do Programa de Pontuação e Bonificação (versão 00):** período de apuração do dia 26 ao dia 25; modalidades A (checklist de entrega e recebimento, 50 pts, −50 por transferência sem checklist completo), B (checklist diário, 30 pts, −10 atraso depois das 10h, −15 ausência) e C (abastecimento com foto do hodômetro, 20 pts, −10); descontos limitados aos pontos da modalidade; −10 por modalidade zerada; mínimo 0. Premiação = (R$ 300 × pontuação ÷ 100 + adicional R$ 100/R$ 50) × dias com posse ÷ dias úteis; adicional só com 15 dias ou mais de posse. Dias úteis sem fins de semana e feriados (nacionais automáticos + feriados cadastrados). Horário do checklist e do abastecimento gravado pelo servidor.
+- Extrato do condutor com cada desconto, evidência, cálculo da pontuação e da premiação; extratos fechados liberados ao condutor 3 dias após o fim do período. Ranking com empate na mesma posição.
+- Gestão: abonos (motivos do item 8), ocorrências lançadas pela gestão (ex.: abastecimento sem registro no extrato do cartão) e ajustes manuais, sempre com justificativa, nome, data e hora; nada é apagado (correção cancela o registro e o original fica visível).
+- Parâmetros do item 11 com vigência: uma alteração só vale a partir do período seguinte, com histórico de versões. Fechamento automático no dia da divulgação (dia 28). PDF e Excel do fechamento com A, B, C, dias com posse e fator.
+- Abastecimento: foto do hodômetro obrigatória (além do cupom).
+- **Oficinas credenciadas** (menu Controle › Oficinas): cadastro com CNPJ, contato, endereço e serviços. Entrada em manutenção, saída, manutenção direta de veículo bloqueado e registro de serviço feito só com oficina credenciada (o banco também recusa).
+- **Manutenção: editar e excluir** serviços realizados (data, km, serviços, custo, oficina, observações) e editar ou excluir a entrada em manutenção em andamento; o plano de manutenção acompanha; o histórico guarda o antes e depois.
+- **Seguro e contato de emergência** por veículo (seguradora, apólice, vigência, assistência 24h, sinistro, corretor, franquia, contato de emergência e orientações). Vencimento do seguro entra nos alertas e no calendário.
+- **Acionar seguro:** botão em destaque quando há problema crítico ou veículo parado (início do condutor, tela do veículo); ao informar um problema crítico o condutor vai direto para a tela de acionamento, com ligação para assistência 24h, sinistro e contato de emergência e cópia dos dados com o local. Cada acionamento avisa a gestão e fica no histórico.
+- **Logo do GestaoVia dentro do sistema:** sempre no menu, no topo do celular e no início do condutor (antes a logo da empresa substituía a do aplicativo); a empresa aparece logo abaixo. Logo também nos PDFs.
+- O prazo do checklist diário passou a ser parâmetro da premiação (Premiação › Parâmetros).
+- Banco: migration `20261009000009_gestaovia_oficinas_seguro_premiacao`.
+
 ## v1.4.0 — 09/10/2026
 - Ícone (favicon) agora vai dentro da própria página, então aparece mesmo se o navegador guardou o antigo; manifest do app instalado com versão nos ícones para o celular atualizar.
 - Centro de custo removido: o número da obra é o centro de custo (cadastro, recebimento, troca de obra, pedágios, PDF).

@@ -2,11 +2,11 @@
 
 /* ---------- Abastecimento (gestão) ---------- */
 function fuelTable(list, emptyTxt = 'Nenhum abastecimento.') {
-  return tbl(['Data', 'Veículo', 'Condutor', 'Obra', '>Km', '>Litros', '>Valor', '>km/l', '>Custo/km', '>Variação', 'Cupom'], list.sort((a, b) => b.at - a.at).slice(0, 150).map(f => {
+  return tbl(['Data', 'Veículo', 'Condutor', 'Obra', '>Km', '>Litros', '>Valor', '>km/l', '>Custo/km', '>Variação', 'Fotos'], list.sort((a, b) => b.at - a.at).slice(0, 150).map(f => {
     const m = fuelMetrics(f); const out = m.delta != null && Math.abs(m.delta) > S.settings.fuelDeviationPct;
     return `<tr><td class="nowrap">${fmtShort(f.at)}</td><td>${vehLink(f.vehicleId)}</td><td>${drvLink(f.driverId)}</td><td>${projLabel(f.projectId)}</td><td class="r">${nf(f.km)}</td><td class="r">${nf(f.liters, 2)}</td><td class="r">${money(f.total)}</td>
       <td class="r">${m.kmL ? nf(m.kmL, 1) : '—'}</td><td class="r">${m.costKm ? money(m.costKm) : '—'}</td><td class="r nowrap">${m.delta != null ? (out ? pill(`${m.delta > 0 ? '+' : ''}${nf(m.delta, 0)}%`, m.delta < 0 ? 'urg' : 'warn') : `<span class="muted">${m.delta > 0 ? '+' : ''}${nf(m.delta, 0)}%</span>`) : '—'}</td>
-      <td>${f.receipt ? `<img src="${esc(photoSrc(f.receipt))}" alt="Cupom" data-act="photo" style="width:34px;height:26px;object-fit:cover;border:1px solid var(--line);border-radius:2px;cursor:pointer">` : '<span class="muted">—</span>'}</td></tr>`;
+      <td class="nowrap">${[['odoPhoto', 'Hodômetro'], ['receipt', 'Cupom']].map(([k, l]) => f[k] ? `<img src="${esc(photoSrc(f[k]))}" alt="${l}" title="${l}" data-act="photo" style="width:34px;height:26px;object-fit:cover;border:1px solid var(--line);border-radius:2px;cursor:pointer;margin-right:3px">` : '').join('') || '<span class="muted">—</span>'}${!fuelHasOdo(f) ? ' ' + pill('sem hodômetro', 'warn') : ''}</td></tr>`;
   }), emptyTxt);
 }
 let FUEL_M = 0; const FUEL_F = { v: '', d: '', p: '' };
@@ -62,11 +62,12 @@ PAGES.manutencao = {
     const cnt = k => all.filter(x => x.s.lvl === k).length;
     const inShop = S.vehicles.filter(v => v.maintenance);
     return `<div class="page-head"><div class="filters">${id ? `<button class="chip on" data-go="manutencao">${veh(id).plate} ×</button>` : ''}<button class="chip ${!l ? 'on' : ''}" data-go="manutencao" ${id ? `data-id="${id}"` : ''}>Todos</button>${['vencido', 'urgente', 'atencao', 'normal'].map(k => `<button class="chip ${l === k ? 'on' : ''}" data-go="manutencao" data-l="${k}" ${id ? `data-id="${id}"` : ''}><span class="dot ${M_LEVEL[k].c}"></span>${M_LEVEL[k].l}<span class="n">${cnt(k)}</span></button>`).join('')}</div>
-      <div class="row"><button class="btn" data-go="calendario">${ic('cal')}Calendário</button>${isManager() ? `<button class="btn pri" data-act="mp-new">${ic('plus')}Item no plano</button>` : ''}</div></div>
+      <div class="row"><button class="btn" data-go="oficinas">${ic('store')}Oficinas</button><button class="btn" data-go="calendario">${ic('cal')}Calendário</button>${isManager() ? `<button class="btn pri" data-act="mp-new">${ic('plus')}Item no plano</button>` : ''}</div></div>
       <div class="stack">
-      ${inShop.length ? `<div class="panel"><div class="panel-h"><h3>Em manutenção agora</h3></div>${tbl(['Veículo', 'Desde', 'Oficina e motivo', ''], inShop.map(v => `<tr><td>${vehLink(v.id)}</td><td>${fmtDT(v.maintenanceSince)}</td><td>${esc(v.maintenanceNote || '—')}</td><td class="r">${isManager() ? `<button class="btn sm pri" data-go="checklist_full" data-vid="${v.id}" data-type="manut_saida">Registrar saída</button>` : ''}</td></tr>`))}</div>` : ''}
+      ${!activeShops().length && isManager() ? noShopsNote() : ''}
+      ${inShop.length ? `<div class="panel"><div class="panel-h"><h3>Em manutenção agora</h3></div>${tbl(['Veículo', 'Desde', 'Oficina', 'Motivo', ''], inShop.map(v => `<tr><td>${vehLink(v.id)}</td><td>${fmtDT(v.maintenanceSince)}</td><td>${v.maintenanceWorkshopId ? esc(shopName(v.maintenanceWorkshopId)) : '<span class="muted">não informada</span>'}</td><td>${esc(v.maintenanceNote || '—')}</td><td class="r nowrap">${isManager() ? `<button class="btn sm" data-act="mnt-entry-edit" data-id="${v.id}">${ic('edit')}Editar</button> <button class="btn sm pri" data-go="checklist_full" data-vid="${v.id}" data-type="manut_saida">Registrar saída</button>` : ''}</td></tr>`))}</div>` : ''}
       <div class="panel">${maintTable(vs, l)}</div>
-      <div class="panel"><div class="panel-h"><h3>Serviços realizados</h3></div>${tbl(['Data', 'Veículo', 'Serviços', 'Oficina', '>Km', '>Custo'], S.maintRecords.filter(r => !id || r.vehicleId === id).sort((a, b) => b.at - a.at).map(r => `<tr><td>${fmtDate(r.at)}</td><td>${vehLink(r.vehicleId)}</td><td>${r.items.join(', ')}</td><td>${esc(r.shop || '')}</td><td class="r">${nf(r.km)}</td><td class="r">${money(r.cost)}</td></tr>`))}</div>
+      <div class="panel"><div class="panel-h"><h3>Serviços realizados</h3>${isManager() ? '<span class="small muted">Editar ou excluir pelo botão de cada linha</span>' : ''}</div>${maintRecordsTable(S.maintRecords.filter(r => !id || r.vehicleId === id))}</div>
       </div>`;
   }
 };
@@ -245,10 +246,10 @@ PAGES.configuracoes = {
     if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
     let body = '';
     if (tab === 'regras') body = `<form class="panel-b form-grid" id="cfg-form" data-sec="regras">
-      <label class="field"><span>Prazo do checklist diário</span><input class="inp" type="time" name="dailyDeadline" value="${st.dailyDeadline}"></label>
+      <div class="field"><span>Prazo do checklist diário</span><b>${esc(deadlineNow())}</b><small>Parâmetro do regulamento: <button type="button" class="link" data-go="bonificacao" data-tab="parametros">Premiação › Parâmetros</button></small></div>
       <label class="field"><span>Alertar transferência incompleta após (horas)</span><input class="inp num" name="transferAlertHours" value="${st.transferAlertHours}"></label>
       <label class="field"><span>Condutor com mais de um veículo</span><select class="inp" name="oneVehiclePerDriver"><option value="1" ${st.oneVehiclePerDriver ? 'selected' : ''}>Não permitir</option><option value="0" ${!st.oneVehiclePerDriver ? 'selected' : ''}>Permitir</option></select></label>
-      <label class="field"><span>Fotos no checklist completo</span><select class="inp" name="requirePhotos"><option value="1" ${st.requirePhotos ? 'selected' : ''}>Obrigatórias (5 fotos)</option><option value="0" ${!st.requirePhotos ? 'selected' : ''}>Opcionais</option></select></label>
+      <label class="field"><span>Fotos no checklist completo</span><select class="inp" name="requirePhotos"><option value="1" ${st.requirePhotos ? 'selected' : ''}>Obrigatórias (5 fotos)</option><option value="0" ${!st.requirePhotos ? 'selected' : ''}>Opcionais (checklist sem fotos desconta na premiação)</option></select></label>
       <label class="field"><span>Manutenção: atenção a (km)</span><input class="inp num" name="attentionKm" value="${st.maint.attentionKm}"></label><label class="field"><span>Manutenção: urgente a (km)</span><input class="inp num" name="urgentKm" value="${st.maint.urgentKm}"></label>
       <label class="field"><span>Manutenção: atenção a (dias)</span><input class="inp num" name="attentionDays" value="${st.maint.attentionDays}"></label><label class="field"><span>Manutenção: urgente a (dias)</span><input class="inp num" name="urgentDays" value="${st.maint.urgentDays}"></label>
       <label class="field"><span>Consumo fora do padrão acima de (%)</span><input class="inp num" name="fuelDeviationPct" value="${st.fuelDeviationPct}"></label>
@@ -265,7 +266,7 @@ PAGES.configuracoes = {
     const f = $('#cfg-form');
     f?.addEventListener('submit', e => {
       e.preventDefault(); const d = formData(f); const st = S.settings; const n = x => parseFloat(String(x).replace(',', '.'));
-      if (f.dataset.sec === 'regras') { st.dailyDeadline = d.dailyDeadline; st.transferAlertHours = n(d.transferAlertHours); st.oneVehiclePerDriver = d.oneVehiclePerDriver === '1'; st.requirePhotos = d.requirePhotos === '1'; Object.assign(st.maint, { attentionKm: n(d.attentionKm), urgentKm: n(d.urgentKm), attentionDays: n(d.attentionDays), urgentDays: n(d.urgentDays) }); st.fuelDeviationPct = n(d.fuelDeviationPct); st.rental = { warnDays: n(d.rentWarn), urgentDays: n(d.rentUrg) }; }
+      if (f.dataset.sec === 'regras') { st.transferAlertHours = n(d.transferAlertHours); st.oneVehiclePerDriver = d.oneVehiclePerDriver === '1'; st.requirePhotos = d.requirePhotos === '1'; Object.assign(st.maint, { attentionKm: n(d.attentionKm), urgentKm: n(d.urgentKm), attentionDays: n(d.attentionDays), urgentDays: n(d.urgentDays) }); st.fuelDeviationPct = n(d.fuelDeviationPct); st.rental = { warnDays: n(d.rentWarn), urgentDays: n(d.rentUrg) }; }
       log('config', `Configurações alteradas (${f.dataset.sec}) por ${CUR.name}`, {}); save(); toast('Configurações salvas.');
     });
   }

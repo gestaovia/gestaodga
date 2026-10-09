@@ -5,6 +5,9 @@ let DRAFT = null;          // rascunho de formulário em andamento
 let SIDE_OPEN = false;
 
 const ICON = { // ícones Lucide (ISC) — https://lucide.dev
+  phone: '<path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/>',
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+  store: '<path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7"/>',
   dash: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
   map: '<path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/>',
   swap: '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
@@ -62,7 +65,7 @@ const themeBtn = (cls = '') => { const d = themeNow() === 'dark'; return `<butto
 const NAV = [
   { g: 'Visão geral', items: [['dashboard', 'Painel da frota', 'dash'], ['calendario', 'Calendário', 'cal']] },
   { g: 'Frota', items: [['veiculos', 'Veículos', 'car'], ['condutores', 'Condutores', 'user'], ['transferencias', 'Transferências', 'swap']] },
-  { g: 'Controle', items: [['checklists', 'Checklists', 'check'], ['abastecimento', 'Abastecimentos', 'fuel'], ['manutencao', 'Manutenção', 'wrench'], ['pedagios', 'Pedágios', 'toll'], ['multas', 'Multas', 'fine']] },
+  { g: 'Controle', items: [['checklists', 'Checklists', 'check'], ['abastecimento', 'Abastecimentos', 'fuel'], ['manutencao', 'Manutenção', 'wrench'], ['oficinas', 'Oficinas', 'store'], ['pedagios', 'Pedágios', 'toll'], ['multas', 'Multas', 'fine']] },
   { g: 'Gestão', items: [['bonificacao', 'Premiação', 'trophy'], ['relatorios', 'Relatórios', 'report']] },
   { g: 'Sistema', items: [['configuracoes', 'Configurações', 'gear']] }
 ];
@@ -110,7 +113,7 @@ function sidebar() {
     if (!items.length) return '';
     return `<div class="nav-group">${g.g}</div>` + items.map(([k, l, i]) => `<button data-go="${k}" class="${ROUTE.page === k || (PARENT[ROUTE.page] === k) ? 'on' : ''}">${ic(i)}<span>${l}</span>${counts[k] ? `<span class="count ${k === 'dashboard' ? 'crit' : ''}">${counts[k]}</span>` : ''}</button>`).join('');
   }).join('');
-  return `<aside class="side ${SIDE_OPEN ? 'open' : ''}"><div class="brand">${orgBrand()}</div>
+  return `<aside class="side ${SIDE_OPEN ? 'open' : ''}"><div class="brand">${orgBrand()}</div>${orgLine()}
     <nav class="nav" aria-label="Menu principal">${groups}</nav>
     <div class="side-foot">${av(CUR)}<div style="flex:1;min-width:0"><b style="color:var(--text2);display:block">${esc(CUR.name)}</b>${roleLabel(CUR)}</div><button class="icon-btn" data-act="logout" aria-label="Sair" title="Sair">${ic('logout')}</button></div></aside>`;
 }
@@ -119,21 +122,23 @@ const photoOf = o => o ? (o.avatar || (S?.users || []).find(u => u.driverId === 
 const av = (o, size = '') => { const ph = photoOf(o); return ph && /^data:image\/(jpeg|png|webp);base64,/.test(ph) ? `<span class="avatar img ${size}"><img src="${esc(ph)}" alt=""></span>` : `<span class="avatar ${size}">${initials(o?.name || '?')}</span>`; };
 const orgOf = () => S?.settings?.org || {};
 const orgLogoOk = l => typeof l === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(l);
+// marca do aplicativo (GestaoVia) sempre visível; a empresa (nome e logo da Organização) aparece junto
 function orgBrand(compact) {
-  const o = orgOf(); const nm = o.displayName || o.name || 'GestaoVia';
-  const logo = orgLogoOk(o.logo) ? `<img class="org-logo" src="${o.logo}" alt="">` : brandMark();
-  if (compact) return `${logo}<b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(nm)}</b>`;
-  return `${logo}<div style="min-width:0"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${esc(nm)}</b><span>GestaoVia${APP_VERSION ? ` · v${APP_VERSION}` : ''}</span></div>`;
+  const o = orgOf(); const nm = o.displayName || o.name || '';
+  const org = orgLogoOk(o.logo) ? `<img class="org-logo sm" src="${o.logo}" alt="">` : '';
+  if (compact) return `<span class="brand-c">${brandMark()}<span style="min-width:0"><b>GestaoVia</b>${nm ? `<small>${esc(nm)}</small>` : ''}</span>${org}</span>`;
+  return `${brandMark()}<div style="min-width:0;flex:1"><b style="display:block">GestaoVia</b><span>${APP_VERSION ? `v${APP_VERSION}` : 'Controle de frotas'}</span></div>`;
 }
+function orgLine() { const o = orgOf(); const nm = o.displayName || o.name || ''; const org = orgLogoOk(o.logo) ? `<img class="org-logo sm" src="${o.logo}" alt="">` : ''; return nm || org ? `<div class="org-line" title="${esc(o.name || nm)}">${org}<span>${esc(nm)}</span></div>` : ''; }
 const brandMark = () => `<img class="brand-logo" src="${window.GV_LOGO || ''}" alt="GestaoVia">`;
-const PARENT = { veiculo: 'veiculos', condutor: 'condutores', transferencia: 'transferencias', scan_result: 'veiculos', checklist_view: 'checklists', forcar: 'transferencias', checklist_full: 'manutencao', scanner: 'veiculos', abastecer: 'abastecimento', obra: 'veiculos', problema: 'veiculos' };
+const PARENT = { veiculo: 'veiculos', condutor: 'condutores', transferencia: 'transferencias', scan_result: 'veiculos', checklist_view: 'checklists', forcar: 'transferencias', checklist_full: 'manutencao', scanner: 'veiculos', abastecer: 'abastecimento', obra: 'veiculos', problema: 'veiculos', seguro: 'veiculos' };
 function topbar(pg) {
   const parent = PARENT[ROUTE.page];
   const parentTitle = parent ? NAV.flatMap(g => g.items).find(i => i[0] === parent)?.[1] : null;
   const title = typeof pg.title === 'function' ? pg.title(ROUTE.p) : pg.title;
   const unread = myNotifications().filter(n => !n.read).length;
   return `<header class="top">
-    <button class="icon-btn menu-btn" data-act="side-open" aria-label="Abrir menu">${ic('menu')}</button>
+    <button class="icon-btn menu-btn" data-act="side-open" aria-label="Abrir menu">${ic('menu')}</button><img class="top-logo" src="${window.GV_LOGO || ''}" alt="GestaoVia">
     ${parentTitle ? `<button class="icon-btn" data-go="${parent}" aria-label="Voltar para ${parentTitle}" title="${parentTitle}">${ic('back')}</button>` : ''}
     <h1>${esc(title)}</h1>
     <div class="spacer"></div>

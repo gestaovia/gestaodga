@@ -37,6 +37,7 @@ async function checklistPDF(id) {
   doc.setFillColor(...BLUE); doc.rect(0, 0, W, 28, 'F');
   const org = orgOf(); text(`${org.displayName || org.name || 'GestaoVia'}${org.cnpj ? ` · CNPJ ${cnpjFmt(org.cnpj)}` : ''}`, M, 11, { bold: true, size: 11, color: [255, 255, 255] });
   text({ diario: 'Checklist diário', avaria: 'Registro de avaria' }[k.type] || `Checklist de ${CK_TYPES[k.type].toLowerCase()}`, M, 20, { bold: true, size: 16, color: [255, 255, 255] });
+  try { doc.addImage(window.GV_LOGO, 'PNG', W - M - 64, 7, 15, 15); } catch (e) { }
   doc.setFillColor(255, 255, 255); doc.roundedRect(W - M - 46, 7, 46, 15, 2, 2, 'F');
   doc.setFillColor(46, 46, 46); doc.rect(W - M - 46, 7, 46, 3, 'F');
   text(v.plate, W - M - 23, 19, { bold: true, size: 15, color: INK, align: 'center' });

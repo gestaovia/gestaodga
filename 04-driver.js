@@ -67,12 +67,13 @@ PAGES.inicio = {
     const T = (go, icon, t, s, cls = '', flag = '') => `<button class="tile ${cls}" data-go="${go}" ${v ? `data-vid="${v.id}"` : ''} ${go === 'scanner' ? '' : dis}><span class="ti">${ic(icon)}</span><span><b>${t}</b><small>${s}</small></span>${flag}</button>`;
     return `<div class="drv">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div><p class="muted small">${cap(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}</p><h1>Olá, ${esc(d.name.split(' ')[0])}</h1></div>
-        <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${ring(sc.total, true)}</button></div>
+        <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}</button></div>
+      ${v && openIssues(v.id).some(i => i.severity === 'critica' || !i.canRun) ? `<div class="note bad stack" style="gap:8px"><div><b>Problema crítico no ${esc(v.plate)}.</b> Se precisar de guincho, socorro ou houve acidente, acione o seguro.</div><button class="btn danger lg block" data-go="seguro" data-vid="${v.id}">${ic('shield')}Acionar seguro</button></div>` : ''}
       ${banners}${card}${v ? `<div>${gpsChip()}</div>` : ''}
       <div class="tiles">
         ${T('scanner', 'qr', 'Escanear veículo', 'Ler o QR Code do carro', 'primary scan')}
         ${T('diario', 'check', 'Checklist diário', daily ? `Feito às ${fmtTime(daily.at)}` : 'Poucos segundos', daily ? 't-green' : '', v && !daily ? '<span class="flag pill warn">pendente</span>' : v ? '<span class="flag pill ok">ok</span>' : '')}
-        ${T('abastecer', 'fuel', 'Abastecer', 'Com foto do cupom')}
+        ${T('abastecer', 'fuel', 'Abastecer', 'Fotos do hodômetro e do cupom')}
         ${T('problema', 'alert', 'Informar problema', 'Avaria ou defeito', 't-red')}
         ${T('entregar', 'handoff', 'Entregar veículo', 'Devolver ou trocar', 't-violet')}
         ${T('meu_veiculo', 'car', 'Meu veículo', v ? v.plate : 'Nenhum', '')}
@@ -81,7 +82,6 @@ PAGES.inicio = {
       </div></div>`;
   }
 };
-ACTIONS['my-score'] = () => { const sc = driverScore(CUR.driverId); openModal({ title: `Minha pontuação · ${monthLabel()}`, body: scoreBreakdown(sc) }); };
 ACTIONS['t-accept'] = a => {
   const t = byId(S.transfers, a.dataset.id);
   setTransfer(t, 'aguardando_entrega', 'Condutor atual aceitou a solicitação');
@@ -267,8 +267,8 @@ function bindDraft(form) {
     const slot = e.target.dataset.photo; if (!slot || !e.target.files[0]) return;
     DRAFT.photos[slot] = await readPhoto(e.target.files[0]);
     const tile = form.querySelector(`[data-slot="${slot}"]`);
-    const lab = { cupom: 'Foto do cupom ou nota fiscal', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
-    if (tile) tile.outerHTML = slot === 'cupom' || slot === 'problema' || slot === 'painel_d' ? singlePhoto(slot, lab) : photoTile(slot, lab);
+    const lab = { cupom: 'Foto do cupom ou nota fiscal', hodometro: 'Foto do hodômetro (obrigatória)', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
+    if (tile) tile.outerHTML = ['cupom', 'hodometro', 'problema', 'painel_d'].includes(slot) ? singlePhoto(slot, lab) : photoTile(slot, lab);
     DRAFT._onChange?.();
   });
 }
@@ -436,7 +436,7 @@ PAGES.diario = {
       if (D.answer === 'nao') errs.push(...problemErrors());
       if (errs.length) return showErrors(errs);
       const kmv = k || suggestedKm(v);
-      const [h, m] = S.settings.dailyDeadline.split(':').map(Number); const n = new Date();
+      const [h, m] = deadlineNow().split(':').map(Number); const n = new Date();
       const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: n.getHours() * 60 + n.getMinutes() > h * 60 + m };
       S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv);
       if (D.answer === 'sim') {
@@ -448,7 +448,7 @@ PAGES.diario = {
         const iss = createIssue(v, c.driverId, 'diario');
         ck.problem = { issueId: iss.id };
         log('checklist', `Checklist diário: veículo com problema (${nf(kmv)} km)`, { vehicleId: v.id, driverId: c.driverId });
-        save(); toast(iss.severity === 'critica' ? 'Problema crítico registrado. A gestão foi alertada.' : 'Checklist registrado com o problema informado.'); go('inicio');
+        save(); const crit = iss.severity === 'critica' || !iss.canRun; toast(crit ? 'Problema crítico registrado. A gestão foi alertada.' : 'Checklist registrado com o problema informado.'); crit ? go('seguro', { vid: v.id }) : go('inicio');
       }
     });
   }
@@ -459,7 +459,7 @@ function problemFields() {
   const D = DRAFT;
   return `<div class="field"><span>Tipo de problema</span><div class="seg">${PROBLEM_TYPES.map(t => `<label><input type="radio" name="type" value="${t}" ${D.type === t ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
     <label class="field"><span>Descrição</span><textarea class="inp" name="desc" placeholder="O que aconteceu? Onde está o problema?">${esc(D.desc)}</textarea></label>
-    <div class="field"><span>Criticidade</span><div class="seg">${Object.entries(SEVERITY).map(([k, s]) => `<label><input type="radio" name="severity" value="${k}" ${D.severity === k ? 'checked' : ''}><span>${s.l}</span></label>`).join('')}</div><small>Crítica gera alerta imediato para o gestor.</small></div>
+    <div class="field"><span>Criticidade</span><div class="seg">${Object.entries(SEVERITY).map(([k, s]) => `<label><input type="radio" name="severity" value="${k}" ${D.severity === k ? 'checked' : ''}><span>${s.l}</span></label>`).join('')}</div><small>Crítica gera alerta imediato para o gestor e abre o acionamento do seguro.</small></div>
     ${singlePhoto('problema', 'Foto do problema')}
     <div class="field"><span>O veículo pode continuar circulando?</span><div class="seg bad"><label><input type="radio" name="canRun" value="1" ${D.canRun === '1' ? 'checked' : ''}><span>Sim</span></label><label><input type="radio" name="canRun" value="0" ${D.canRun === '0' ? 'checked' : ''}><span>Não, veículo parado</span></label></div></div>`;
 }
@@ -502,7 +502,10 @@ PAGES.problema = {
       e.preventDefault(); const errs = problemErrors(); if (errs.length) return showErrors(errs);
       const v = veh(DRAFT.vid); const c = activeCustody(v.id);
       const iss = createIssue(v, CUR.driverId || c?.driverId, 'informado'); save();
-      toast(iss.severity === 'critica' || !iss.canRun ? 'Problema registrado. A gestão foi alertada.' : 'Problema registrado.'); go(CUR.role === 'condutor' ? 'inicio' : 'veiculo', { id: v.id });
+      const crit = iss.severity === 'critica' || !iss.canRun;
+      toast(crit ? 'Problema registrado. A gestão foi alertada.' : 'Problema registrado.');
+      if (crit) return go('seguro', { vid: v.id });
+      go(CUR.role === 'condutor' ? 'inicio' : 'veiculo', { id: v.id });
     });
   }
 };
@@ -514,11 +517,12 @@ PAGES.checklist_full = {
     const v = veh(vid);
     if (['manut_entrada', 'manut_saida'].includes(type) && !isManager()) return '<div class="drv"><div class="note bad">Somente gestores registram entrada e saída de manutenção.</div></div>';
     if (type === 'manut_entrada' && activeCustody(vid)) return `<div class="drv" style="margin:0"><h1>Entrada em manutenção</h1><div class="note warn">O veículo está com ${esc(drv(activeCustody(vid).driverId).name)}. O condutor precisa fazer a entrega (ou use a transferência forçada) antes da entrada em manutenção.</div><button class="btn" data-go="veiculo" data-id="${vid}">Voltar ao veículo</button></div>`;
-    if (!DRAFT || DRAFT.kind !== 'full_' + type) { newDraft('full_' + type, vid, { shop: v.maintenanceNote || '', doneItems: [], cost: '' }); captureLocation(v); }
-    const extra = type === 'manut_entrada' ? `<div class="panel"><div class="panel-h"><h3>Manutenção</h3></div><div class="panel-b"><label class="field"><span>Oficina e motivo</span><input class="inp" name="shop" value="${esc(DRAFT.shop)}" placeholder="Ex.: Oficina Alvorada – revisão dos 120 mil km"></label></div></div>`
+    if (['manut_entrada', 'manut_saida'].includes(type) && !activeShops().length && !(type === 'manut_saida' && v.maintenanceWorkshopId)) return `<div class="drv" style="margin:0"><h1>${CK_TYPES[type]}</h1>${noShopsNote()}</div>`;
+    if (!DRAFT || DRAFT.kind !== 'full_' + type) { newDraft('full_' + type, vid, { shop: type === 'manut_entrada' ? '' : v.maintenanceNote || '', workshopId: v.maintenanceWorkshopId || '', doneItems: [], cost: '' }); captureLocation(v); }
+    const extra = type === 'manut_entrada' ? `<div class="panel"><div class="panel-h"><h3>Manutenção</h3></div><div class="panel-b form-grid"><label class="field"><span>Oficina credenciada</span>${shopSelect('workshopId', DRAFT.workshopId)}</label><label class="field"><span>Motivo</span><input class="inp" name="shop" value="${esc(DRAFT.shop)}" placeholder="Ex.: revisão dos 120 mil km"></label></div></div>`
       : type === 'manut_saida' ? `<div class="panel"><div class="panel-h"><h3>Serviços realizados</h3></div><div class="panel-b stack" style="gap:12px">
           <div class="seg">${MAINT_ITEMS.map(i => `<label><input type="checkbox" name="done_${i}" ${DRAFT.doneItems.includes(i) ? 'checked' : ''}><span>${i}</span></label>`).join('')}</div>
-          <div class="form-grid"><label class="field"><span>Custo total (R$)</span><input class="inp num" name="cost" inputmode="decimal" value="${esc(DRAFT.cost)}"></label><label class="field"><span>Oficina</span><input class="inp" name="shop" value="${esc(DRAFT.shop)}"></label></div></div></div>` : '';
+          <div class="form-grid"><label class="field"><span>Custo total (R$)</span><input class="inp num" name="cost" inputmode="decimal" value="${esc(DRAFT.cost)}"></label><label class="field"><span>Oficina credenciada</span>${shopSelect('workshopId', DRAFT.workshopId)}</label></div></div></div>` : '';
     const wrap = CUR.role === 'condutor' ? 'drv' : 'drv" style="margin:0;max-width:760px';
     return `<form class="${wrap}" id="ckform" novalidate>
       <div><p class="label">Checklist completo</p><h1>${CK_TYPES[type]}</h1></div>
@@ -534,17 +538,19 @@ PAGES.checklist_full = {
       e.preventDefault();
       const v = veh(vid); const { e: errs, km: k } = validateFull(v);
       if (type === 'manut_saida' && !DRAFT.doneItems.length) errs.push('Marque ao menos um serviço realizado.');
+      if (['manut_entrada', 'manut_saida'].includes(type) && !shopOk(DRAFT.workshopId) && !(type === 'manut_saida' && DRAFT.workshopId && DRAFT.workshopId === v.maintenanceWorkshopId)) errs.unshift('Escolha a oficina credenciada.');
+      if (type === 'manut_entrada' && (DRAFT.shop || '').length < 3) errs.unshift('Informe o motivo da manutenção.');
       if (errs.length) return showErrors(errs);
       const c = activeCustody(vid);
       saveFullChecklist(type, v, c?.driverId || null, c?.id || null, k);
-      if (type === 'manut_entrada') { v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = DRAFT.shop; log('manutencao', `Entrada em manutenção${DRAFT.shop ? ': ' + DRAFT.shop : ''}`, { vehicleId: vid }); }
+      if (type === 'manut_entrada') { v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = DRAFT.shop; v.maintenanceWorkshopId = DRAFT.workshopId; log('manutencao', `Entrada em manutenção na ${shopName(DRAFT.workshopId)}: ${DRAFT.shop}`, { vehicleId: vid }); }
       if (type === 'manut_saida') {
         const cost = parseFloat(String(DRAFT.cost).replace(/\./g, '').replace(',', '.')) || 0;
-        S.maintRecords.push({ id: uid('mr'), vehicleId: vid, at: nowTs(), items: DRAFT.doneItems, cost, shop: DRAFT.shop, km: k, type: 'preventiva' });
+        S.maintRecords.push({ id: uid('mr'), vehicleId: vid, at: nowTs(), items: DRAFT.doneItems, cost, shop: shopName(DRAFT.workshopId), workshopId: DRAFT.workshopId, km: k, type: 'preventiva', notes: v.maintenanceNote || '', planPrev: planSnapshot(vid, DRAFT.doneItems) });
         DRAFT.doneItems.forEach(i => S.plans.filter(p => p.vehicleId === vid && (p.item === i || (i === 'Alinhamento' && p.item === 'Balanceamento' && false))).forEach(p => { p.lastKm = k; p.lastDate = startOfDay(nowTs()); }));
-        v.maintenance = false; v.maintenanceSince = null; v.maintenanceNote = '';
+        v.maintenance = false; v.maintenanceSince = null; v.maintenanceNote = ''; v.maintenanceWorkshopId = null;
         openIssues(vid).forEach(i => { i.status = 'resolvida'; i.resolvedAt = nowTs(); i.resolvedBy = CUR.id; i.resolution = `Resolvido na manutenção: ${DRAFT.doneItems.join(', ')}`; });
-        log('manutencao', `Saída de manutenção: ${DRAFT.doneItems.join(', ')}${cost ? ' · ' + money(cost) : ''}`, { vehicleId: vid });
+        log('manutencao', `Saída de manutenção (${shopName(DRAFT.workshopId)}): ${DRAFT.doneItems.join(', ')}${cost ? ' · ' + money(cost) : ''}`, { vehicleId: vid });
       }
       save(); toast('Checklist concluído.'); go(CUR.role === 'condutor' ? 'inicio' : 'veiculo', { id: vid });
     });
@@ -606,7 +612,7 @@ PAGES.abastecer = {
         <label class="field"><span>Valor total (R$)</span><input class="inp num" name="total" inputmode="decimal" value="${esc(DRAFT.total)}" placeholder="0,00"></label>
         <div class="field full"><span>Combustível</span><div class="seg">${types.map(t => `<label><input type="radio" name="fuelType" value="${t}" ${DRAFT.fuelType === t ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
         <label class="field full"><span>Posto</span><input class="inp" name="station" list="stations" value="${esc(DRAFT.station)}" placeholder="Nome do posto"><datalist id="stations">${stations.map(s => `<option value="${esc(s)}">`).join('')}</datalist></label>
-        <div class="full">${singlePhoto('cupom', 'Foto do cupom ou nota fiscal')}</div>
+        <div class="full stack" style="gap:8px">${singlePhoto('hodometro', 'Foto do hodômetro (obrigatória)')}${singlePhoto('cupom', 'Foto do cupom ou nota fiscal')}</div>
       </div></div>
       <div class="panel"><div class="panel-h"><h3>Cálculo automático</h3></div><div class="panel-b" id="fuel-calc"></div></div>
       <div class="note bad" id="ck-err" hidden role="alert"></div>
@@ -638,10 +644,10 @@ PAGES.abastecer = {
       const k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10); const l = num(DRAFT.liters); const t = num(DRAFT.total);
       if (!k) errs.push('Informe a quilometragem.'); else if (k < lastRecordedKm(v.id)) errs.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
       if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.');
-      if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
+      if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.hodometro) errs.push('Envie a foto do hodômetro (vale pontos na premiação).'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
       if (errs.length) return showErrors(errs);
       const seg = currentSegment(c);
-      const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: seg?.projectId || null, at: nowTs(), km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, location: DRAFT.geo };
+      const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: seg?.projectId || null, at: nowTs(), km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, odoPhoto: DRAFT.photos.hodometro, location: DRAFT.geo };
       S.fuel.push(rec); v.odometer = Math.max(v.odometer, k);
       log('abastecimento', `Abastecimento: ${nf(l, 1)} L, ${money(t)} em ${rec.station}`, { vehicleId: v.id, driverId: c.driverId });
       const m = fuelOutlier(rec);
@@ -673,6 +679,7 @@ PAGES.meu_veiculo = {
         <button class="act" data-go="obra" data-vid="${v.id}">${ic('pin')}<span>Alterar obra<small>Sem encerrar a posse</small></span></button>
         <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Abastecer</span></button>
         <button class="act" data-go="problema" data-vid="${v.id}">${ic('alert')}<span>Informar problema</span></button>
+        <button class="act" data-go="seguro" data-vid="${v.id}">${ic('shield')}<span>Seguro e emergência<small>Assistência 24h e contatos</small></span></button>
         <button class="act" data-go="entregar" data-vid="${v.id}" ${t ? `data-tid="${t.id}"` : ''}>${ic('handoff')}<span>Entregar veículo</span></button>
       </div>
       <div class="panel"><div class="panel-h"><h3>Obras nesta posse</h3></div><div class="panel-b">${c.segments.map(s => `<div class="row small" style="padding:3px 0"><span class="mono num" style="min-width:92px">${fmtShort(s.at)}</span><b>${esc(prj(s.projectId).code)}</b><span class="muted">${esc(s.purpose || '')}</span></div>`).join('') || '<span class="muted">Sem obra</span>'}</div></div>
