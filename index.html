@@ -893,6 +893,10 @@ textarea.inp{min-height:76px;resize:vertical}
 /* map */
 .fleet-map{height:440px;border-radius:var(--r-sm);overflow:hidden;background:var(--map-land);position:relative;z-index:0}
 .fleet-map.sm{height:230px}
+/* mapa OpenStreetMap: tons suaves no claro e invertido no escuro */
+.osm-tiles{filter:grayscale(.35) saturate(.8)}
+:root[data-theme="dark"] .osm-tiles{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) grayscale(.3)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .osm-tiles{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) grayscale(.3)}}
 .map-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.76rem;color:var(--text2);padding:10px 2px 0}
 .vpin{display:flex;align-items:center;gap:0;transform:translate(-9px,-9px);white-space:nowrap}
 .vpin i{width:18px;height:18px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);flex-shrink:0}
@@ -2502,7 +2506,7 @@ const isDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches &
 function buildMap(el, vehicles, opts = {}) {
   if (!el) return null;
   if (!window.L) { el.innerHTML = '<div class="empty">Mapa indisponível: a biblioteca de mapas não carregou.</div>'; return null; }
-  const map = L.map(el, { scrollWheelZoom: false, zoomSnap: .5, fadeAnimation: false, zoomAnimation: true, attributionControl: true, minZoom: 9, maxZoom: 18 });
+  const map = L.map(el, { scrollWheelZoom: false, zoomSnap: .5, fadeAnimation: false, zoomAnimation: true, attributionControl: true, minZoom: 4, maxZoom: 19 });
   MAPS.push(map);
   map.createPane('vbase').style.zIndex = 150;
   map.createPane('vlabel').style.zIndex = 160;
@@ -2514,8 +2518,9 @@ function buildMap(el, vehicles, opts = {}) {
     L.geoJSON(BM.roads, { pane: 'vbase', interactive: false, style: { color: cssVar('--map-road'), weight: 3.5, opacity: 1 } }).addTo(map);
     BM.mun.features.forEach(f => L.marker(f.properties.c, { pane: 'vlabel', interactive: false, icon: L.divIcon({ className: '', html: `<div class="mlabel">${esc(f.properties.n)}</div>`, iconSize: [0, 0] }) }).addTo(map));
   }
-  // ruas reais quando a rede permite (Hostinger); no visualizador fica a base vetorial acima
-  const tl = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${isDark() ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`, { subdomains: 'abcd', maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' });
+  // ruas do OpenStreetMap: livre, sem conta e sem chave de acesso. No modo escuro as cores são invertidas por CSS.
+  // Sem internet ou se o serviço recusar, fica a base vetorial embutida acima (IBGE · Natural Earth).
+  const tl = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'osm-tiles', attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' });
   let failed = 0;
   tl.on('tileerror', () => { if (++failed === 1) { map.removeLayer(tl); map.attributionControl.addAttribution('Base: IBGE · Natural Earth'); } });
   tl.addTo(map);

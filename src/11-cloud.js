@@ -1,13 +1,15 @@
 /* ===================== Nuvem: Supabase (login, dados por perfil, arquivos) =====================
    No navegador ficam SOMENTE o endereço do projeto e a chave publicável (pública por definição).
-   Quem pode ver e alterar cada registro é decidido no banco (RLS). Chaves de serviço e o token do
-   Traccar ficam no servidor (funções admin-users, traccar-proxy e traccar-webhook). */
+   Quem pode ver e alterar cada registro é decidido no banco (RLS). A chave de serviço fica só no
+   servidor (função admin-users). */
 const CFG = window.VIALINK_CONFIG || {};
 const BUCKET = 'vialink-arquivos';
-let APP_MODE = 'demo';
+const APP_MODE = 'cloud';
 const cloudConfigured = () => !!(CFG.supabaseUrl && CFG.supabaseKey);
 const isUUID = s => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 const snake = s => s.replace(/[A-Z]/g, c => '_' + c.toLowerCase());
+// cópia profunda: a foto de referência não pode compartilhar objetos com o estado (senão a alteração some do diff)
+const clone = o => o == null ? o : JSON.parse(JSON.stringify(o));
 function stable(v) {
   if (v === undefined) return 'null';
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
@@ -44,7 +46,7 @@ SPEC.forEach(sp => {
   sp.tsSet = new Set(sp.ts || []);
 });
 function toRow(sp, o) {
-  if (sp.single) { const data = JSON.parse(JSON.stringify(o)); if (data.traccar) delete data.traccar.token; return { id: 1, data }; }
+  if (sp.single) { const data = JSON.parse(JSON.stringify(o)); return { id: 1, data }; }
   const row = {}; const extra = {};
   for (const [k, v] of Object.entries(o)) {
     if (k.startsWith('_') || v === undefined) continue;
@@ -70,15 +72,14 @@ const listOf = sp => sp.single ? [S.settings] : sp.asMap ? Object.entries(S.loca
 const WRITES = {
   admin: null, gestor: null,
   supervisor: new Set(['audit', 'notifications', 'locations']),
-  condutor: new Set(['custody', 'transfers', 'checklists', 'issues', 'fuel', 'notifications', 'audit', 'locations', 'vehicles'])
+  condutor: new Set(['custody', 'transfers', 'checklists', 'issues', 'fuel', 'notifications', 'audit', 'locations', 'vehicles', 'trackerEvents'])
 };
 
 const DEFAULT_SETTINGS = () => ({
   dailyDeadline: '10:00', transferAlertHours: 4, oneVehiclePerDriver: true, requirePhotos: true,
   maint: { attentionKm: 1500, urgentKm: 500, attentionDays: 30, urgentDays: 7 }, fuelDeviationPct: 15,
   score: { criteria: { checklist: { on: true, weight: 30 }, conservacao: { on: true, weight: 20 }, abastecimento: { on: true, weight: 15 }, infracoes: { on: true, weight: 20 }, procedimentos: { on: true, weight: 15 } }, penalties: { atraso: 50, avaria: 5, limpeza: 2, leve: 3, media: 5, grave: 8, gravissima: 12, forcada: 5, semObra: 5, telemetria: 2 }, mode: 'faixas', minScore: 70, maxBonus: 300, tiers: [{ min: 90, value: 300 }, { min: 80, value: 200 }, { min: 70, value: 100 }] },
-  rental: { warnDays: 30, urgentDays: 7 }, tracker: { enabled: true, provider: 'Traccar', endpoint: '', interval: 60 },
-  traccar: { mode: 'off', url: '', live: false, pollSec: 30, odometer: true, speedLimit: 100 }, docs: { warnDays: 30, urgentDays: 7 }
+  rental: { warnDays: 30, urgentDays: 7 }, gps: GPS_DEF(), docs: { warnDays: 30, urgentDays: 7 }
 });
 function fillDefaults(dst, def) { for (const [k, v] of Object.entries(def)) { if (dst[k] === undefined || dst[k] === null) dst[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof dst[k] === 'object') fillDefaults(dst[k], v); } return dst; }
 
@@ -97,7 +98,6 @@ const CLOUD = {
 
   /* ---------- sessão ---------- */
   async boot() {
-    APP_MODE = 'cloud';
     if (!window.supabase?.createClient) { ROUTE = { page: 'login', p: {} }; render(); LOGIN_MSG = 'Não foi possível carregar a biblioteca do Supabase. Verifique a conexão.'; return render(); }
     const sb = this.client();
     sb.auth.onAuthStateChange((ev) => {
@@ -123,13 +123,13 @@ const CLOUD = {
       this.on = true; LOGIN_BUSY = false; LOGIN_MSG = '';
       this.startPolling();
       if (prof.must_change_password || RECOVERY) go('senha'); else go(homePage());
-      if (CUR.role !== 'condutor') TC.start().then(() => TC.paint());
+      if (CUR.role === 'condutor') GPS.refresh();
     } catch (e) {
       LOGIN_BUSY = false; LOGIN_MSG = 'Não foi possível carregar os dados: ' + friendlyError(e); render();
     }
   },
   async leave(msg) {
-    this.on = false; clearInterval(this.poll); clearTimeout(this.timer); clearTimeout(this.retryT); TC.stop();
+    this.on = false; clearInterval(this.poll); clearTimeout(this.timer); clearTimeout(this.retryT); GPS.stop();
     this.base = {}; this.signed = {}; CUR = null; S = null; LOGIN_MSG = msg || '';
     try { await this.client().auth.signOut(); } catch (e) { }
     ROUTE = { page: 'login', p: {} }; render();
@@ -151,22 +151,21 @@ const CLOUD = {
     const sb = this.client();
     const [lists, prof, dir] = await Promise.all([
       Promise.all(SPEC.map(sp => this.fetchAll(sp))),
-      sb.from('profiles').select('id,name,email,role,driver_id,active,must_change_password').order('name'),
+      sb.from('profiles').select('id,name,email,role,driver_id,active,must_change_password,is_owner').order('name'),
       sb.rpc('driver_directory')
     ]);
     if (prof.error) throw prof.error;
     const D = { version: 6, cloud: true, locations: {}, users: [] };
     SPEC.forEach((sp, i) => {
       const rows = lists[i];
-      if (sp.single) { D.settings = fillDefaults(rows[0] ? fromRow(sp, rows[0]) : {}, DEFAULT_SETTINGS()); return; }
+      if (sp.single) { D.settings = fillDefaults(rows[0] ? fromRow(sp, rows[0]) : {}, DEFAULT_SETTINGS()); delete D.settings.traccar; delete D.settings.tracker; return; }
       const objs = rows.map(r => fromRow(sp, r));
       if (sp.sort) objs.sort((a, b) => (a[sp.sort] || 0) - (b[sp.sort] || 0));
       if (sp.asMap) objs.forEach(o => { const { id, ...l } = o; D.locations[id] = l; }); else D[sp.key] = objs;
     });
-    D.users = (prof.data || []).map(p => ({ id: p.id, name: p.name, email: p.email, role: p.role, driverId: p.driver_id, active: p.active, mustChange: p.must_change_password }));
+    D.users = (prof.data || []).map(p => ({ id: p.id, name: p.name, email: p.email, role: p.role, driverId: p.driver_id, active: p.active, mustChange: p.must_change_password, owner: !!p.is_owner }));
     // condutor: nomes dos colegas sem dados pessoais (CNH, telefone)
     (dir.data || []).forEach(d => { if (!D.drivers.some(x => x.id === d.id)) D.drivers.push({ id: d.id, name: d.name, active: d.active, _ro: true }); });
-    if (D.settings.traccar?.mode === 'simulador') D.settings.traccar.mode = 'off';
     S = D;
     // inicializações preguiçosas do aplicativo feitas antes da foto de referência
     S.vehicles.forEach(v => docsOf(v)); docSet();
@@ -175,7 +174,7 @@ const CLOUD = {
   },
   snapshot() {
     this.base = {};
-    SPEC.forEach(sp => { const m = new Map(); listOf(sp).forEach(o => { if (o && !o._ro) m.set(String(o.id ?? 1), toRow(sp, o)); }); this.base[sp.key] = m; });
+    SPEC.forEach(sp => { const m = new Map(); listOf(sp).forEach(o => { if (o && !o._ro) m.set(String(o.id ?? 1), clone(toRow(sp, o))); }); this.base[sp.key] = m; });
   },
 
   /* ---------- gravação: só as colunas que mudaram, numa transação ---------- */
@@ -214,8 +213,8 @@ const CLOUD = {
     ops.forEach(o => {
       const m = this.base[o.sp.key];
       if (o.op === 'delete') m.delete(o.id);
-      else if (o.op === 'update') m.set(o.id, { ...(m.get(o.id) || {}), ...(o.full || o.row) });
-      else m.set(o.id, o.full || o.row);
+      else if (o.op === 'update') m.set(o.id, { ...(m.get(o.id) || {}), ...clone(o.full || o.row) });
+      else m.set(o.id, clone(o.full || o.row));
     });
   },
   queue() { clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 350); },
@@ -228,8 +227,9 @@ const CLOUD = {
         await this.externalize();
         ops = this.diff();
         // inclusões primeiro (ordem das tabelas), depois alterações, por último exclusões:
-        // assim a posse nova já existe quando o hodômetro do veículo é atualizado pelo condutor
-        const rank = o => o.op === 'delete' ? 2 : o.op === 'update' ? 1 : 0;
+        // assim a posse nova já existe quando o hodômetro do veículo é atualizado pelo condutor.
+        // Exceção: QR Code revogado sai antes do novo entrar (o banco aceita só um ativo por veículo).
+        const rank = o => o.op === 'delete' ? 2 : o.sp.key === 'qrcodes' && o.op === 'update' ? -1 : o.op === 'update' ? 1 : 0;
         const send = ops.filter(o => this.allowed(o)).map((o, i) => [o, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || (rank(a[0]) === 2 ? b[1] - a[1] : a[1] - b[1])).map(x => x[0]);
         if (send.length) {
           this.setStatus('saving');
@@ -258,7 +258,8 @@ const CLOUD = {
     }
     this.setStatus('error'); this.lastError = friendlyError(e);
     toast('Não foi possível salvar: ' + this.lastError + ' Os dados foram recarregados.');
-    try { await this.reload(true, true); } catch (x) { }
+    // recarrega depois que esta gravação terminar (dentro dela, reload esperaria por si mesma)
+    setTimeout(() => this.reload(true, true).then(() => this.setStatus('ok')).catch(() => { }), 0);
   },
   setStatus(s) { this.status = s; const b = $('#sync-badge'); if (b) b.outerHTML = syncBadge(); },
 
@@ -349,7 +350,7 @@ function syncBadge() {
   return `<span id="sync-badge" class="st small" title="${esc(CLOUD.lastError || 'Dados no servidor')}" style="white-space:nowrap"><span class="dot ${m[0]}"></span>${m[1]}</span>`;
 }
 
-/* ===================== Telas: entrar, primeiro acesso e troca de senha ===================== */
+/* ===================== Telas: entrar, recuperar e trocar senha ===================== */
 let LOGIN_MSG = '', LOGIN_BUSY = false, LOGIN_VIEW = 'entrar', RECOVERY = false, SERVER_OK = null;
 function cloudLoginPage() {
   const v = LOGIN_VIEW;
@@ -358,21 +359,17 @@ function cloudLoginPage() {
       <label class="field"><span>Senha</span><input class="inp" name="pass" type="password" autocomplete="current-password" required></label>
       <p class="err" id="login-err">${esc(LOGIN_MSG)}</p>
       <button class="btn pri lg" ${LOGIN_BUSY ? 'disabled' : ''}>${LOGIN_BUSY ? 'Entrando…' : 'Entrar'}</button>
-      <div class="row" style="justify-content:space-between"><button type="button" class="link small" data-act="cl-view" data-v="esqueci">Esqueci minha senha</button><button type="button" class="link small" data-act="cl-view" data-v="primeiro">Primeiro acesso do administrador</button></div>
+      <div class="row" style="justify-content:space-between"><button type="button" class="link small" data-act="cl-view" data-v="esqueci">Esqueci minha senha</button></div>
     </form>`
     : v === 'esqueci' ? `<form id="cl-form" class="stack" style="max-width:380px;gap:12px"><p class="muted">Enviaremos um link para criar uma nova senha.</p>
       <label class="field"><span>E-mail</span><input class="inp" name="email" type="email" required></label><p class="err" id="login-err">${esc(LOGIN_MSG)}</p>
       <button class="btn pri lg">Enviar link</button><button type="button" class="link small" data-act="cl-view" data-v="entrar">Voltar</button></form>`
-      : `<form id="cl-form" class="stack" style="max-width:380px;gap:12px"><p class="muted">Use somente se você é o administrador indicado na implantação. Os demais usuários recebem o acesso pela tela de Usuários.</p>
-      <label class="field"><span>Nome</span><input class="inp" name="name" required></label>
-      <label class="field"><span>E-mail</span><input class="inp" name="email" type="email" required></label>
-      <label class="field"><span>Senha (mín. 8 caracteres)</span><input class="inp" name="pass" type="password" minlength="8" autocomplete="new-password" required></label>
-      <p class="err" id="login-err">${esc(LOGIN_MSG)}</p><button class="btn ok lg">Criar acesso</button><button type="button" class="link small" data-act="cl-view" data-v="entrar">Voltar</button></form>`;
+      : '';
   return `<div class="login">
     <div class="login-l"><div class="brand" style="border:0;padding:0">${brandMark()}<div><b>gestaovia</b><span>Gestão de frota e posse de veículos</span></div></div>
-      <div><h1 style="font-size:26px">${v === 'entrar' ? 'Entrar' : v === 'esqueci' ? 'Recuperar senha' : 'Primeiro acesso'}</h1><p class="muted" style="margin-top:4px">Use seu e-mail corporativo.</p></div>
+      <div><h1 style="font-size:26px">${v === 'esqueci' ? 'Recuperar senha' : 'Entrar'}</h1><p class="muted" style="margin-top:4px">Use seu e-mail corporativo.</p></div>
       ${form}
-      <p class="small muted" id="srv-note">${SERVER_OK === false ? 'O servidor não respondeu deste ambiente. Publicado no seu domínio o login funciona normalmente.' : ''}</p></div>
+      <p class="small muted" id="srv-note">${SERVER_OK === false ? 'Não foi possível falar com o servidor. Verifique a conexão com a internet.' : ''}</p></div>
     <div class="login-r"><div><p class="label">Acesso por perfil</p><h2 style="margin-top:4px">Cada pessoa vê só o que precisa</h2></div>
       <ul class="att" style="padding:0">
         <li><span class="ic neu">${ic('gear')}</span><div><b>Administrador</b><small>Regras, usuários e integrações</small></div></li>
@@ -380,11 +377,10 @@ function cloudLoginPage() {
         <li><span class="ic neu">${ic('report')}</span><div><b>Supervisor</b><small>Acompanha tudo, sem ações administrativas</small></div></li>
         <li><span class="ic neu">${ic('qr')}</span><div><b>Condutor</b><small>O próprio veículo, checklists e abastecimentos</small></div></li>
       </ul>
-      <button class="btn" data-act="cl-demo">${ic('grid')}Ver a demonstração com dados de exemplo</button>
-      <p class="small muted">A demonstração roda só neste navegador e não grava nada no servidor.</p></div></div>`;
+      <p class="small muted">Não tem acesso? Peça ao administrador da frota. A senha provisória é trocada no primeiro login.</p></div></div>`;
 }
 function mountCloudLogin() {
-  if (SERVER_OK === null) CLOUD.reachable().then(ok => { SERVER_OK = ok; const n = $('#srv-note'); if (n && !ok) n.textContent = 'O servidor não respondeu deste ambiente. Publicado no seu domínio o login funciona normalmente.'; });
+  if (SERVER_OK === null) CLOUD.reachable().then(ok => { SERVER_OK = ok; const n = $('#srv-note'); if (n && !ok) n.textContent = 'Não foi possível falar com o servidor. Verifique a conexão com a internet.'; });
   const f = $('#cl-form'); if (!f) return;
   f.addEventListener('submit', async e => {
     e.preventDefault(); const d = formData(f); const err = t => { LOGIN_MSG = t; const el = $('#login-err'); if (el) el.textContent = t; };
@@ -398,20 +394,11 @@ function mountCloudLogin() {
       } else if (LOGIN_VIEW === 'esqueci') {
         const { error } = await sb.auth.resetPasswordForEmail(d.email, { redirectTo: location.origin + location.pathname });
         btn.disabled = false; err(error ? friendlyError(error) : 'Se o e-mail estiver cadastrado, o link chegará em alguns minutos.');
-      } else {
-        if ((d.pass || '').length < 8) { btn.disabled = false; return err('A senha precisa ter ao menos 8 caracteres.'); }
-        const { data, error } = await sb.auth.signUp({ email: d.email, password: d.pass, options: { data: { name: d.name }, emailRedirectTo: location.origin + location.pathname } });
-        btn.disabled = false;
-        if (error) return err(friendlyError(error));
-        if (data.session) return CLOUD.enter(data.user);
-        LOGIN_VIEW = 'entrar'; LOGIN_MSG = 'Confira seu e-mail e clique no link de confirmação. Depois entre com a senha criada.'; render();
       }
     } catch (x) { btn.disabled = false; err(x instanceof TypeError ? 'Sem conexão com o servidor.' : friendlyError(x)); }
   });
 }
 ACTIONS['cl-view'] = a => { LOGIN_VIEW = a.dataset.v; LOGIN_MSG = ''; render(); };
-ACTIONS['cl-demo'] = () => { try { sessionStorage.setItem('vialink-mode', 'demo'); } catch (e) { } APP_MODE = 'demo'; load(); CUR = null; ROUTE = { page: 'login', p: {} }; render(); TC.start(); };
-ACTIONS['cl-back'] = () => { try { sessionStorage.removeItem('vialink-mode'); sessionStorage.removeItem('vialink-user'); } catch (e) { } TC.stop(); S = null; CUR = null; CLOUD.boot(); };
 
 PAGES.senha = {
   title: 'Definir senha', driver: true,
@@ -440,12 +427,13 @@ PAGES.senha = {
 
 /* ===================== Usuários e acessos (administrador) ===================== */
 const tempPassword = () => { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'; const r = crypto.getRandomValues(new Uint32Array(10)); return 'Vl-' + [...r].map(x => a[x % a.length]).join(''); };
+const roleLabel = u => u?.owner ? 'Proprietário' : ROLES[u?.role] || '';
 function cloudUsersTab() {
-  const rows = S.users.slice().sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name)).map(u => `<tr style="${u.active ? '' : 'opacity:.6'}"><td><b>${esc(u.name)}</b>${u.id === CUR.id ? ' <span class="pill blue">você</span>' : ''}${u.mustChange ? ' <span class="pill">senha provisória</span>' : ''}</td><td class="small">${esc(u.email)}</td>
-    <td>${u.id === CUR.id ? ROLES[u.role] : `<select class="inp" style="min-height:32px;padding:4px 8px" data-act-change="u-role" data-id="${u.id}">${Object.entries(ROLES).map(([k, l]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`}</td>
+  const rows = S.users.slice().sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name)).map(u => `<tr style="${u.active ? '' : 'opacity:.6'}"><td><b>${esc(u.name)}</b>${u.owner ? ' ' + pill('Proprietário', 'ok') : ''}${u.id === CUR.id ? ' <span class="pill blue">você</span>' : ''}${u.mustChange ? ' <span class="pill">senha provisória</span>' : ''}</td><td class="small">${esc(u.email)}</td>
+    <td>${u.id === CUR.id || u.owner ? roleLabel(u) : `<select class="inp" style="min-height:32px;padding:4px 8px" data-act-change="u-role" data-id="${u.id}">${Object.entries(ROLES).map(([k, l]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`}</td>
     <td class="small">${u.driverId ? esc(drv(u.driverId)?.name || '—') : '—'}</td>
     <td>${u.active ? pill('Ativo', 'ok') : pill('Inativo')}</td>
-    <td class="r nowrap">${u.id === CUR.id ? '' : `<button class="btn sm" data-act="u-pass" data-id="${u.id}">Nova senha</button> <button class="btn sm ${u.active ? 'danger' : 'pri'}" data-act="u-toggle" data-id="${u.id}">${u.active ? 'Inativar' : 'Reativar'}</button>`}</td></tr>`);
+    <td class="r nowrap">${u.id === CUR.id || u.owner ? '' : `<button class="btn sm" data-act="u-pass" data-id="${u.id}">Nova senha</button> <button class="btn sm ${u.active ? 'danger' : 'pri'}" data-act="u-toggle" data-id="${u.id}">${u.active ? 'Inativar' : 'Reativar'}</button>`}</td></tr>`);
   return `<div class="panel-b row" style="justify-content:space-between"><p class="muted small" style="max-width:640px">O acesso é criado aqui com uma senha provisória; no primeiro login a pessoa escolhe a própria senha. Inativar bloqueia o login na hora e todo o conteúdo deixa de ser lido pelo banco.</p><button class="btn pri" data-act="u-new">${ic('plus')}Novo usuário</button></div>
     ${tbl(['Nome', 'E-mail', 'Perfil', 'Condutor vinculado', 'Situação', ''], rows)}
     <div class="panel-b"><h3 style="margin-bottom:8px">O que cada perfil pode fazer</h3>${tbl(['Ação', 'Condutor', 'Supervisor', 'Gestor de Frota', 'Administrador'], [['Escanear, receber, entregar, checklists e abastecer (somente o próprio)', 1, 0, 1, 1], ['Ver painel, veículos, condutores, custos e relatórios', 0, 1, 1, 1], ['Transferência forçada, pedágios, multas, manutenção e premiação', 0, 0, 1, 1], ['Cadastrar condutores e liberar o acesso deles', 0, 0, 1, 1], ['Criar usuários de qualquer perfil, regras e integrações', 0, 0, 0, 1]].map(([l, ...r]) => `<tr><td>${l}</td>${r.map(x => `<td>${x ? '<span class="st"><span class="dot ok"></span>Sim</span>' : '<span class="muted">—</span>'}</td>`).join('')}</tr>`))}
@@ -529,28 +517,4 @@ async function cloudDriverActive(d, active) {
   catch (e) { toast('O acesso ao aplicativo não foi alterado: ' + friendlyError(e)); }
 }
 
-/* ===================== Dados de exemplo no banco (para conhecer o sistema) ===================== */
-function remapDemo(D) {
-  const map = new Map();
-  ['costCenters', 'projects', 'drivers', 'vehicles', 'qrcodes', 'custody', 'transfers', 'checklists', 'issues', 'fuel', 'plans', 'maintRecords', 'tolls', 'fines', 'notifications', 'audit', 'trackerEvents']
-    .forEach(k => (D[k] || []).forEach(o => { if (!isUUID(o.id)) map.set(o.id, crypto.randomUUID()); }));
-  (D.users || []).forEach(u => map.set(u.id, CUR.id));
-  const walk = v => {
-    if (typeof v === 'string') return map.has(v) ? map.get(v) : v;
-    if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) o[map.has(k) ? map.get(k) : k] = walk(x); return o; }
-    return v;
-  };
-  return walk(D);
-}
-ACTIONS['cl-seed'] = async a => {
-  if (S.vehicles.length) return toast('O banco já tem veículos. A carga de exemplo só roda com o banco vazio.');
-  a.disabled = true; a.textContent = 'Carregando…';
-  const D = remapDemo(seed());
-  ['costCenters', 'projects', 'drivers', 'vehicles', 'qrcodes', 'custody', 'transfers', 'checklists', 'issues', 'fuel', 'plans', 'maintRecords', 'tolls', 'fines', 'notifications', 'audit', 'trackerEvents'].forEach(k => S[k] = D[k] || []);
-  S.locations = D.locations || {};
-  await CLOUD.flush();
-  await CLOUD.reload(true);
-  toast(CLOUD.status === 'ok' ? 'Dados de exemplo gravados no banco.' : 'A carga não terminou. Veja a mensagem de erro.');
-};
 ACTIONS['cl-logout'] = () => CLOUD.leave();

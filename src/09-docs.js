@@ -70,7 +70,7 @@ function readDocFile(file) {
   return new Promise(async res => {
     if (!file) return res(null);
     if (file.type.startsWith('image/')) return res({ name: file.name, size: file.size, type: file.type, data: await readPhoto(file, 1400) });
-    if (file.size <= (APP_MODE === 'cloud' ? 9.5 * 1024 * 1024 : 900 * 1024)) { const fr = new FileReader(); fr.onload = () => res({ name: file.name, size: file.size, type: file.type, data: fr.result }); fr.onerror = () => res({ name: file.name, size: file.size, type: file.type, data: null }); return fr.readAsDataURL(file); }
+    if (file.size <= 9.5 * 1024 * 1024) { const fr = new FileReader(); fr.onload = () => res({ name: file.name, size: file.size, type: file.type, data: fr.result }); fr.onerror = () => res({ name: file.name, size: file.size, type: file.type, data: null }); return fr.readAsDataURL(file); }
     res({ name: file.name, size: file.size, type: file.type, data: null, tooBig: true });
   });
 }
@@ -86,7 +86,7 @@ ACTIONS['doc-file'] = a => {
       : `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b> · ${nf(f.size / 1024)} KB<br><a class="link" href="${url}" target="_blank" rel="noopener">Abrir o arquivo</a> <span class="small muted">(link válido por 1 hora)</span></div></div>`;
   } else if (f.data && f.type?.startsWith('image/')) body = `<img src="${f.data}" alt="${esc(f.name)}" style="width:100%;border-radius:8px">`;
   else if (f.data) { const blob = URL.createObjectURL(new Blob([Uint8Array.from(atob(f.data.split(',')[1]), c => c.charCodeAt(0))], { type: f.type || 'application/pdf' })); body = `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b> · ${nf(f.size / 1024)} KB<br><a class="link" href="${blob}" target="_blank" rel="noopener">Abrir o arquivo</a></div></div>`; }
-  else body = `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b>${f.size ? ` · ${nf(f.size / 1024)} KB` : ''}<br>${f.demo ? 'Arquivo de exemplo da demonstração.' : f.tooBig ? 'Arquivo grande demais para guardar no navegador; na versão com banco ele vai para o armazenamento de arquivos.' : ''}</div></div>`;
+  else body = `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b>${f.size ? ` · ${nf(f.size / 1024)} KB` : ''}<br>${f.tooBig ? 'Arquivo acima de 10 MB: não foi enviado. Reduza o tamanho (ou envie foto/PDF menor) e anexe de novo.' : 'Arquivo ainda não enviado ao servidor.'}</div></div>`;
   openModal({ title: kind === 'crlv' ? `CRLV ${year} · ${veh(vid).plate}` : `Comprovante IPVA ${year} · ${n}ª parcela`, body, wide: true });
 };
 
@@ -167,25 +167,3 @@ document.addEventListener('change', e => {
   const v = veh(e.target.dataset.id); docsOf(v).ipvaByRental = e.target.checked;
   log('documento', `IPVA ${e.target.checked ? 'marcado como responsabilidade da locadora' : 'passa a ser controlado pela empresa'}`, { vehicleId: v.id }); save(); render();
 });
-
-/* ---------- dados de exemplo ---------- */
-function seedDocs(D) {
-  const Y = new Date().getFullYear(); const t0 = startOfDay(nowTs());
-  const demoFile = (n, v) => ({ name: n, size: 180000 + (v.plate.charCodeAt(0) * 911) % 90000, type: 'application/pdf', data: null, demo: true });
-  const lic = { v1: 18, v3: -5, v6: 5 }; // dias até o próximo licenciamento (demonstração)
-  D.vehicles.forEach((v, idx) => {
-    const locada = v.ownership === 'locada';
-    const docs = v.docs = { crlv: [], ipva: [], ipvaByRental: locada };
-    const renavam = String(10000000000 + ((idx + 7) * 7349201) % 89999999999).slice(0, 11);
-    const due = lic[v.id] != null ? t0 + lic[v.id] * DAY : new Date(Y + 1, 2 + idx % 8, 10 + idx).getTime();
-    const cy = lic[v.id] != null ? Y - 1 : Y;
-    docs.crlv.push({ year: cy, renavam, issuedAt: new Date(cy, 1 + idx % 6, 5 + idx).getTime(), licDue: due, fee: null, feePaidAt: null, file: demoFile(`CRLV-e_${cy}_${v.plate}.pdf`, v) });
-    if (locada) return;
-    const val = Math.round((v.year >= 2023 ? 3600 : 2200) + idx * 173);
-    const parts = idx % 3 === 0 ? 1 : 3;
-    docs.ipva.push({ year: Y, total: val, installments: Array.from({ length: parts }, (_, k) => {
-      const dueK = new Date(Y, k, 12 + idx % 6).getTime(); const unpaid = v.id === 'v7' && k === parts - 1;
-      return { n: k + 1, due: dueK, value: Math.round(val / parts * 100) / 100, paidAt: unpaid ? null : dueK - 2 * DAY, paidValue: null, receipt: unpaid ? null : { name: `comprovante_IPVA_${Y}_${v.plate}_${k + 1}.pdf`, size: 64000, type: 'application/pdf', data: null, demo: true } };
-    }) });
-  });
-}

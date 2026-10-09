@@ -4,16 +4,16 @@ const lastRecordedKm = vid => {
   const ks = [...S.checklists.filter(k => k.vehicleId === vid && k.km).map(k => k.km), ...S.fuel.filter(f => f.vehicleId === vid).map(f => f.km), ...S.custody.filter(c => c.vehicleId === vid).map(c => c.endKm || c.startKm)];
   return ks.length ? Math.max(...ks) : 0;
 };
-const suggestedKm = v => (v.tracker && S.locations[v.id]) ? S.locations[v.id].km : v.odometer;
+const suggestedKm = v => v.odometer;
 
 function captureLocation(v) {
   const tl = currentLocation(v.id);
-  if (tl) DRAFT.geo = { lat: tl.lat, lng: tl.lng, source: 'rastreador' };
+  if (tl && nowTs() - tl.at < 15 * MIN) DRAFT.geo = { lat: tl.lat, lng: tl.lng, source: 'celular' };
   try {
     navigator.geolocation?.getCurrentPosition(p => { if (DRAFT) { DRAFT.geo = { lat: p.coords.latitude, lng: p.coords.longitude, source: 'celular' }; const el = $('#geo-txt'); if (el) el.textContent = geoText(DRAFT.geo); } }, () => { }, { timeout: 5000, maximumAge: 60000 });
   } catch (e) { }
 }
-const geoText = g => g ? `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)} (${g.source === 'celular' ? 'GPS do celular' : 'rastreador'})` : 'Indisponível neste aparelho';
+const geoText = g => g ? `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)} (GPS do celular)` : 'Indisponível neste aparelho';
 
 /* ---------- regras de posse ---------- */
 function receiveCheck(v, did) {
@@ -68,7 +68,7 @@ PAGES.inicio = {
     return `<div class="drv">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div><p class="muted small">${cap(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}</p><h1>Olá, ${esc(d.name.split(' ')[0])}</h1></div>
         <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${ring(sc.total, true)}</button></div>
-      ${banners}${card}
+      ${banners}${card}${v ? `<div>${gpsChip()}</div>` : ''}
       <div class="tiles">
         ${T('scanner', 'qr', 'Escanear veículo', 'Ler o QR Code do carro', 'primary scan')}
         ${T('diario', 'check', 'Checklist diário', daily ? `Feito às ${fmtTime(daily.at)}` : 'Poucos segundos', daily ? 't-green' : '', v && !daily ? '<span class="flag pill warn">pendente</span>' : v ? '<span class="flag pill ok">ok</span>' : '')}
@@ -123,8 +123,6 @@ PAGES.scanner = {
         <label class="btn block" style="position:relative;overflow:hidden">${ic('camera')} Ler QR Code por foto<input type="file" accept="image/*" capture="environment" id="qr-file" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
         <form id="code-form" class="row" style="flex-wrap:nowrap"><input class="inp" id="code-inp" name="code" placeholder="Placa ou código do QR" autocomplete="off" aria-label="Placa ou código"><button class="btn">Buscar</button></form>
       </div></div>
-      <div class="panel"><div class="panel-h"><h3>Simular leitura</h3><span class="muted small">Para testar o protótipo sem câmera</span></div>
-        <div class="panel-b qr-list">${S.vehicles.map(v => `<button class="chip" data-act="sim-scan" data-token="${S.qrcodes.find(q => q.vehicleId === v.id && q.active).token}">${plate(v.plate)} <span class="muted">${esc(v.model.split(' ')[0])}</span></button>`).join('')}</div></div>
     </div>`;
   },
   mount() {
@@ -141,7 +139,6 @@ PAGES.scanner = {
     });
   }
 };
-ACTIONS['sim-scan'] = a => onScanned(a.dataset.token);
 ACTIONS['cam-start'] = async () => {
   const msg = $('#cam-msg');
   try {
@@ -163,7 +160,7 @@ ACTIONS['cam-start'] = async () => {
     };
     loop();
   } catch (e) {
-    msg.textContent = 'A câmera não está disponível neste navegador ou a permissão foi negada. Use a leitura por foto, digite a placa ou simule a leitura abaixo.';
+    msg.textContent = 'A câmera não está disponível neste navegador ou a permissão foi negada. Use a leitura por foto ou digite a placa.';
   }
 };
 
@@ -241,7 +238,7 @@ function fullChecklistBody(v) {
   }).join('');
   return `
     <div class="panel"><div class="panel-h"><h3>Quilometragem e combustível</h3></div><div class="panel-b form-grid">
-      <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}" aria-describedby="km-h"><small id="km-h">${v.tracker ? 'Sugerida pelo rastreador. Confira no painel.' : `Último registro: ${km(lastRecordedKm(v.id))}`}</small></label>
+      <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}" aria-describedby="km-h"><small id="km-h">Último registro: ${km(lastRecordedKm(v.id))}. Confira no painel.</small></label>
       <div class="field"><span>Nível de combustível</span><div class="seg">${FUEL_LEVELS.map(f => `<label><input type="radio" name="fuel" value="${f}" ${D.fuel === f ? 'checked' : ''}><span>${f}</span></label>`).join('')}</div></div>
     </div></div>
     <div class="panel"><div class="panel-h"><h3>Itens do veículo</h3><button type="button" class="btn sm" data-act="ck-allok">Marcar todos como OK</button></div><div class="panel-b" style="padding-block:4px">${items}</div></div>
@@ -249,7 +246,7 @@ function fullChecklistBody(v) {
       <label class="field full"><span>Avarias encontradas</span><textarea class="inp" name="avarias" placeholder="Deixe em branco se não houver avarias">${esc(D.avarias)}</textarea></label>
       <label class="field full"><span>Observações</span><textarea class="inp" name="notes">${esc(D.notes)}</textarea></label>
     </div></div>
-    <div class="panel"><div class="panel-h"><h3>Fotos obrigatórias</h3><button type="button" class="btn sm" data-act="ck-demo-photos">Usar fotos de exemplo</button></div>
+    <div class="panel"><div class="panel-h"><h3>${S.settings.requirePhotos ? 'Fotos obrigatórias' : 'Fotos'}</h3></div>
       <div class="panel-b"><div class="photos">${PHOTO_SLOTS.map(([k, l]) => photoTile(k, l)).join('')}</div></div></div>`;
 }
 function photoTile(k, l) {
@@ -275,7 +272,6 @@ function bindDraft(form) {
   });
 }
 ACTIONS['ck-allok'] = () => { CK_ITEMS.forEach(([k]) => { DRAFT.items[k] = 'ok'; const r = $(`input[name="it_${k}"][value="ok"]`); if (r) r.checked = true; }); };
-ACTIONS['ck-demo-photos'] = () => { PHOTO_SLOTS.forEach(([k, l]) => { if (!DRAFT.photos[k]) DRAFT.photos[k] = 'demo:' + k; const t = $(`[data-slot="${k}"]`); if (t) t.outerHTML = photoTile(k, l); }); };
 function singlePhoto(slot, label) {
   const p = DRAFT.photos[slot];
   return `<label class="ph ${p ? 'done' : ''}" data-slot="${slot}" style="aspect-ratio:auto;min-height:92px;flex-direction:row;gap:10px">${p ? `<img src="${photoSrc(p)}" alt=""><span class="cap">${label} ✓ (toque para trocar)</span>` : `${ic('camera')}<span>${label}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${slot}" aria-label="${label}"></label>`;
@@ -415,7 +411,7 @@ PAGES.diario = {
       <div class="yn"><button type="button" class="${sim ? 'on-ok' : ''}" data-act="d-ans" data-v="sim">Sim</button><button type="button" class="${nao ? 'on-bad' : ''}" data-act="d-ans" data-v="nao">Não</button></div>
       ${D.answer ? `
       <div class="panel"><div class="panel-b stack" style="gap:12px">
-        <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}"><small>${v.tracker ? 'Sugerida pelo rastreador. Confira no painel.' : 'Ou envie a foto do painel abaixo.'}</small></label>
+        <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}"><small>Confira no painel ou envie a foto abaixo.</small></label>
         ${singlePhoto('painel_d', 'Foto do painel (opcional)')}
       </div></div>` : ''}
       ${sim ? `<div class="panel"><div class="panel-b stack" style="gap:10px">

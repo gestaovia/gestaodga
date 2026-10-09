@@ -24,7 +24,7 @@ function vStatus(v) {
   const c = activeCustody(v.id);
   if (c) {
     const loc = S.locations[v.id];
-    if (loc && v.tracker) { if (loc.speed > 5) return 'deslocamento'; if (!loc.ignition) return 'parado'; }
+    if (loc && nowTs() - loc.at < 10 * MIN && loc.speed > 10) return 'deslocamento';
     return 'em_uso';
   }
   return 'disponivel';
@@ -132,7 +132,7 @@ const CRITERIA = {
   conservacao: { l: 'Conservação do veículo', d: 'Avarias não comunicadas e limpeza' },
   abastecimento: { l: 'Abastecimentos', d: 'Registros completos com cupom e km' },
   infracoes: { l: 'Sem infrações', d: 'Multas no período' },
-  procedimentos: { l: 'Procedimentos', d: 'Transferências, obra vinculada e telemetria' }
+  procedimentos: { l: 'Procedimentos', d: 'Transferências, obra vinculada e velocidade' }
 };
 function driverScore(did, from = startOfMonth(nowTs()), to = nowTs()) {
   const cfg = S.settings.score; const C = cfg.criteria; const P = cfg.penalties; const d = drv(did);
@@ -166,7 +166,7 @@ function driverScore(did, from = startOfMonth(nowTs()), to = nowTs()) {
     conservacao: `${avarias} avaria(s) não comunicada(s) · ${dirty} limpeza ruim`,
     abastecimento: fuels.length ? `${okFuel} de ${fuels.length} completos` : 'Sem abastecimentos',
     infracoes: fines.length ? `${fines.length} multa(s)` : 'Nenhuma multa',
-    procedimentos: `${forced} forçada(s) · ${noProj} sem obra · ${tel} alerta(s) do rastreador`
+    procedimentos: `${forced} forçada(s) · ${noProj} sem obra · ${tel} excesso(s) de velocidade`
   };
   const parts = Object.entries(C).filter(([, c]) => c.on).map(([k, c]) => {
     let v;
@@ -271,10 +271,10 @@ function fleetCounts() {
 
 /* ----- última localização registrada (celular do condutor no checklist) ----- */
 function lastLocation(vid) {
-  // posição mais recente entre o rastreador (Traccar) e o celular do condutor no checklist
+  // posição mais recente: envio automático do celular do condutor ou localização registrada no checklist
   const k = S.checklists.filter(x => x.vehicleId === vid && x.location).sort((a, b) => b.at - a.at)[0];
   const t = S.locations[vid]; const v = veh(vid);
-  const fromT = t && v?.tracker && S.settings.traccar?.mode !== 'off' ? { lat: t.lat, lng: t.lng, at: t.at, source: 'rastreador', what: `Rastreador${t.speed > 3 ? ` · ${t.speed} km/h` : t.ignition ? ' · ligado' : ' · parado'}`, driverId: null } : null;
+  const fromT = t ? { lat: t.lat, lng: t.lng, at: t.at, source: 'celular', what: `GPS do condutor${t.speed > 3 ? ` · ${t.speed} km/h` : ''}`, driverId: null } : null;
   const fromK = k ? { lat: k.location.lat, lng: k.location.lng, at: k.at, source: k.location.source, what: `Checklist ${CK_TYPES[k.type].toLowerCase()}`, driverId: k.driverId } : null;
   if (fromT && (!fromK || fromT.at >= fromK.at)) return fromT;
   return fromK || fromT;
@@ -284,32 +284,13 @@ function lastLocation(vid) {
 /* ----- localização ----- */
 function currentLocation(vid) {
   const l = S.locations[vid]; if (!l) return null;
-  return { lat: l.lat, lng: l.lng, source: 'rastreador', at: l.at };
+  return { lat: l.lat, lng: l.lng, source: l.source || 'celular', at: l.at };
 }
 function nearestPlace(l) {
-  if (!l) return 'Sem rastreador';
+  if (!l) return 'Sem localização';
   let best = null, bd = 1e9;
-  S.projects.forEach(p => { const d = Math.hypot(p.lat - l.lat, (p.lng - l.lng) * .92) * 111; if (d < bd) { bd = d; best = p; } });
-  if (bd < 1.2) return best.code === 'Matriz' ? 'Matriz (pátio)' : `${best.code} (canteiro)`;
-  if (Math.abs(l.lat + 22.872) < .004 && Math.abs(l.lng + 47.098) < .004) return 'Oficina Mecânica Alvorada';
+  S.projects.forEach(p => { if (p.lat == null || p.lng == null) return; const d = Math.hypot(p.lat - l.lat, (p.lng - l.lng) * .92) * 111; if (d < bd) { bd = d; best = p; } });
+  if (!best) return l.address || 'Posição recebida';
+  if (bd < 1.2) return `${best.code} (canteiro)`;
   return `${nf(bd, 1)} km de ${best.code}`;
-}
-// simulação do rastreador: veículos com ignição ligada andam um pouco a cada ciclo
-function tickTelemetry() {
-  S.vehicles.forEach(v => {
-    const l = S.locations[v.id]; if (!l || !v.tracker || !activeCustody(v.id) || v.maintenance || openIssues(v.id).some(i => !i.canRun)) return;
-    if (!l.ignition) { if (Math.random() < .08) { l.ignition = true; l.speed = 0; } l.at = nowTs(); return; }
-    const seg = currentSegment(activeCustody(v.id)); const p = seg ? prj(seg.projectId) : null;
-    const tgt = p || { lat: -22.9, lng: -47.06 };
-    const dLat = tgt.lat - l.lat, dLng = tgt.lng - l.lng, dist = Math.hypot(dLat, dLng);
-    if (dist < .004) { l.speed = 0; if (Math.random() < .5) l.ignition = false; }
-    else {
-      const step = Math.min(dist, .003 + Math.random() * .004);
-      l.lat += dLat / dist * step + (Math.random() - .5) * .0015; l.lng += dLng / dist * step + (Math.random() - .5) * .0015;
-      l.speed = Math.round(35 + Math.random() * 55);
-      const inc = Math.round(step * 111 * 1.3);
-      v.odometer += inc; l.km = v.odometer;
-    }
-    l.at = nowTs();
-  });
 }

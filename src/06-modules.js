@@ -111,7 +111,7 @@ PAGES.pedagios = {
     const un = S.tolls.filter(t => tollMatch(t).how === 'sem');
     const list = f === 'sem' ? un : S.tolls.slice();
     return `<div class="page-head"><div class="filters"><button class="chip ${!f ? 'on' : ''}" data-go="pedagios">Todas</button><button class="chip ${f === 'sem' ? 'on' : ''}" data-go="pedagios" data-f="sem">Sem condutor<span class="n">${un.length}</span></button></div>${isManager() ? '<div class="row"><button class="btn" data-act="toll-import">Importar fatura</button><button class="btn pri" data-act="toll-new">Registrar passagem</button></div>' : ''}</div>
-      <div class="stack"><div class="kpis">${kpi('Passagens no mês', ms.length, 'toll', 'c-blue')}${kpi('Valor no mês', money(sum(ms, t => t.value)), 'report')}${kpi('Identificadas', nf(S.tolls.filter(t => tollMatch(t).how === 'auto').length / S.tolls.length * 100, 0) + '%', 'check', 'c-green', '', 'pela posse')}${kpi('Sem condutor', un.length, 'alert', un.length ? 'c-yellow' : '', 'data-go="pedagios" data-f="sem"')}</div>
+      <div class="stack"><div class="kpis">${kpi('Passagens no mês', ms.length, 'toll', 'c-blue')}${kpi('Valor no mês', money(sum(ms, t => t.value)), 'report')}${kpi('Identificadas', S.tolls.length ? nf(S.tolls.filter(t => tollMatch(t).how === 'auto').length / S.tolls.length * 100, 0) + '%' : '—', 'check', 'c-green', '', 'pela posse')}${kpi('Sem condutor', un.length, 'alert', un.length ? 'c-yellow' : '', 'data-go="pedagios" data-f="sem"')}</div>
       <div class="panel">${tollTable(list)}</div></div>`;
   }
 };
@@ -129,10 +129,9 @@ function importTolls(text) {
   return { ok, errs };
 }
 ACTIONS['toll-import'] = () => {
-  const ex = S.custody.find(c => c.vehicleId === 'v1' && !c.end) ? `ABC1D23;${fmtDate(nowTs())};09:15;Praça Valinhos – SP-330 km 82;11,60\nTUV3W45;${fmtDate(nowTs() - 2 * DAY)};14:40;Praça Campinas – SP-348 km 72;9,10` : '';
   openModal({
     title: 'Importar fatura de pedágio', wide: true,
-    body: `<p class="small muted">Cole as linhas da fatura (CSV ou planilha) no formato: <span class="mono">placa;data;hora;local;valor</span>. O sistema identifica o condutor e a obra de cada passagem.</p><textarea class="inp mono" id="toll-csv" style="min-height:160px">${ex}</textarea><p class="err" id="toll-err"></p>`,
+    body: `<p class="small muted">Cole as linhas da fatura (CSV ou planilha) no formato: <span class="mono">placa;data;hora;local;valor</span>. O sistema identifica o condutor e a obra de cada passagem.</p><textarea class="inp mono" id="toll-csv" style="min-height:160px" placeholder="ABC1D23;09/10/2026;09:15;Praça Valinhos – SP-330 km 82;11,60"></textarea><p class="err" id="toll-err"></p>`,
     foot: '<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="toll-import-ok">Importar</button>'
   });
 };
@@ -158,7 +157,7 @@ ACTIONS['toll-adj'] = a => {
     title: 'Ajuste manual de pedágio', body: `<p>${plate(t.plate)} · ${fmtDT(t.at)} · ${esc(t.place)} · <b>${money(t.value)}</b></p>
       <div class="note warn">Não há posse registrada neste horário. ${near.length ? `Posses mais próximas: ${near.map(c => `${esc(drv(c.driverId).name)} (${fmtShort(c.start)} a ${c.end ? fmtShort(c.end) : 'agora'})`).join('; ')}.` : ''}</div>
       <form id="adjform" class="form-grid"><label class="field"><span>Condutor</span><select class="inp" name="driverId">${driverOptions(t.manual?.driverId || near[0]?.driverId)}</select></label>
-      <label class="field"><span>Obra</span><select class="inp" name="projectId">${projectOptions(t.manual?.projectId || 'pmat')}</select></label>
+      <label class="field"><span>Obra</span><select class="inp" name="projectId">${projectOptions(t.manual?.projectId || currentSegment(near[0])?.projectId)}</select></label>
       <label class="field full"><span>Motivo do ajuste</span><input class="inp" name="reason" value="${esc(t.manual?.reason || '')}" placeholder="Ex.: veículo usado sem registro de posse"></label><p class="err full" id="adj-err"></p></form>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="toll-adj-ok" data-id="${t.id}">Salvar ajuste</button>`
   });
@@ -198,10 +197,10 @@ ACTIONS['fine-view'] = a => {
       <div class="panel"><div class="panel-h"><h3>Responsável no momento da infração</h3>${m.how === 'auto' ? pill('Identificado pela posse', 'ok') : m.how === 'manual' ? pill('Indicado manualmente', '') : pill('Sem posse no horário', 'warn')}</div><div class="panel-b">
         ${m.driverId ? `<dl class="dl"><dt>Condutor</dt><dd><b>${esc(drv(m.driverId).name)}</b> · CNH ${drv(m.driverId).cnhCat}</dd><dt>Obra associada</dt><dd>${projFull(m.projectId)}</dd>${c ? `<dt>Período de posse</dt><dd>${fmtDT(c.start)} até ${c.end ? fmtDT(c.end) : 'agora'}</dd>` : ''}</dl>`
         : `<p>Não havia posse registrada para ${f.plate} neste horário. ${isManager() ? 'Indique o condutor manualmente:' : ''}</p>${isManager() ? `<div class="row" style="margin-top:8px"><select class="inp" id="fine-drv" style="max-width:260px">${driverOptions('')}</select><button class="btn" data-act="fine-assign" data-id="${f.id}">Indicar condutor</button></div>` : ''}`}</div></div>
-      <div><p class="label" style="margin-bottom:6px">Anexos</p>${f.attachments.length ? f.attachments.map(x => `<div class="row small">${ic('fine')} ${esc(x)}</div>`).join('') : '<span class="muted small">Nenhum documento anexado.</span>'}
+      <div><p class="label" style="margin-bottom:6px">Anexos</p>${f.attachments.length ? f.attachments.map((x, i) => typeof x === 'string' ? `<div class="row small">${ic('fine')} ${esc(x)}</div>` : `<div class="row small">${ic('fine')} <button class="link" data-act="fine-file-open" data-id="${f.id}" data-i="${i}">${esc(x.name)}</button>${x.size ? ` <span class="muted">${nf(x.size / 1024)} KB</span>` : ''}</div>`).join('') : '<span class="muted small">Nenhum documento anexado.</span>'}
         ${isManager() ? `<label class="btn sm" style="position:relative;margin-top:8px">Anexar documento<input type="file" id="fine-file" data-id="${f.id}" style="position:absolute;inset:0;opacity:0"></label>` : ''}</div>
       <div><p class="label" style="margin-bottom:4px">Histórico do veículo próximo ao horário</p>${timelineHTML(hist)}</div>`,
-    onMount: el => { el.querySelector('#fine-file')?.addEventListener('change', e => { const file = e.target.files[0]; if (!file) return; f.attachments.push(file.name); log('multa', `Documento anexado à multa ${f.notice}: ${file.name}`, { vehicleId: m.vehicleId }); save(); ACTIONS['fine-view']({ dataset: { id: f.id } }); }); }
+    onMount: el => { el.querySelector('#fine-file')?.addEventListener('change', async e => { const file = e.target.files[0]; if (!file) return; const doc = await readDocFile(file); if (doc.tooBig) return toast('Arquivo acima de 10 MB. Envie um arquivo menor.'); f.attachments.push(doc); log('multa', `Documento anexado à multa ${f.notice}: ${file.name}`, { vehicleId: m.vehicleId }); save(); ACTIONS['fine-view']({ dataset: { id: f.id } }); }); }
   });
 };
 ACTIONS['fine-assign'] = a => { const f = byId(S.fines, a.dataset.id); f.manualDriverId = $('#fine-drv').value; log('multa', `Multa ${f.notice} indicada manualmente para ${drv(f.manualDriverId).name}`, { vehicleId: vehicleByPlate(f.plate)?.id, driverId: f.manualDriverId }); save(); closeModal(); render(); };
@@ -218,16 +217,25 @@ ACTIONS['fine-new'] = () => openModal({
   foot: '<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="fine-save">Registrar e identificar condutor</button>',
   onMount: el => el.querySelector('#fn-grav').addEventListener('change', e => { el.querySelector('#fn-val').value = nf(FINE_TYPES[e.target.value], 2); })
 });
-ACTIONS['fine-save'] = () => {
+ACTIONS['fine-save'] = async () => {
   const form = $('#fnform'); const d = formData(form); const v = parseFloat(d.value.replace(/\./g, '').replace(',', '.'));
   if (!d.notice || !d.date || !d.time || !d.place || !d.infraction || !v) return $('#fn-err').textContent = 'Preencha todos os campos.';
-  const file = form.querySelector('[name=file]').files[0];
-  const f = { id: uid('fin'), plate: d.plate, at: new Date(d.date + 'T' + d.time).getTime(), place: d.place, infraction: d.infraction, gravity: d.gravity, value: v, notice: d.notice, points: { leve: 3, media: 4, grave: 5, gravissima: 7 }[d.gravity], attachments: file ? [file.name] : [], manualDriverId: null };
+  const file = form.querySelector('[name=file]').files[0]; const doc = file ? await readDocFile(file) : null;
+  if (doc?.tooBig) return $('#fn-err').textContent = 'Arquivo acima de 10 MB. Envie um arquivo menor.';
+  const f = { id: uid('fin'), plate: d.plate, at: new Date(d.date + 'T' + d.time).getTime(), place: d.place, infraction: d.infraction, gravity: d.gravity, value: v, notice: d.notice, points: { leve: 3, media: 4, grave: 5, gravissima: 7 }[d.gravity], attachments: doc ? [doc] : [], manualDriverId: null };
   S.fines.push(f); const m = fineMatch(f);
   log('multa', `Multa ${f.notice} registrada (${money(v)})${m.driverId ? ` · condutor identificado: ${drv(m.driverId).name}` : ' · sem posse no horário'}`, { vehicleId: m.vehicleId, driverId: m.driverId });
   save(); closeModal(); toast(m.driverId ? `Condutor identificado: ${drv(m.driverId).name}.` : 'Sem posse no horário: indique o condutor manualmente.'); render();
 };
 
+
+ACTIONS['fine-file-open'] = a => {
+  const x = byId(S.fines, a.dataset.id)?.attachments[+a.dataset.i]; if (!x) return;
+  const url = String(x.data || '').startsWith('sb:') ? CLOUD.fileUrl(x.data) : x.data;
+  if (!url) return toast('O link do arquivo expirou. Recarregue a página.');
+  if (x.type?.startsWith('image/')) return openModal({ title: x.name, body: `<img src="${url}" alt="" style="width:100%">`, wide: true });
+  window.open(url, '_blank', 'noopener');
+};
 
 /* ---------- Relatórios ---------- */
 let REP_CACHE = null;
@@ -260,20 +268,21 @@ ACTIONS['rep-copy'] = async a => {
 
 /* ---------- Configurações ---------- */
 const DB_ENTITIES = [
-  ['users', 'Usuários e perfil de acesso (administrador, gestor, supervisor, condutor)'], ['drivers', 'Condutores: CNH, categoria, validade, contato'],
-  ['vehicles', 'Veículos: placa, modelo, ano, combustível, hodômetro, rastreador'], ['vehicle_qr_codes', 'Identificador seguro do QR Code, ativo/revogado'],
-  ['vehicle_custody', 'Posse: fonte de verdade da responsabilidade (condutor, início, fim, km inicial e final)'], ['custody_project_changes', 'Obra e centro de custo ao longo da posse (histórico com data e hora)'],
-  ['vehicle_transfers', 'Transferências de posse e seus estados, inclusive forçadas com justificativa'], ['projects', 'Obras'], ['cost_centers', 'Centros de custo'],
-  ['checklists', 'Checklists diários e completos (recebimento, entrega, manutenção, avaria)'], ['checklist_items', 'Itens avaliados em cada checklist'], ['checklist_photos', 'Fotos associadas à movimentação'],
-  ['vehicle_issues', 'Problemas informados, criticidade, bloqueio e resolução'], ['fuel_records', 'Abastecimentos vinculados à posse e à obra'],
-  ['maintenance_plans', 'Plano preventivo por veículo (km, data ou ambos)'], ['maintenance_records', 'Serviços realizados e custos'],
-  ['tolls', 'Passagens de pedágio e ajuste manual'], ['fines', 'Multas e anexos'], ['vehicle_locations', 'Posições recebidas do Traccar (lat, long, velocidade, ignição, hodômetro)'], ['telemetry_events', 'Alertas do Traccar: excesso de velocidade, frenagem e aceleração bruscas'],
-  ['driver_scores', 'Pontuação mensal por critério'], ['driver_bonuses', 'Bonificação calculada e aprovada'], ['notifications', 'Alertas para condutores e gestão'], ['audit_logs', 'Auditoria completa de todas as ações']
+  ['profiles', 'Usuários e perfil de acesso', () => S.users], ['drivers', 'Condutores: CNH, categoria, validade, contato', () => S.drivers.filter(x => !x._ro)],
+  ['vehicles', 'Veículos, locação, CRLV e IPVA', () => S.vehicles], ['qr_codes', 'QR Codes dos veículos (ativos e revogados)', () => S.qrcodes],
+  ['custody', 'Posse: quem responde pelo veículo, início, fim, km e obras', () => S.custody], ['transfers', 'Transferências e seus estados', () => S.transfers],
+  ['cost_centers', 'Centros de custo', () => S.costCenters], ['projects', 'Obras', () => S.projects],
+  ['checklists', 'Checklists diários e completos com fotos', () => S.checklists], ['issues', 'Problemas informados e resolução', () => S.issues],
+  ['fuel_records', 'Abastecimentos', () => S.fuel], ['maintenance_plans', 'Plano preventivo por veículo', () => S.plans], ['maintenance_records', 'Serviços realizados e custos', () => S.maintRecords],
+  ['tolls', 'Pedágios', () => S.tolls], ['fines', 'Multas e anexos', () => S.fines],
+  ['vehicle_last_location', 'Última posição de cada veículo (GPS do condutor)', () => Object.keys(S.locations)], ['tracker_events', 'Alertas de velocidade', () => S.trackerEvents],
+  ['notifications', 'Alertas para condutores e gestão', () => S.notifications], ['audit_logs', 'Auditoria de todas as ações', () => S.audit]
 ];
 PAGES.configuracoes = {
   title: 'Configurações',
   render({ tab = 'regras' }) {
-    const st = S.settings; const tabs = [['regras', 'Regras da frota'], ['integ', 'Rastreamento (Traccar)'], ['usuarios', 'Usuários e perfis'], ['obras', 'Obras e centros de custo'], ['dados', 'Banco de dados']];
+    const st = S.settings; const tabs = [['regras', 'Regras da frota'], ['obras', 'Obras e centros de custo'], ['usuarios', 'Usuários e perfis'], ['localizacao', 'Localização'], ['dados', 'Banco de dados']].filter(([k]) => CUR.role === 'admin' || ['regras', 'obras'].includes(k));
+    if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
     let body = '';
     if (tab === 'regras') body = `<form class="panel-b form-grid" id="cfg-form" data-sec="regras">
       <label class="field"><span>Prazo do checklist diário</span><input class="inp" type="time" name="dailyDeadline" value="${st.dailyDeadline}"></label>
@@ -285,79 +294,97 @@ PAGES.configuracoes = {
       <label class="field"><span>Consumo fora do padrão acima de (%)</span><input class="inp num" name="fuelDeviationPct" value="${st.fuelDeviationPct}"></label>
       <label class="field"><span>Locação: avisar com (dias)</span><input class="inp num" name="rentWarn" value="${st.rental.warnDays}"></label><label class="field"><span>Locação: urgente com (dias)</span><input class="inp num" name="rentUrg" value="${st.rental.urgentDays}"></label>
       <div class="full"><button class="btn ok">Salvar regras</button></div></form>`;
-    if (tab === 'usuarios' && APP_MODE === 'cloud') body = cloudUsersTab();
-    else if (tab === 'usuarios') body = `${tbl(['Nome', 'E-mail', 'Perfil', 'Condutor vinculado', ''], S.users.map(u => `<tr><td>${esc(u.name)}</td><td class="small">${esc(u.email)}</td><td><select class="inp" style="min-height:32px;padding:4px 8px" data-act-change="role" data-id="${u.id}">${Object.entries(ROLES).map(([k, l]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td><td>${u.driverId ? esc(drv(u.driverId).name) : '—'}</td><td>${u.active ? pill('Ativo', 'ok') : pill('Inativo')}</td></tr>`))}
-      <div class="panel-b"><h3 style="margin-bottom:8px">Permissões por perfil</h3>${tbl(['Ação', 'Condutor', 'Supervisor', 'Gestor de Frota', 'Administrador'], [['Escanear, receber, entregar, checklists, abastecer', 1, 0, 0, 0], ['Ver dashboard, central, veículos, condutores e relatórios', 0, 1, 1, 1], ['Transferência forçada, ajustes de pedágio e multa, manutenção', 0, 0, 1, 1], ['Configurar regras, usuários e integrações', 0, 0, 0, 1]].map(([l, ...r]) => `<tr><td>${l}</td>${r.map(x => `<td>${x ? '<span class="st"><span class="dot ok"></span>Sim</span>' : '<span class="muted">—</span>'}</td>`).join('')}</tr>`))}
-      <p class="small muted" style="margin-top:8px">O condutor vê apenas o próprio veículo, as próprias solicitações e as telas de operação.</p></div>`;
-    if (tab === 'obras') body = `${tbl(['Obra', 'Descrição', 'Centro de custo', 'Veículos agora'], S.projects.map(p => `<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td>${ccLabel(p.ccId)}</td><td>${S.vehicles.filter(v => currentSegment(activeCustody(v.id))?.projectId === p.id).map(v => plate(v.plate)).join(' ') || '<span class="muted">—</span>'}</td></tr>`))}
-      <form class="panel-b form-grid" id="proj-form"><label class="field"><span>Código</span><input class="inp" name="code" placeholder="Obra 40"></label><label class="field"><span>Descrição</span><input class="inp" name="name"></label><label class="field"><span>Centro de custo</span><select class="inp" name="ccId">${ccOptions()}</select></label><div class="field" style="justify-content:flex-end"><button class="btn">Adicionar obra</button></div></form>`;
-    if (tab === 'integ') body = traccarSettings();
-    if (tab === 'dados' && APP_MODE === 'cloud') body = `<div class="panel-b stack">${syncBadge()}<p class="muted">Os dados ficam no Supabase (PostgreSQL) com regras de acesso por perfil (RLS). Fotos e documentos ficam num armazenamento privado; os links abertos no aplicativo expiram em 1 hora.</p>
-      ${tbl(['Tabela', 'Conteúdo', '>Registros visíveis'], DB_ENTITIES.map(([t, d]) => `<tr><td class="mono small">${t}</td><td class="small">${d}</td><td class="r">${({ users: S.users, drivers: S.drivers.filter(x => !x._ro), vehicles: S.vehicles, vehicle_qr_codes: S.qrcodes, vehicle_custody: S.custody, vehicle_transfers: S.transfers, projects: S.projects, cost_centers: S.costCenters, checklists: S.checklists, vehicle_issues: S.issues, fuel_records: S.fuel, maintenance_plans: S.plans, maintenance_records: S.maintRecords, tolls: S.tolls, fines: S.fines, notifications: S.notifications, audit_logs: S.audit, telemetry_events: S.trackerEvents, vehicle_locations: Object.keys(S.locations) }[t] || []).length || '—'}</td></tr>`))}
-      ${S.vehicles.length ? '' : `<div class="note">${ic('grid')}<div><b>Banco vazio.</b> Para conhecer o sistema com dados, grave os dados de exemplo (9 veículos, 9 condutores, 40 dias de histórico). Os condutores de exemplo não recebem login. <button class="btn sm pri" data-act="cl-seed" style="margin-left:8px">Gravar dados de exemplo</button></div></div>`}</div>`;
-    else if (tab === 'dados') body = `<div class="panel-b stack"><p class="muted">Entidades principais do banco. O script SQL completo (PostgreSQL / Supabase) acompanha o protótipo.</p>
-      ${tbl(['Tabela', 'Conteúdo', '>Registros no protótipo'], DB_ENTITIES.map(([t, d]) => `<tr><td class="mono small">${t}</td><td class="small">${d}</td><td class="r">${({ users: S.users, drivers: S.drivers, vehicles: S.vehicles, vehicle_qr_codes: S.qrcodes, vehicle_custody: S.custody, vehicle_transfers: S.transfers, projects: S.projects, cost_centers: S.costCenters, checklists: S.checklists, vehicle_issues: S.issues, fuel_records: S.fuel, maintenance_plans: S.plans, maintenance_records: S.maintRecords, tolls: S.tolls, fines: S.fines, notifications: S.notifications, audit_logs: S.audit, telemetry_events: S.trackerEvents, vehicle_locations: Object.keys(S.locations) }[t] || []).length || '—'}</td></tr>`))}
-      <div class="note"><b>Dados da demonstração.</b> Tudo o que você registra fica salvo apenas neste navegador. <button class="btn sm danger" data-act="reset" style="margin-left:8px">Restaurar dados de exemplo</button></div></div>`;
+    if (tab === 'usuarios') body = cloudUsersTab();
+    if (tab === 'obras') body = projectsTab();
+    if (tab === 'localizacao') body = gpsSettings();
+    if (tab === 'dados') body = `<div class="panel-b stack">${syncBadge()}<p class="muted">Os dados ficam no Supabase (PostgreSQL) com regras de acesso por perfil (RLS). Fotos e documentos ficam num armazenamento privado; os links abertos no aplicativo expiram em 1 hora.</p>
+      ${tbl(['Tabela', 'Conteúdo', '>Registros visíveis'], DB_ENTITIES.map(([t, d, f]) => `<tr><td class="mono small">${t}</td><td class="small">${d}</td><td class="r">${nf(f().length)}</td></tr>`))}
+      </div>`;
     return `<div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="configuracoes" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div>`;
   },
   mount() {
-    mountTraccarSettings();
+    mountGpsSettings();
     const f = $('#cfg-form');
     f?.addEventListener('submit', e => {
       e.preventDefault(); const d = formData(f); const st = S.settings; const n = x => parseFloat(String(x).replace(',', '.'));
       if (f.dataset.sec === 'regras') { st.dailyDeadline = d.dailyDeadline; st.transferAlertHours = n(d.transferAlertHours); st.oneVehiclePerDriver = d.oneVehiclePerDriver === '1'; st.requirePhotos = d.requirePhotos === '1'; Object.assign(st.maint, { attentionKm: n(d.attentionKm), urgentKm: n(d.urgentKm), attentionDays: n(d.attentionDays), urgentDays: n(d.urgentDays) }); st.fuelDeviationPct = n(d.fuelDeviationPct); st.rental = { warnDays: n(d.rentWarn), urgentDays: n(d.rentUrg) }; }
-      if (f.dataset.sec === 'integ') { Object.assign(st.tracker, { enabled: d.enabled === '1', provider: d.provider, endpoint: d.endpoint, interval: n(d.interval) }); }
       log('config', `Configurações alteradas (${f.dataset.sec}) por ${CUR.name}`, {}); save(); toast('Configurações salvas.');
     });
-    $('#proj-form')?.addEventListener('submit', e => { e.preventDefault(); const d = formData(e.target); if (!d.code || !d.name) return toast('Informe código e descrição.'); S.projects.push({ id: uid('prj'), code: d.code, name: d.name, ccId: d.ccId, lat: -22.9 + (Math.random() - .5) * .25, lng: -47.1 + (Math.random() - .5) * .3, active: true }); save(); toast('Obra adicionada.'); render(); });
-    $$('[data-act-change="role"]').forEach(s => s.addEventListener('change', () => { const u = byId(S.users, s.dataset.id); u.role = s.value; log('config', `Perfil de ${u.name} alterado para ${ROLES[u.role]}`, {}); save(); toast('Perfil atualizado.'); }));
   }
 };
-ACTIONS.reset = () => { resetDemo(); CUR = byId(S.users, CUR.id) || S.users[0]; toast('Dados de exemplo restaurados.'); go(homePage()); };
+
+/* ---------- Obras e centros de custo ---------- */
+const coordTxt = p => p.lat != null && p.lng != null ? `${nf(p.lat, 5)}, ${nf(p.lng, 5)}` : '<span class="muted">sem local</span>';
+function projectsTab() {
+  const man = isManager();
+  const ccRows = S.costCenters.slice().sort((a, b) => String(a.code).localeCompare(String(b.code), 'pt-BR', { numeric: true })).map(c => `<tr style="${c.active === false ? 'opacity:.6' : ''}"><td class="mono"><b>${esc(c.code)}</b></td><td>${esc(c.name)}</td><td class="r">${S.projects.filter(p => p.ccId === c.id).length}</td><td>${c.active === false ? pill('Inativo') : pill('Ativo', 'ok')}</td><td class="r">${man ? `<button class="btn sm" data-act="cc-edit" data-id="${c.id}">${ic('edit')}Editar</button>` : ''}</td></tr>`);
+  const pRows = S.projects.slice().sort((a, b) => (b.active - a.active) || String(a.code).localeCompare(String(b.code), 'pt-BR', { numeric: true })).map(p => `<tr style="${p.active ? '' : 'opacity:.6'}"><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td class="small">${ccLabel(p.ccId)}</td><td class="small mono">${coordTxt(p)}</td><td>${S.vehicles.filter(v => currentSegment(activeCustody(v.id))?.projectId === p.id).map(v => plate(v.plate)).join(' ') || '<span class="muted">—</span>'}</td><td>${p.active ? pill('Ativa', 'ok') : pill('Encerrada')}</td><td class="r">${man ? `<button class="btn sm" data-act="prj-edit" data-id="${p.id}">${ic('edit')}Editar</button>` : ''}</td></tr>`);
+  return `<div class="panel-b row" style="justify-content:space-between"><h3>Centros de custo</h3>${man ? `<button class="btn pri" data-act="cc-edit">${ic('plus')}Novo centro de custo</button>` : ''}</div>
+    ${tbl(['Código', 'Descrição', '>Obras', 'Situação', ''], ccRows, 'Nenhum centro de custo. Cadastre o primeiro para depois criar as obras.')}
+    <div class="panel-b row" style="justify-content:space-between;border-top:1px solid var(--line)"><h3>Obras</h3>${man ? `<button class="btn pri" data-act="prj-edit" ${S.costCenters.some(c => c.active !== false) ? '' : 'disabled title="Cadastre antes um centro de custo"'}>${ic('plus')}Nova obra</button>` : ''}</div>
+    ${tbl(['Obra', 'Descrição', 'Centro de custo', 'Local (lat, long)', 'Veículos agora', 'Situação', ''], pRows, 'Nenhuma obra cadastrada.')}
+    <p class="panel-b small muted">O local da obra (latitude e longitude) aparece no mapa e serve para identificar quando o veículo está no canteiro. No Google Maps, clique com o botão direito no local e copie as coordenadas.</p>`;
+}
+ACTIONS['cc-edit'] = a => {
+  const c = a.dataset.id ? byId(S.costCenters, a.dataset.id) : null;
+  openModal({
+    title: c ? 'Editar centro de custo' : 'Novo centro de custo',
+    body: `<form id="cc-form" class="form-grid"><label class="field"><span>Código</span><input class="inp" name="code" value="${esc(c?.code || '')}" placeholder="1015"></label><label class="field"><span>Descrição</span><input class="inp" name="name" value="${esc(c?.name || '')}" placeholder="Obras de Subestação"></label>
+      ${c ? `<label class="field"><span>Situação</span><select class="inp" name="active"><option value="1" ${c.active !== false ? 'selected' : ''}>Ativo</option><option value="0" ${c.active === false ? 'selected' : ''}>Inativo</option></select></label>` : ''}<p class="err full" id="cc-err"></p></form>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="cc-save" data-id="${c?.id || ''}">Salvar</button>`
+  });
+};
+ACTIONS['cc-save'] = a => {
+  const d = formData($('#cc-form')); const err = t => $('#cc-err').textContent = t;
+  if (!d.code || !d.name) return err('Informe código e descrição.');
+  if (S.costCenters.some(x => x.id !== a.dataset.id && String(x.code).toLowerCase() === d.code.toLowerCase())) return err('Já existe um centro de custo com este código.');
+  let c = a.dataset.id ? byId(S.costCenters, a.dataset.id) : null;
+  if (c) Object.assign(c, { code: d.code, name: d.name, active: d.active !== '0' });
+  else { c = { id: uid(), code: d.code, name: d.name, active: true }; S.costCenters.push(c); }
+  log('config', `Centro de custo ${d.code} – ${d.name} ${a.dataset.id ? 'alterado' : 'cadastrado'} por ${CUR.name}`, {}); save(); closeModal(); toast('Centro de custo salvo.'); render();
+};
+ACTIONS['prj-edit'] = a => {
+  const p = a.dataset.id ? byId(S.projects, a.dataset.id) : null;
+  openModal({
+    title: p ? 'Editar obra' : 'Nova obra',
+    body: `<form id="prj-form" class="form-grid"><label class="field"><span>Código</span><input class="inp" name="code" value="${esc(p?.code || '')}" placeholder="Obra 40"></label>
+      <label class="field"><span>Centro de custo</span><select class="inp" name="ccId">${S.costCenters.filter(c => c.active !== false || c.id === p?.ccId).map(c => `<option value="${c.id}" ${c.id === p?.ccId ? 'selected' : ''}>${esc(c.code)} – ${esc(c.name)}</option>`).join('')}</select></label>
+      <label class="field full"><span>Descrição</span><input class="inp" name="name" value="${esc(p?.name || '')}" placeholder="Cliente, local ou escopo"></label>
+      <label class="field full"><span>Local: latitude, longitude (opcional)</span><input class="inp mono" name="coords" value="${p && p.lat != null ? `${p.lat}, ${p.lng}` : ''}" placeholder="-22.90561, -47.06070" inputmode="text"><small><button type="button" class="link small" data-act="prj-here">Usar a minha localização atual</button></small></label>
+      ${p ? `<label class="field"><span>Situação</span><select class="inp" name="active"><option value="1" ${p.active ? 'selected' : ''}>Ativa</option><option value="0" ${!p.active ? 'selected' : ''}>Encerrada</option></select></label>` : ''}
+      <p class="err full" id="prj-err"></p></form>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="prj-save" data-id="${p?.id || ''}">Salvar</button>`
+  });
+};
+ACTIONS['prj-here'] = () => {
+  if (!navigator.geolocation) return toast('Localização indisponível neste navegador.');
+  navigator.geolocation.getCurrentPosition(pos => { const i = $('#prj-form [name=coords]'); if (i) i.value = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`; }, () => toast('Não foi possível obter a localização. Verifique a permissão.'), { enableHighAccuracy: true, timeout: 10000 });
+};
+ACTIONS['prj-save'] = a => {
+  const d = formData($('#prj-form')); const err = t => $('#prj-err').textContent = t;
+  if (!d.code || !d.name) return err('Informe código e descrição.');
+  if (!d.ccId) return err('Escolha o centro de custo.');
+  if (S.projects.some(x => x.id !== a.dataset.id && String(x.code).toLowerCase() === d.code.toLowerCase())) return err('Já existe uma obra com este código.');
+  let lat = null, lng = null;
+  if (d.coords) {
+    const m = d.coords.replace(/[()]/g, '').match(/^\s*(-?\d+(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d+(?:[.,]\d+)?)\s*$/);
+    if (!m) return err('Coordenadas inválidas. Use o formato -22.90561, -47.06070.');
+    lat = parseFloat(m[1].replace(',', '.')); lng = parseFloat(m[2].replace(',', '.'));
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return err('Coordenadas fora do intervalo válido.');
+  }
+  let p = a.dataset.id ? byId(S.projects, a.dataset.id) : null;
+  if (p) Object.assign(p, { code: d.code, name: d.name, ccId: d.ccId, lat, lng, active: d.active !== '0' });
+  else { p = { id: uid(), code: d.code, name: d.name, ccId: d.ccId, lat, lng, active: true }; S.projects.push(p); }
+  log('config', `Obra ${d.code} ${a.dataset.id ? 'alterada' : 'cadastrada'} por ${CUR.name}`, {}); save(); closeModal(); toast('Obra salva.'); render();
+};
 
 /* ---------- Login ---------- */
-PAGES.login = {
-  render() {
-    if (APP_MODE === 'cloud') return cloudLoginPage();
-    const persona = (uidv, note) => { const u = byId(S.users, uidv); return `<button class="persona" data-act="login-as" data-id="${u.id}"><span class="avatar">${initials(u.name)}</span><span><b>${esc(u.name)}</b><div class="meta">${ROLES[u.role]} · ${note}</div></span></button>`; };
-    return `<div class="login">
-      <div class="login-l"><div class="brand" style="border:0;padding:0">${brandMark()}<div><b>gestaovia</b><span>Gestão de frota e posse de veículos</span></div></div>
-        <div><h1 style="font-size:26px">Entrar</h1><p class="muted" style="margin-top:4px">Use seu e-mail corporativo.</p></div>
-        <form id="login-form" class="stack" style="max-width:380px;gap:12px">
-          <label class="field"><span>E-mail</span><input class="inp" name="email" type="email" autocomplete="username" value="ana.ribeiro@empresa.com.br"></label>
-          <label class="field"><span>Senha</span><input class="inp" name="pass" type="password" autocomplete="current-password" value="demonstracao"></label>
-          <p class="err" id="login-err"></p><button class="btn pri lg">Entrar</button>
-        </form>
-        <p class="small muted">Demonstração: os dados ficam só neste navegador.</p>${cloudConfigured() ? `<button class="btn" data-act="cl-back">${ic('key')}Entrar com meu usuário</button>` : ''}</div>
-      <div class="login-r"><div><p class="label">Perfis de demonstração</p><h2 style="margin-top:4px">Entre como um destes usuários</h2></div>
-        <div class="stack" style="gap:8px">
-          ${persona('u_gestor', 'visão completa e transferência forçada')}
-          ${persona('u_d1', 'está com o ABC1D23 na Obra 15')}
-          ${persona('u_d8', 'sem veículo: pode receber o MNO2P34')}
-          ${persona('u_d6', 'tem pedido de transferência do BRA2E19')}
-          ${persona('u_d7', 'aguarda o BRA2E19')}
-          ${persona('u_sup', 'acompanhamento, sem ações administrativas')}
-          ${persona('u_admin', 'regras, usuários e integrações')}
-        </div>
-        <p class="small muted">Para testar a transferência: entre como Tiago, escaneie o ABC1D23 e solicite; alterne para João no topo e faça a entrega; volte a Tiago e faça o recebimento.</p></div></div>`;
-  },
-  mount() {
-    if (APP_MODE === 'cloud') return mountCloudLogin();
-    $('#login-form').addEventListener('submit', e => { e.preventDefault(); const d = formData(e.target); const u = S.users.find(x => x.email.toLowerCase() === d.email.toLowerCase()); if (!u) return $('#login-err').textContent = 'E-mail não encontrado. Use um dos perfis de demonstração ao lado.'; if (u.active === false) return $('#login-err').textContent = 'Acesso inativo. Procure a gestão da frota.'; doLogin(u); });
-  }
-};
-ACTIONS['login-as'] = a => doLogin(byId(S.users, a.dataset.id));
-function doLogin(u) { CUR = u; try { sessionStorage.setItem('vialink-user', u.id); } catch (e) { } go(homePage()); }
+PAGES.login = { render: () => cloudLoginPage(), mount: () => mountCloudLogin() };
 
 /* ---------- Inicialização ---------- */
 function boot() {
-  let demo = false; try { demo = sessionStorage.getItem('vialink-mode') === 'demo'; } catch (x) { }
-  if (cloudConfigured() && !demo) return CLOUD.boot();
-  load();
-  try { const id = sessionStorage.getItem('vialink-user'); if (id) CUR = byId(S.users, id); } catch (e) { }
-  ROUTE = { page: CUR ? homePage() : 'login', p: {} };
-  try { history.replaceState(ROUTE, ''); } catch (e) { }
-  render();
-  TC.start().then(() => TC.paint());
+  if (!cloudConfigured()) { $('#app').innerHTML = '<div class="login"><div class="login-l"><h1>gestaovia</h1><p class="err">Configuração do servidor ausente. Gere o site com o build.py a partir do config.json.</p></div></div>'; return; }
+  try { history.replaceState({ page: 'login', p: {} }, ''); } catch (e) { }
+  CLOUD.boot();
 }
 boot();

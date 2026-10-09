@@ -18,7 +18,7 @@ const isDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches &
 function buildMap(el, vehicles, opts = {}) {
   if (!el) return null;
   if (!window.L) { el.innerHTML = '<div class="empty">Mapa indisponível: a biblioteca de mapas não carregou.</div>'; return null; }
-  const map = L.map(el, { scrollWheelZoom: false, zoomSnap: .5, fadeAnimation: false, zoomAnimation: true, attributionControl: true, minZoom: 9, maxZoom: 18 });
+  const map = L.map(el, { scrollWheelZoom: false, zoomSnap: .5, fadeAnimation: false, zoomAnimation: true, attributionControl: true, minZoom: 4, maxZoom: 19 });
   MAPS.push(map);
   map.createPane('vbase').style.zIndex = 150;
   map.createPane('vlabel').style.zIndex = 160;
@@ -30,13 +30,14 @@ function buildMap(el, vehicles, opts = {}) {
     L.geoJSON(BM.roads, { pane: 'vbase', interactive: false, style: { color: cssVar('--map-road'), weight: 3.5, opacity: 1 } }).addTo(map);
     BM.mun.features.forEach(f => L.marker(f.properties.c, { pane: 'vlabel', interactive: false, icon: L.divIcon({ className: '', html: `<div class="mlabel">${esc(f.properties.n)}</div>`, iconSize: [0, 0] }) }).addTo(map));
   }
-  // ruas reais quando a rede permite (Hostinger); no visualizador fica a base vetorial acima
-  const tl = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${isDark() ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`, { subdomains: 'abcd', maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' });
+  // ruas do OpenStreetMap: livre, sem conta e sem chave de acesso. No modo escuro as cores são invertidas por CSS.
+  // Sem internet ou se o serviço recusar, fica a base vetorial embutida acima (IBGE · Natural Earth).
+  const tl = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'osm-tiles', attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' });
   let failed = 0;
   tl.on('tileerror', () => { if (++failed === 1) { map.removeLayer(tl); map.attributionControl.addAttribution('Base: IBGE · Natural Earth'); } });
   tl.addTo(map);
   const pts = [];
-  if (opts.projects !== false) S.projects.filter(p => p.active).forEach(p => {
+  if (opts.projects !== false) S.projects.filter(p => p.active && p.lat != null && p.lng != null).forEach(p => {
     L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html: `<div class="ppin"></div><div class="mlabel proj">${esc(p.code)}</div>`, iconSize: [0, 0] }) }).bindTooltip(`${esc(p.code)} · ${esc(p.name)}`).addTo(map);
     if (!opts.fitVehiclesOnly) pts.push([p.lat, p.lng]);
   });
@@ -57,7 +58,7 @@ function buildMap(el, vehicles, opts = {}) {
 const vehicleIcon = (v, st) => L.divIcon({ className: '', html: `<div class="vpin"><i style="background:${statusHex(V_STATUS[st].c)}"></i><b>${v.plate}</b></div>`, iconSize: [0, 0] });
 function vehiclePopup(v, loc) {
   const st = vStatus(v); const c = activeCustody(v.id); const seg = currentSegment(c); const t = S.locations[v.id];
-  return `<div class="map-pop"><b>${v.plate}</b> · ${esc(v.model)}<br>${stTag(st)}<br>${c ? `${esc(drv(c.driverId).name)} · ${seg ? esc(prj(seg.projectId).code) : 'sem obra'}<br>` : ''}<span class="muted">${esc(loc.what)} · ${fmtShort(loc.at)}</span>${t?.source === 'traccar' && v.tracker ? `<br><span class="muted">Hodômetro ${nf(v.odometer)} km · ignição ${t.ignition ? 'ligada' : 'desligada'}</span>` : ''}<br><button class="link" data-go="veiculo" data-id="${v.id}">Abrir veículo</button></div>`;
+  return `<div class="map-pop"><b>${v.plate}</b> · ${esc(v.model)}<br>${stTag(st)}<br>${c ? `${esc(drv(c.driverId).name)} · ${seg ? esc(prj(seg.projectId).code) : 'sem obra'}<br>` : ''}<span class="muted">${esc(loc.what)} · ${fmtShort(loc.at)}</span><br><button class="link" data-go="veiculo" data-id="${v.id}">Abrir veículo</button></div>`;
 }
 const mapLegend = () => `<div class="map-legend">${['em_uso', 'disponivel', 'aguardando_transferencia', 'manutencao', 'bloqueado'].map(k => `<span class="st"><span class="dot ${V_STATUS[k].c}"></span>${V_STATUS[k].l}</span>`).join('')}<span class="st"><span class="ppin" style="transform:none;display:inline-block;width:11px;height:11px"></span>Obra</span></div>`;
 
@@ -83,7 +84,7 @@ PAGES.dashboard = {
           <div class="panel-b"><div class="fleet-map" id="dash-map" role="img" aria-label="Mapa com a posição dos veículos"></div>${mapLegend()}</div></div>
         <div class="panel"><div class="panel-h"><h2>Status dos veículos</h2><button class="link small" data-go="veiculos">Ver todos</button></div>
           <div class="vlist">${vs.map(v => { const st = vStatus(v); const c = activeCustody(v.id); const seg = currentSegment(c); const loc = lastLocation(v.id);
-            return `<div class="vrow" data-go="veiculo" data-id="${v.id}">${plate(v.plate)}<div class="who2"><b>${c ? esc(drv(c.driverId).name) : V_STATUS[st].l}</b><small>${c ? `${seg ? esc(prj(seg.projectId).code) : 'Sem obra'} · desde ${fmtShort(c.start)}` : loc ? `${esc(nearestPlace(loc))}` : esc(v.model)}</small></div><span class="dot ${V_STATUS[st].c}" title="${V_STATUS[st].l}"></span></div>`; }).join('')}</div></div>
+            return `<div class="vrow" data-go="veiculo" data-id="${v.id}">${plate(v.plate)}<div class="who2"><b>${c ? esc(drv(c.driverId).name) : V_STATUS[st].l}</b><small>${c ? `${seg ? esc(prj(seg.projectId).code) : 'Sem obra'} · desde ${fmtShort(c.start)}` : loc ? `${esc(nearestPlace(loc))}` : esc(v.model)}</small></div><span class="dot ${V_STATUS[st].c}" title="${V_STATUS[st].l}"></span></div>`; }).join('') || `<div class="panel-b muted">Nenhum veículo cadastrado. ${isManager() ? '<button class="link" data-go="veiculos">Cadastrar o primeiro</button>' : ''}</div>`}</div></div>
       </div>
       <div class="panel"><div class="panel-h"><h2>Condutores em posse</h2><span class="pill blue">${inUse.length}</span></div>
         <div class="panel-b"><div class="cards">${inUse.map(c => { const v = veh(c.vehicleId); const d = drv(c.driverId); const seg = currentSegment(c); const dly = dailyDoneToday(v.id);
@@ -149,7 +150,6 @@ function vehicleForm(v = {}) {
       <label class="field"><span>Ocupantes (lugares)</span><input class="inp num" name="seats" type="number" min="1" max="20" value="${v.seats || 5}"></label>
       <label class="field"><span>Quilometragem atual</span><input class="inp num" name="odometer" inputmode="numeric" value="${v.odometer ?? ''}"></label>
       <label class="field"><span>Consumo de referência (km/l)</span><input class="inp num" name="avgKmL" inputmode="decimal" value="${v.avgKmL ? nf(v.avgKmL, 1) : '10'}"></label>
-      <label class="field"><span>Rastreador</span><select class="inp" name="tracker"><option value="1" ${v.tracker !== false ? 'selected' : ''}>Instalado</option><option value="0" ${v.tracker === false ? 'selected' : ''}>Não</option></select></label>
     </div>
     <div class="field"><span>Tipo de frota</span><div class="seg"><label><input type="radio" name="ownership" value="propria" ${!loc ? 'checked' : ''}><span>Frota própria</span></label><label><input type="radio" name="ownership" value="locada" ${loc ? 'checked' : ''}><span>${ic('key')} Locada</span></label></div></div>
     <div id="rent-box" class="panel" style="box-shadow:none;background:var(--surface2)" ${loc ? '' : 'hidden'}><div class="panel-b form-grid" style="padding-top:14px">
@@ -182,7 +182,7 @@ ACTIONS['veh-save'] = a => {
     if (parseDate(d.dueDate) <= parseDate(d.pickupDate)) return err('O prazo de devolução deve ser depois da retirada.');
     rental = { ...(edit?.rental || { history: [] }), company: d.company, contract: d.contract, pickupDate: parseDate(d.pickupDate), dueDate: parseDate(d.dueDate), monthly: numv(d.monthly) || 0, status: 'ativa' };
   }
-  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: d.tracker === '1', ownership: d.ownership, rental };
+  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: edit?.tracker ?? false, ownership: d.ownership, rental };
   if (edit) { Object.assign(edit, fields); log('cadastro', `Cadastro do veículo atualizado por ${CUR.name}`, { vehicleId: edit.id }); save(); closeModal(); toast('Veículo atualizado.'); return render(); }
   const id = uid('veh');
   S.vehicles.push({ id, plate: p, ...fields, maintenance: false, active: true });
@@ -281,7 +281,7 @@ PAGES.veiculo = {
       <div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="veiculo" data-id="${id}" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div>
     </div>`;
   },
-  mount({ id }) { const el = $('#veh-map'); if (el) { const m = buildMap(el, [veh(id)], { projects: true, fitVehiclesOnly: true, zoom: 13 }); if (veh(id).traccarId && S.settings.traccar.mode !== 'off') drawTodayRoute(m, id); } PAGES.veiculo._mountPlan?.(id); }
+  mount({ id }) { const el = $('#veh-map'); if (el) { const m = buildMap(el, [veh(id)], { projects: true, fitVehiclesOnly: true, zoom: 13 }); drawTodayRoute(m, id); } PAGES.veiculo._mountPlan?.(id); }
 };
 ACTIONS['iss-resolve'] = a => {
   const i = byId(S.issues, a.dataset.id);
@@ -425,14 +425,13 @@ ACTIONS['drv-save'] = a => {
   if (other) return err('Este e-mail já está em uso por outro usuário.');
   const fields = { name: d.name, cnh: d.cnh.replace(/\D/g, ''), cnhCat: d.cnhCat, cnhExp: parseDate(d.cnhExp), phone: d.phone };
   if (edit) {
-    Object.assign(edit, fields); const u = S.users.find(x => x.driverId === edit.id); if (u) { u.name = d.name; u.email = d.email; }
+    Object.assign(edit, fields);
     log('cadastro', `Cadastro do condutor ${edit.name} atualizado por ${CUR.name}`, { driverId: edit.id }); save(); closeModal(); toast('Condutor atualizado.');
     if (APP_MODE === 'cloud') cloudDriverAccess(edit, d.email, false).then(render);
     return render();
   }
   const id = uid('drv');
   S.drivers.push({ id, ...fields, active: true, telemetry: { avarias: 0, harsh: 0, speeding: 0 }, createdAt: nowTs() });
-  if (APP_MODE !== 'cloud') S.users.push({ id: 'u_' + id, name: d.name, role: 'condutor', driverId: id, email: d.email, active: true });
   log('cadastro', `Condutor ${d.name} cadastrado por ${CUR.name}`, { driverId: id });
   save(); closeModal();
   if (APP_MODE === 'cloud') { a.disabled = true; cloudDriverAccess(drv(id), d.email, true).then(() => go('condutor', { id })); return; }

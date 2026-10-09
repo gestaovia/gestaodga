@@ -61,7 +61,7 @@ const NAV = [
   { g: 'Gestão', items: [['bonificacao', 'Premiação', 'trophy'], ['relatorios', 'Relatórios', 'report']] },
   { g: 'Sistema', items: [['configuracoes', 'Configurações', 'gear']] }
 ];
-const PAGE_ROLES = { configuracoes: ['admin'] };
+const PAGE_ROLES = { configuracoes: ['admin', 'gestor'] };
 const isManager = () => CUR && ['admin', 'gestor'].includes(CUR.role);
 const isStaff = () => CUR && CUR.role !== 'condutor';
 const canPage = page => !PAGE_ROLES[page] || PAGE_ROLES[page].includes(CUR.role);
@@ -86,23 +86,17 @@ function render() {
   let pg = PAGES[ROUTE.page];
   if (!pg || (!pg.driver && CUR.role === 'condutor') || !canPage(ROUTE.page)) { ROUTE = { page: homePage(), p: {} }; pg = PAGES[ROUTE.page]; }
   const body = pg.render(ROUTE.p);
-  const demo = demoBar();
   if (CUR.role === 'condutor') {
-    root.innerHTML = `${demo}<div class="drv-shell">${driverTop()}${body}</div>`;
+    root.innerHTML = `<div class="drv-shell">${driverTop()}${body}</div>`;
   } else {
     const rb = pg.rightbar ? pg.rightbar(ROUTE.p) : '';
-    root.innerHTML = `${demo}<div class="app">${sidebar()}${SIDE_OPEN ? '<div class="scrim" data-act="side-close"></div>' : ''}<div class="main">${topbar(pg)}<div class="body-wrap ${rb ? 'with-rb' : ''}"><div class="content">${body}</div>${rb ? `<aside class="rightbar">${rb}</aside>` : ''}</div></div></div>`;
+    root.innerHTML = `<div class="app">${sidebar()}${SIDE_OPEN ? '<div class="scrim" data-act="side-close"></div>' : ''}<div class="main">${topbar(pg)}<div class="body-wrap ${rb ? 'with-rb' : ''}"><div class="content">${body}</div>${rb ? `<aside class="rightbar">${rb}</aside>` : ''}</div></div></div>`;
   }
   pg.mount?.(ROUTE.p);
+  if (CUR.role === 'condutor') GPS.refresh();
 }
 const homePage = () => CUR.role === 'condutor' ? 'inicio' : 'dashboard';
 
-function demoBar() {
-  if (APP_MODE === 'cloud') return '';
-  const opts = S.users.filter(u => u.active).map(u => `<option value="${u.id}" ${u.id === CUR.id ? 'selected' : ''}>${esc(u.name)} — ${ROLES[u.role]}</option>`).join('');
-  return `<div class="demo-bar"><b>Protótipo</b><span>dados de demonstração</span>
-    <label class="row" style="gap:6px;margin-left:auto"><span>Entrar como</span><select id="demo-user" aria-label="Alternar usuário">${opts}</select></label>${cloudConfigured() ? '<button class="btn sm" data-act="cl-back">Sair da demonstração</button>' : ''}</div>`;
-}
 function sidebar() {
   const counts = { transferencias: S.transfers.filter(t => !['concluida', 'cancelada'].includes(t.status)).length, dashboard: attentionItems().filter(a => ['bad', 'urg'].includes(a.c)).length };
   const groups = NAV.map(g => {
@@ -112,7 +106,7 @@ function sidebar() {
   }).join('');
   return `<aside class="side ${SIDE_OPEN ? 'open' : ''}"><div class="brand">${brandMark()}<div><b>gestaovia</b><span>Gestão de frota</span></div></div>
     <nav class="nav" aria-label="Menu principal">${groups}</nav>
-    <div class="side-foot"><span class="avatar">${initials(CUR.name)}</span><div style="flex:1;min-width:0"><b style="color:var(--text2);display:block">${esc(CUR.name)}</b>${ROLES[CUR.role]}</div><button class="icon-btn" data-act="logout" aria-label="Sair" title="Sair">${ic('logout')}</button></div></aside>`;
+    <div class="side-foot"><span class="avatar">${initials(CUR.name)}</span><div style="flex:1;min-width:0"><b style="color:var(--text2);display:block">${esc(CUR.name)}</b>${roleLabel(CUR)}</div><button class="icon-btn" data-act="logout" aria-label="Sair" title="Sair">${ic('logout')}</button></div></aside>`;
 }
 const brandMark = () => `<div class="brand-mark">${ic('car')}</div>`;
 const PARENT = { veiculo: 'veiculos', condutor: 'condutores', transferencia: 'transferencias', scan_result: 'veiculos', checklist_view: 'checklists', forcar: 'transferencias', checklist_full: 'manutencao', scanner: 'veiculos', abastecer: 'abastecimento', obra: 'veiculos', problema: 'veiculos' };
@@ -165,7 +159,7 @@ function photoSrc(p, label = '') {
   if (p.startsWith('data:') || p.startsWith('http')) return p;
   if (p.startsWith('sb:')) { const u = CLOUD.fileUrl(p); if (u) return u; label = 'Foto indisponível'; p = 'x:'; }
   const lab = { frontal: 'Frontal', traseira: 'Traseira', lat_dir: 'Lateral dir.', lat_esq: 'Lateral esq.', painel: 'Painel', cupom: 'Cupom fiscal' }[p.split(':')[1]] || label;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 160 120"><rect width="160" height="120" fill="#C9CED3"/><path d="M28 80h104M36 80v-16l10-18h68l10 18v16" stroke="#7B838B" stroke-width="3" fill="none"/><circle cx="54" cy="84" r="9" fill="#7B838B"/><circle cx="106" cy="84" r="9" fill="#7B838B"/><text x="80" y="22" font-family="sans-serif" font-size="12" fill="#3E454C" text-anchor="middle">${lab}${p === 'x:' ? '' : ' (exemplo)'}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 160 120"><rect width="160" height="120" fill="#C9CED3"/><path d="M28 80h104M36 80v-16l10-18h68l10 18v16" stroke="#7B838B" stroke-width="3" fill="none"/><circle cx="54" cy="84" r="9" fill="#7B838B"/><circle cx="106" cy="84" r="9" fill="#7B838B"/><text x="80" y="22" font-family="sans-serif" font-size="12" fill="#3E454C" text-anchor="middle">${lab}</text></svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 function thumbs(photos) {
@@ -204,15 +198,11 @@ document.addEventListener('click', e => {
   if (act === 'side-open') { SIDE_OPEN = true; render(); }
   else if (act === 'side-close') { SIDE_OPEN = false; render(); }
   else if (act === 'modal-close') closeModal();
-  else if (act === 'logout' && APP_MODE === 'cloud') CLOUD.leave();
-  else if (act === 'logout') { CUR = null; try { sessionStorage.removeItem('vialink-user'); } catch (x) { } go('login'); }
+  else if (act === 'logout') CLOUD.leave();
   else if (act === 'notifs') showNotifications();
   else if (act === 'theme') { const t = themeNow() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, t); } catch (x) { } applyTheme(t); render(); }
   else if (act === 'photo') { openModal({ title: 'Foto', body: `<img src="${e.target.src}" alt="" style="width:100%">`, wide: true }); }
   else if (ACTIONS[act]) ACTIONS[act](a, e);
-});
-document.addEventListener('change', e => {
-  if (e.target.id === 'demo-user') { CUR = byId(S.users, e.target.value); try { sessionStorage.setItem('vialink-user', CUR.id); } catch (x) { } go(homePage()); toast(`Agora você está como ${CUR.name} (${ROLES[CUR.role]}).`); }
 });
 const ACTIONS = {};
 
@@ -233,7 +223,7 @@ function ccOptions(sel) { return S.costCenters.map(c => `<option value="${c.id}"
 function purposeOptions(sel) { return PURPOSES.map(p => `<option ${p === sel ? 'selected' : ''}>${p}</option>`).join(''); }
 function driverOptions(sel, filter = () => true) { return S.drivers.filter(filter).map(d => `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${esc(d.name)}</option>`).join(''); }
 
-// redimensiona a foto para caber no armazenamento do protótipo
+// redimensiona a foto antes do envio (economiza dados móveis e armazenamento)
 function readPhoto(file, maxW = 640) {
   return new Promise((res, rej) => {
     const fr = new FileReader();

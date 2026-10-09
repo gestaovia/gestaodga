@@ -3,6 +3,7 @@
 // A chave de serviço (SUPABASE_SERVICE_ROLE_KEY) existe só aqui, no servidor.
 //   admin  : gerencia qualquer usuário
 //   gestor : gerencia somente condutores
+//   proprietário: só ele mesmo altera o próprio acesso; ninguém o inativa ou rebaixa
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
@@ -32,7 +33,7 @@ Deno.serve(async (req) => {
   if (!user) return fail("Sessão expirada. Entre novamente.", 401);
 
   const db = createClient(SB_URL, SERVICE_KEY, { auth: { persistSession: false } });
-  const { data: me } = await db.from("profiles").select("id, role, active").eq("id", user.id).maybeSingle();
+  const { data: me } = await db.from("profiles").select("id, role, active, is_owner").eq("id", user.id).maybeSingle();
   if (!me?.active || !["admin", "gestor"].includes(me.role)) return fail("Sem permissão para gerenciar usuários.", 403);
   const isAdmin = me.role === "admin";
 
@@ -77,6 +78,7 @@ Deno.serve(async (req) => {
     const { data: target } = await db.from("profiles").select("*").eq("id", id).maybeSingle();
     if (!target) return fail("Usuário não encontrado.", 404);
     if (!isAdmin && target.role !== "condutor") return fail("O gestor gerencia apenas condutores.", 403);
+    if (target.is_owner && id !== me.id) return fail("O acesso do proprietário só pode ser alterado por ele mesmo.", 403);
 
     if (action === "reset_password") {
       const password = String(body.password ?? "");
@@ -101,6 +103,7 @@ Deno.serve(async (req) => {
       patch.driver_id = d;
     }
     if (body.active !== undefined) patch.active = !!body.active;
+    if (target.is_owner && (patch.active === false || (patch.role && patch.role !== "admin"))) return fail("O proprietário não pode ser inativado nem mudar de perfil.");
     if (body.email !== undefined) {
       const e = String(body.email).trim().toLowerCase();
       if (!EMAIL.test(e)) return fail("Informe um e-mail válido.");
