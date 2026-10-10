@@ -13,7 +13,7 @@ const kpi = (label, value, icon, cls = '', go = '', sub = '') => `<button class=
 let MAPS = [];
 function destroyMaps() { MAPS.forEach(m => { try { m.remove(); } catch (e) { } }); MAPS = []; }
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const statusHex = c => ({ ok: cssVar('--green'), neu: cssVar('--blue'), warn: cssVar('--yellow'), urg: cssVar('--orange'), bad: cssVar('--red'), gray: cssVar('--text3') }[c] || cssVar('--text3'));
+const statusHex = c => ({ 'vs-free': cssVar('--u-yellow'), 'vs-drv': cssVar('--u-green'), 'vs-prob': cssVar('--u-red'), ok: cssVar('--green'), neu: cssVar('--blue'), warn: cssVar('--yellow'), urg: cssVar('--orange'), bad: cssVar('--red'), gray: cssVar('--text3') }[c] || cssVar('--text3'));
 const isDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.dataset.theme !== 'light' || document.documentElement.dataset.theme === 'dark';
 function buildMap(el, vehicles, opts = {}) {
   if (!el) return null;
@@ -60,7 +60,7 @@ function vehiclePopup(v, loc) {
   const st = vStatus(v); const c = activeCustody(v.id); const seg = currentSegment(c); const t = S.locations[v.id];
   return `<div class="map-pop"><b>${v.plate}</b> · ${esc(v.model)}<br>${stTag(st)}<br>${c ? `${esc(drv(c.driverId).name)} · ${seg ? esc(prj(seg.projectId).code) : 'sem obra'}<br>` : ''}<span class="muted">${esc(loc.what)} · ${fmtShort(loc.at)}</span><br><button class="link" data-go="veiculo" data-id="${v.id}">Abrir veículo</button></div>`;
 }
-const mapLegend = () => `<div class="map-legend">${['em_uso', 'disponivel', 'aguardando_transferencia', 'manutencao', 'bloqueado'].map(k => `<span class="st"><span class="dot ${V_STATUS[k].c}"></span>${V_STATUS[k].l}</span>`).join('')}<span class="st"><span class="ppin" style="transform:none;display:inline-block;width:11px;height:11px"></span>Obra</span></div>`;
+const mapLegend = () => `<div class="map-legend">${VS_LEGEND.map(([c, l]) => `<span class="st"><span class="dot ${c}"></span>${l}</span>`).join('')}<span class="st"><span class="ppin" style="transform:none;display:inline-block;width:11px;height:11px"></span>Obra</span></div>`;
 
 /* ===================== Painel (dashboard) ===================== */
 PAGES.dashboard = {
@@ -73,8 +73,8 @@ PAGES.dashboard = {
     return `<div class="stack">
       <div class="kpis">
         ${kpi('Veículos', k.total, 'car', '', 'data-go="veiculos"', `${k.locados} locados`)}
-        ${kpi('Em uso', k.emUso, 'road', 'c-blue', 'data-go="veiculos" data-f="em_uso"', `${inUse.length} condutores`)}
-        ${kpi('Disponíveis', k.disp, 'check', 'c-green', 'data-go="veiculos" data-f="disponivel"')}
+        ${kpi('Em uso', k.emUso, 'road', 'vs-drv', 'data-go="veiculos" data-f="em_uso"', `${inUse.length} condutores`)}
+        ${kpi('Disponíveis', k.disp, 'check', 'vs-free', 'data-go="veiculos" data-f="disponivel"')}
         ${kpi('Manutenção', k.manut, 'wrench', k.manutVenc ? 'c-red' : '', 'data-go="calendario"', `${k.manutVenc} vencida(s)`)}
         ${kpi('Alertas', crit, 'alert', crit ? 'c-red' : '', 'data-go="dashboard" data-f="alertas"', `${att.length} no total`)}
         ${kpi('Locações', k.locVence, 'key', k.locVence ? 'c-amber' : '', 'data-go="veiculos" data-f="locada"', 'vencendo em 30 dias')}
@@ -108,7 +108,8 @@ PAGES.dashboard = {
 
 /* ===================== Veículos ===================== */
 const VFILTERS = {
-  '': ['Todos', () => true], em_uso: ['Em uso', v => !!activeCustody(v.id)], disponivel: ['Disponíveis', v => vStatus(v) === 'disponivel'],
+  '': ['Todos', () => true], em_uso: ['Com condutor', v => !!activeCustody(v.id), 'vs-drv'], disponivel: ['Disponíveis', v => vStatus(v) === 'disponivel', 'vs-free'],
+  problema: ['Com problema', v => ['bloqueado', 'pendencia'].includes(vStatus(v)), 'vs-prob'],
   manutencao: ['Manutenção', v => v.maintenance || vehicleMaint(v.id).worst === 'vencido'], alerta: ['Com alerta', v => openIssues(v.id).length > 0 || needsDaily(v) || !!(activeCustody(v.id) && !activeCustody(v.id).segments.length)],
   propria: ['Próprios', v => v.ownership !== 'locada'], locada: ['Locados', v => v.ownership === 'locada']
 };
@@ -117,7 +118,7 @@ function vehicleCard(v) {
   const st = vStatus(v); const c = activeCustody(v.id); const seg = currentSegment(c); const mt = vehicleMaint(v.id); const rs = rentalState(v);
   const nx = mt.next; const pct = nx ? Math.max(0, Math.min(100, 100 - nx.s.remKm / nx.p.everyKm * 100)) : 0;
   return `<div class="vcard" data-go="veiculo" data-id="${v.id}">
-    <div class="h"><div>${plate(v.plate)}<div class="model">${esc(v.brand)} ${esc(v.model)} · ${v.year}</div></div><span class="pill ${V_STATUS[st].c === 'gray' ? '' : V_STATUS[st].c === 'neu' ? 'blue' : V_STATUS[st].c}">${V_STATUS[st].l}</span></div>
+    <div class="h"><div>${plate(v.plate)}<div class="model">${esc(v.brand)} ${esc(v.model)} · ${v.year}</div></div><span class="pill ${V_STATUS[st].c === 'gray' ? '' : V_STATUS[st].c}">${V_STATUS[st].l}</span></div>
     <div class="person">${c ? `${av(drv(c.driverId))}<div style="min-width:0"><b>${esc(drv(c.driverId).name)}</b><small>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</small></div>` : `<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span><div><b class="muted">Sem condutor</b><small>${v.maintenance ? 'Na oficina' : 'No pátio'}</small></div>`}</div>
     ${nx ? `<div><div class="row small" style="justify-content:space-between;margin-bottom:5px"><span class="muted">${esc(nx.p.item)}</span><b class="num" style="color:${nx.s.lvl === 'normal' ? 'var(--text2)' : `var(--${{ atencao: 'yellow', urgente: 'orange', vencido: 'red' }[nx.s.lvl]})`}">${nx.s.remKm > 0 ? `${nf(nx.s.remKm)} km` : 'vencida'}</b></div><div class="bar ${M_LEVEL[nx.s.lvl].c}"><i style="width:${pct}%"></i></div></div>` : ''}
     <div class="foot"><span class="tags">${ownTag(v)}${seatsTag(v)}${docBadge(v)}</span><span class="num">${km(v.odometer)}</span></div>
@@ -128,7 +129,7 @@ PAGES.veiculos = {
   title: 'Veículos',
   render({ f = '' }) {
     const list = S.vehicles.filter(v => v.active).filter(VFILTERS[f]?.[1] || (() => true)).filter(v => !VSEARCH || (v.plate + v.model + v.brand).toLowerCase().includes(VSEARCH.toLowerCase()));
-    return `<div class="page-head"><div class="filters">${Object.entries(VFILTERS).map(([k, [l, fn]]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="veiculos" data-f="${k}">${l}<span class="n">${S.vehicles.filter(v => v.active).filter(fn).length}</span></button>`).join('')}</div>
+    return `<div class="page-head"><div class="filters">${Object.entries(VFILTERS).map(([k, [l, fn, dc]]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="veiculos" data-f="${k}">${dc ? `<span class="dot ${dc}"></span>` : ''}${l}<span class="n">${S.vehicles.filter(v => v.active).filter(fn).length}</span></button>`).join('')}</div>
       <div class="row"><input class="inp" id="v-search" placeholder="Buscar placa ou modelo" value="${esc(VSEARCH)}" style="width:210px;min-height:36px" aria-label="Buscar veículo">${isManager() ? `<button class="btn pri" data-act="veh-new">${ic('plus')}Cadastrar</button>` : ''}</div></div>
       <div class="cards" id="v-cards">${list.map(vehicleCard).join('') || empty('Nenhum veículo neste filtro.')}</div>`;
   },

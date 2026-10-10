@@ -7,7 +7,7 @@ import json, pathlib, re, sys
 ROOT = pathlib.Path(__file__).resolve().parent
 SRC = ROOT / 'src'
 ORDER = ['01-core.js', '02-logic.js', '03-shell.js', '04-driver.js', '05-manager.js', '07-calendar.js',
-         '08-gps.js', '09-docs.js', '10-pdf.js', '11-cloud.js', '12-perfil.js', '13-relatorios.js', '06-modules.js']
+         '08-gps.js', '09-docs.js', '10-pdf.js', '11-cloud.js', '12-perfil.js', '13-relatorios.js', '14-premiacao.js', '15-oficinas-seguro.js', '16-consulta-data.js', '06-modules.js']
 
 cfg = json.loads((ROOT / 'config.json').read_text(encoding='utf-8'))
 VERSION = (ROOT / 'VERSION').read_text(encoding='utf-8').strip() if (ROOT / 'VERSION').exists() else ''
@@ -46,7 +46,7 @@ head = f'''<title>GestaoVia | Sistema de Controle de Frotas</title>
 <meta http-equiv="Content-Security-Policy" content="{CSP}">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <link rel="icon" type="image/png" sizes="32x32" href="{FAV32}"><link rel="icon" type="image/png" sizes="192x192" href="{FAV192}">
-<link rel="apple-touch-icon" href="icons/icon-180.png?v={VERSION}"><link rel="manifest" href="manifest.webmanifest?v={VERSION}">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v={VERSION}"><link rel="manifest" href="manifest.webmanifest?v={VERSION}">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="GestaoVia">
 ''' + '''<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=Geist+Mono:wght@500;700&display=swap">

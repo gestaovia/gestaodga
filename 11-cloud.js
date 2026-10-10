@@ -288,7 +288,7 @@ const CLOUD = {
     if (!this.on) return;
     if (force && !skipFlush) { clearTimeout(this.timer); await this.flush(); }
     if (this.busy) { if (!force) return; await this.busy; }
-    if (!force && (DRAFT || $('#modal') || this.diff().some(o => this.allowed(o)))) return;
+    if (!force && (DRAFT || FORM_DIRTY || $('#modal') || this.diff().some(o => this.allowed(o)))) return;
     const before = stable([...Object.values(this.base)].map(m => [...m.entries()]));
     const keepCur = CUR?.id;
     await this.loadAll();

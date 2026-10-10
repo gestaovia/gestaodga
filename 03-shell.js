@@ -81,15 +81,44 @@ function go(page, p = {}, opts = {}) {
   ROUTE = { page, p };
   if (CUR && page !== 'login') { try { sessionStorage.setItem('gv-route', JSON.stringify({ page, p })); } catch (e) { } }
   if (!opts.keepDraft) DRAFT = null;
+  FORM_DIRTY = false;
   SIDE_OPEN = false;
   if (!opts.noPush) { try { history.pushState({ page, p }, ''); } catch (e) { } }
   render();
   window.scrollTo(0, 0);
 }
-window.addEventListener('popstate', e => { if (e.state && CUR) { ROUTE = e.state; DRAFT = null; render(); } });
+window.addEventListener('popstate', e => {
+  if (!e.state || !CUR) return;
+  // voltar do navegador/celular com formulário preenchido: fica na tela e pergunta antes
+  if (FORM_DIRTY) { const back = e.state; try { history.pushState({ page: ROUTE.page, p: ROUTE.p }, ''); } catch (x) { } return confirmLeave(() => { FORM_DIRTY = false; ROUTE = back; DRAFT = null; render(); window.scrollTo(0, 0); }); }
+  ROUTE = e.state; DRAFT = null; render();
+});
+
+/* ----- formulário em andamento: só sai por Cancelar ou concluindo -----
+   Ao digitar ou escolher algo num formulário da tela, cliques fora dele (menu, voltar, outras telas,
+   sair, recarregar) pedem confirmação. Janelas (modais) não fecham ao clicar fora. */
+let FORM_DIRTY = false, LEAVE_FN = null;
+const GUARD_SKIP = new Set(['code-form', 'cl-form', 'pw-form']);
+function markDirty(e) {
+  const f = e.target?.closest?.('form');
+  if (!f || !CUR || f.closest('#modal') || !f.closest('#app') || GUARD_SKIP.has(f.id)) return;
+  FORM_DIRTY = true;
+}
+document.addEventListener('input', markDirty, true);
+document.addEventListener('change', markDirty, true);
+window.addEventListener('beforeunload', e => { if (FORM_DIRTY && CLOUD.on) { e.preventDefault(); e.returnValue = ''; } });
+function confirmLeave(fn) {
+  LEAVE_FN = fn;
+  openModal({
+    title: 'Sair sem concluir?',
+    body: '<p>Você começou a preencher esta tela. Se sair agora, o que foi preenchido será perdido.</p>',
+    foot: '<button class="btn" data-act="modal-close">Continuar preenchendo</button><button class="btn danger" data-act="leave-ok">Sair sem salvar</button>'
+  });
+}
 
 function render() {
   const root = $('#app');
+  if (!DRAFT) FORM_DIRTY = false; // a tela é redesenhada a partir dos dados salvos (rascunhos do condutor continuam)
   stopCamera(); if (typeof destroyMaps === "function") destroyMaps();
   if (!CUR || ROUTE.page === 'login') { root.innerHTML = PAGES.login.render() + themeBtn('theme-fab'); PAGES.login.mount?.(); return; }
   let pg = PAGES[ROUTE.page];
@@ -126,7 +155,8 @@ const orgLogoOk = l => typeof l === 'string' && /^data:image\/(png|jpeg|webp);ba
 function orgBrand(compact) {
   const o = orgOf(); const nm = o.displayName || o.name || '';
   const org = orgLogoOk(o.logo) ? `<img class="org-logo sm" src="${o.logo}" alt="">` : '';
-  if (compact) return `<span class="brand-c">${brandMark()}<span style="min-width:0"><b>GestaoVia</b>${nm ? `<small>${esc(nm)}</small>` : ''}</span>${org}</span>`;
+  // topo do celular: logo GestaoVia + nome; a empresa (logo pequena e nome) fica na linha de baixo, sem sobrepor
+  if (compact) return `<span class="brand-c">${brandMark()}<span class="brand-tx"><b>GestaoVia</b>${nm || org ? `<small>${org}${nm ? `<span>${esc(nm)}</span>` : ''}</small>` : ''}</span></span>`;
   return `${brandMark()}<div style="min-width:0;flex:1"><b style="display:block">GestaoVia</b><span>${APP_VERSION ? `v${APP_VERSION}` : 'Controle de frotas'}</span></div>`;
 }
 function orgLine() { const o = orgOf(); const nm = o.displayName || o.name || ''; const org = orgLogoOk(o.logo) ? `<img class="org-logo sm" src="${o.logo}" alt="">` : ''; return nm || org ? `<div class="org-line" title="${esc(o.name || nm)}">${org}<span>${esc(nm)}</span></div>` : ''; }
@@ -199,7 +229,8 @@ function openModal({ title, body, foot = '', wide = false, onMount }) {
   const el = document.createElement('div');
   el.className = 'modal-bg'; el.id = 'modal';
   el.innerHTML = `<div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-h"><h2>${esc(title)}</h2><button class="x-btn" data-act="modal-close" aria-label="Fechar">×</button></div><div class="modal-b">${body}</div>${foot ? `<div class="modal-f">${foot}</div>` : ''}</div>`;
-  el.addEventListener('click', e => { if (e.target === el) closeModal(); });
+  // clicar fora não fecha: só Cancelar, o X ou concluir a ação. A janela balança para indicar isso.
+  el.addEventListener('click', e => { if (e.target !== el) return; const m = el.firstElementChild; m.classList.remove('nudge'); void m.offsetWidth; m.classList.add('nudge'); });
   document.body.appendChild(el);
   onMount?.(el);
   return el;
@@ -215,16 +246,22 @@ function toast(msg) {
 /* ----- eventos globais ----- */
 document.addEventListener('click', e => {
   const g = e.target.closest('[data-go]');
-  if (g) { e.preventDefault(); const p = {}; Object.entries(g.dataset).forEach(([k, v]) => { if (k !== 'go') p[k] = v; }); closeModal(); go(g.dataset.go, p); return; }
+  if (g) {
+    e.preventDefault(); const p = {}; Object.entries(g.dataset).forEach(([k, v]) => { if (k !== 'go') p[k] = v; });
+    // botão dentro do próprio formulário (ex.: Cancelar) sai direto; fora dele, pergunta antes
+    if (FORM_DIRTY && !g.closest('#app form')) return confirmLeave(() => go(g.dataset.go, p));
+    closeModal(); go(g.dataset.go, p); return;
+  }
   const a = e.target.closest('[data-act]');
   if (!a) return;
   const act = a.dataset.act;
   if (act === 'side-open') { SIDE_OPEN = true; render(); }
   else if (act === 'side-close') { SIDE_OPEN = false; render(); }
   else if (act === 'modal-close') closeModal();
-  else if (act === 'logout') CLOUD.leave();
+  else if (act === 'logout') { if (FORM_DIRTY) confirmLeave(() => { FORM_DIRTY = false; closeModal(); CLOUD.leave(); }); else CLOUD.leave(); }
+  else if (act === 'leave-ok') { const fn = LEAVE_FN; LEAVE_FN = null; FORM_DIRTY = false; closeModal(); fn?.(); }
   else if (act === 'notifs') showNotifications();
-  else if (act === 'theme') { const t = themeNow() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, t); } catch (x) { } applyTheme(t); render(); }
+  else if (act === 'theme') { const t = themeNow() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, t); } catch (x) { } applyTheme(t); if (FORM_DIRTY) $$('[data-act="theme"]').forEach(b => b.outerHTML = themeBtn(b.classList.contains('theme-fab') ? 'theme-fab' : '')); else render(); }
   else if (act === 'photo') { openModal({ title: 'Foto', body: `<img src="${esc(e.target.src)}" alt="" style="width:100%">`, wide: true }); }
   else if (ACTIONS[act]) ACTIONS[act](a, e);
 });

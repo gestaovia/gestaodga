@@ -574,3 +574,50 @@ a.btn{text-decoration:none}
 details>summary{list-style:none}details>summary::-webkit-details-marker{display:none}
 .mod-card>.row>b.num{white-space:nowrap}
 .ins-calls .btn{flex-wrap:wrap;height:auto;min-height:48px;white-space:normal;text-align:left}
+
+/* v1.6 · janela não fecha ao clicar fora: balança para indicar Cancelar ou Concluir */
+@keyframes gvnudge{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(2px)}}
+.modal.nudge{animation:gvnudge .32s ease-in-out}
+@media (prefers-reduced-motion:reduce){.modal.nudge{animation:none;box-shadow:0 0 0 2px var(--ring)}}
+
+/* v1.6 · status do veículo: amarelo = disponível, verde = com condutor, vermelho = com problema (sempre colorido) */
+.dot.vs-free{background:var(--u-yellow)} .dot.vs-drv{background:var(--u-green)} .dot.vs-prob{background:var(--u-red)}
+.pill.vs-free{background:var(--u-yellow-soft);color:var(--u-yellow)} .pill.vs-drv{background:var(--u-green-soft);color:var(--u-green)} .pill.vs-prob{background:var(--u-red-soft);color:var(--u-red)}
+.kpi.vs-free .v{color:var(--u-yellow)} .kpi.vs-drv .v{color:var(--u-green)}
+.kpi.vs-free.zero .v,.kpi.vs-drv.zero .v{color:var(--text3)}
+.chip .dot{margin-right:2px}
+
+/* v1.6 · consulta por data (Veículos e Condutores) */
+.dq-bar{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;padding:10px 12px;margin-bottom:14px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+.dq-t{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:.84rem;color:var(--text2)}
+.dq-t svg{width:16px;height:16px}
+.dq-in{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.dq-in .inp{min-height:36px;width:150px}
+.dq-q{display:flex;gap:6px;flex-wrap:wrap}
+.dq-q .chip svg{width:14px;height:14px}
+.pill svg{width:13px;height:13px;vertical-align:-2px;margin-right:4px}
+.dq-same{display:inline-block;width:88px}.dq-same.av{width:32px}
+.dq-idle{display:flex;flex-wrap:wrap;gap:8px;padding-top:12px}
+@media (max-width:640px){
+  .dq-bar{padding:10px}
+  .dq-in{width:100%}.dq-in .inp{flex:1 1 0;width:auto;min-width:0}
+  .dq-same{width:0}.dq-same.av{width:32px}
+}
+
+/* v1.6 · topo do condutor no celular: marca e empresa sem sobrepor */
+.brand-c{flex:1 1 auto;min-width:0;overflow:hidden}
+.brand-c .brand-tx{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
+.brand-c b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand-c small{display:flex!important;align-items:center;gap:5px;max-width:none!important;min-width:0}
+.brand-c small span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.brand-c small .org-logo.sm{width:16px;height:16px;border-radius:3px}
+.drv-shell .top .spacer{flex:0 0 0}
+.drv-shell .top{gap:8px}
+@media (max-width:420px){.drv-shell .top{gap:6px;padding-inline:12px!important}.drv-shell .top .icon-btn{width:38px;height:38px}}
+@media (max-width:360px){.drv-shell .top .icon-btn{width:34px;height:34px}.brand-c .brand-logo{width:28px;height:28px}}
+/* v1.6 · janelas no celular: o fundo da janela acompanha todo o conteúdo (antes o conteúdo passava do fundo e aparecia a tela de trás) */
+@media (max-width:640px){
+  .modal-bg{align-items:flex-start}
+  .modal{min-height:100%;display:flex;flex-direction:column}
+  .modal-b{flex:1 0 auto}
+}
