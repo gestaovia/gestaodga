@@ -288,7 +288,7 @@ PAGES.veiculo = {
 ACTIONS['iss-resolve'] = a => {
   const i = byId(S.issues, a.dataset.id);
   openModal({
-    title: 'Resolver ocorrência', body: `<p><b>${esc(i.type)}</b> — ${esc(i.desc)}</p><label class="field"><span>O que foi feito?</span><textarea class="inp" id="iss-note" placeholder="Ex.: pastilhas trocadas na Oficina Alvorada"></textarea></label><p class="err" id="iss-err"></p>`,
+    title: 'Resolver ocorrência', body: `<p><b>${esc(i.type)}</b> — ${esc(i.desc)}</p><label class="field"><span>O que foi feito?</span><textarea class="inp" id="iss-note" placeholder="Ex.: pastilhas trocadas na Oficina Alvorada"></textarea></label><label class="field"><span>Custo do incidente (opcional)</span><input class="inp num" id="iss-cost" inputmode="decimal" placeholder="R$ 0,00" value="${i.cost ? nf(i.cost, 2) : ''}"><small>Conserto, franquia, guincho etc. Entra nos Indicadores (custo de incidentes).</small></label><p class="err" id="iss-err"></p>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="iss-resolve-ok" data-id="${i.id}">Confirmar</button>`
   });
 };
@@ -296,6 +296,7 @@ ACTIONS['iss-resolve-ok'] = a => {
   const i = byId(S.issues, a.dataset.id); const note = $('#iss-note').value.trim();
   if (note.length < 5) return $('#iss-err').textContent = 'Descreva a solução.';
   i.status = 'resolvida'; i.resolvedAt = nowTs(); i.resolvedBy = CUR.id; i.resolution = note;
+  const cost = parseFloat(String($('#iss-cost')?.value || '').replace(/\./g, '').replace(',', '.')); if (cost > 0) { i.cost = Math.round(cost * 100) / 100; i.costBy = CUR.id; i.costAt = nowTs(); }
   log('problema_resolvido', `Ocorrência resolvida (${i.type}): ${note}`, { vehicleId: i.vehicleId, driverId: i.driverId });
   save(); closeModal(); toast('Ocorrência resolvida. Veículo liberado.'); render();
 };

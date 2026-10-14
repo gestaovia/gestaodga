@@ -7,6 +7,18 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.8.0 — 14/10/2026
+- **Indicadores mensais** (menu Visão geral › Indicadores; gestão e supervisor): mês com setas, filtros por obra, veículo e frota própria/locada, que valem para todos os gráficos.
+  - Resumo: custo total (com variação contra o mês anterior; no mês atual, contra o mesmo período do mês anterior), custo médio por km, consumo médio e preventiva em dia.
+  - Custos: custo por obra (combustível, manutenção, locação, multas, incidentes e outros), manutenção por veículo e custo por km [(combustível + manutenção) ÷ km], separando própria e locada.
+  - Desempenho: ranking de km rodados com a utilização (dias úteis em posse ÷ dias úteis disponíveis, fora de manutenção) e destaque do veículo que mais rodou; consumo km/l por veículo com alerta de consumo alto.
+  - Manutenção preventiva: % de tarefas que venceram no mês e foram feitas até o vencimento (data ou km, o que vier primeiro); tarefas que ainda não venceram não contam; lista de vencidas em aberto.
+  - Multas e incidentes: quantidade e custo, por veículo ou por obra.
+  - Evolução mensal do custo operacional (até 12 meses), por categoria.
+  - Cada gráfico tem "Ver tabela" com os números e mostra aviso quando não há dados (nada é estimado). "Dados a completar" lista o que falta registrar (km, valor da locação, custo de incidentes, plano de manutenção).
+- **Custo de incidentes:** campo opcional ao resolver um problema e botão "Informar custo" nos Indicadores (gestor e administrador).
+- **Início do condutor sem topo:** a tela começa direto pela foto/iniciais e nome do condutor e pelo veículo; mantém o botão verde Checklist diário, os botões de ação e o Pendente em vermelho. Nas outras telas continua o topo com voltar.
+
 ## v1.7.0 — 14/10/2026
 - **Painel do condutor mais simples (conforme a imagem de referência):** topo só com a logo do GestaoVia; placa em destaque e clicável (abre os dados do veículo, no lugar do botão "Meu veículo"); "Checklist hoje" **Pendente em vermelho**; botão verde principal **Checklist diário** (com o prazo do dia) para quem está com veículo — quem está sem veículo continua vendo **Escanear veículo**; abaixo: Entregar veículo, Trocar obra, Informar problema, Registrar abastecimento (opcional) e Meus checklists. Avisos, Meu perfil, modo claro/escuro e Sair foram para o rodapé do início; aviso novo aparece como faixa no topo.
 - **Excluir veículo (somente o proprietário):** botão Excluir na tela do veículo, com confirmação digitando a placa e a lista do que será apagado (posses, checklists, abastecimentos, QR Code, manutenção e localização daquele veículo). Outros veículos e condutores não são alterados; pedágios e multas pela placa continuam. A permissão é conferida no banco (função `delete_vehicle` e regra de exclusão da tabela de veículos só para o proprietário).

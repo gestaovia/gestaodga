@@ -48,6 +48,8 @@ const ICON = { // ícones Lucide (ISC) — https://lucide.dev
   xls: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
+  up: '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+  down: '<polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/>',
   lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
 };
 const ic = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k] || ''}</svg>`;
@@ -64,7 +66,7 @@ try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () =
 const themeBtn = (cls = '') => { const d = themeNow() === 'dark'; return `<button class="icon-btn ${cls}" data-act="theme" aria-label="${d ? 'Usar modo claro' : 'Usar modo escuro'}" title="${d ? 'Modo claro' : 'Modo escuro'}">${ic(d ? 'sun' : 'moon')}</button>`; };
 
 const NAV = [
-  { g: 'Visão geral', items: [['dashboard', 'Painel da frota', 'dash'], ['calendario', 'Calendário', 'cal']] },
+  { g: 'Visão geral', items: [['dashboard', 'Painel da frota', 'dash'], ['indicadores', 'Indicadores', 'report'], ['calendario', 'Calendário', 'cal']] },
   { g: 'Frota', items: [['veiculos', 'Veículos', 'car'], ['condutores', 'Condutores', 'user'], ['transferencias', 'Transferências', 'swap']] },
   { g: 'Controle', items: [['checklists', 'Checklists', 'check'], ['abastecimento', 'Abastecimentos', 'fuel'], ['manutencao', 'Manutenção', 'wrench'], ['oficinas', 'Oficinas', 'store'], ['pedagios', 'Pedágios', 'toll'], ['multas', 'Multas', 'fine']] },
   { g: 'Gestão', items: [['bonificacao', 'Premiação', 'trophy'], ['relatorios', 'Relatórios', 'report']] },
@@ -182,10 +184,10 @@ function topbar(pg) {
   </header>`;
 }
 function driverTop() {
-  // topo do condutor: só a logo do sistema no início; nas outras telas, voltar + título
-  const home = ROUTE.page === 'inicio';
+  // início do condutor sem topo (começa direto pelo usuário e o veículo); nas outras telas, voltar + título
+  if (ROUTE.page === 'inicio') return '';
   return `<header class="top drv-top" style="padding-inline:16px">
-    ${home ? `<span class="drv-logo">${brandMark()}</span>` : `<button class="icon-btn" data-go="inicio" aria-label="Voltar ao início">${ic('back')}</button><h1>${esc(typeof PAGES[ROUTE.page]?.title === 'function' ? PAGES[ROUTE.page].title(ROUTE.p) : PAGES[ROUTE.page]?.title || '')}</h1>`}
+    <button class="icon-btn" data-go="inicio" aria-label="Voltar ao início">${ic('back')}</button><h1>${esc(typeof PAGES[ROUTE.page]?.title === 'function' ? PAGES[ROUTE.page].title(ROUTE.p) : PAGES[ROUTE.page]?.title || '')}</h1>
   </header>`;
 }
 function myNotifications() {
