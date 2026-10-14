@@ -250,14 +250,14 @@ PAGES.veiculo = {
     if (tab === 'tl') { const all = S.audit.filter(a => a.vehicleId === id).sort((a, b) => b.at - a.at); const n = +(ROUTE.p.n || 25); body = `<div class="panel-b" style="padding-top:12px">${timelineHTML(all.slice(0, n))}${all.length > n ? `<button class="btn sm" data-go="veiculo" data-id="${id}" data-n="${n + 50}">Mostrar mais (${all.length - n})</button>` : ''}</div>`; }
     if (tab === 'posses') body = tbl(['Condutor', 'Início', 'Fim', 'Duração', '>Km rodados', 'Obras'], S.custody.filter(x => x.vehicleId === id).sort((a, b) => b.start - a.start).map(x => `<tr><td>${drvLink(x.driverId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td class="nowrap">${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || v.odometer) - x.startKm)}</td><td>${[...new Set(x.segments.map(s => prj(s.projectId).code))].join(', ') || pill('Sem obra', 'urg')}</td></tr>`));
     if (tab === 'ck') body = checklistTable(S.checklists.filter(k => k.vehicleId === id));
-    if (tab === 'fuel') body = fuelTable(S.fuel.filter(f => f.vehicleId === id));
+    if (tab === 'fuel') body = `${isStaff() ? `<div class="panel-b" style="padding-bottom:0"><button class="btn ok sm" data-go="lancar_abastecimento" data-vid="${id}">${ic('plus')}Lançar abastecimento</button></div>` : ''}${fuelTable(S.fuel.filter(f => f.vehicleId === id))}`;
     if (tab === 'mnt') body = `${planEditor(v)}<div class="panel-h"><h3>Serviços realizados</h3></div>${maintRecordsTable(S.maintRecords.filter(r => r.vehicleId === id), { noVeh: true })}`;
     if (tab === 'docs') body = docsTab(v);
     if (tab === 'tf') body = `<div class="panel-h"><h3>Pedágios</h3></div>${tollTable(S.tolls.filter(x => x.plate === v.plate))}<div class="panel-h"><h3>Multas</h3></div>${fineTable(S.fines.filter(x => x.plate === v.plate))}`;
     return `<div class="stack">
       <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between;gap:16px">
         <div class="row" style="gap:16px">${plate(v.plate, true)}<div><h2 style="font-size:1.15rem">${esc(v.brand)} ${esc(v.model)}</h2><div class="row" style="gap:8px;margin-top:6px">${stTag(st)}${ownTag(v)}${seatsTag(v)}${docBadge(v) ? `<button style="border:none;background:none;padding:0" data-go="veiculo" data-id="${id}" data-tab="docs">${docBadge(v)}</button>` : ''}<span class="muted small">${v.year} · ${v.fuelType}</span></div></div></div>
-        <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button>` : ''}${M && !v.maintenance && openIssues(id).some(i => !i.canRun) ? `<button class="btn ok" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : M && !v.maintenance && !c ? `<button class="btn" data-go="checklist_full" data-vid="${id}" data-type="manut_entrada">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}</div>
+        <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button>` : ''}${M && !v.maintenance && openIssues(id).some(i => !i.canRun) ? `<button class="btn ok" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : M && !v.maintenance && !c ? `<button class="btn" data-go="checklist_full" data-vid="${id}" data-type="manut_entrada">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}${isOwner() ? `<button class="btn danger" data-act="veh-del" data-id="${id}" title="Excluir veículo (somente o proprietário)">${ic('trash')}Excluir</button>` : ''}</div>
       </div></div>
       ${iss.map(i => `<div class="note ${i.severity === 'critica' || !i.canRun ? 'bad' : 'warn'}">${ic('alert')}<div style="flex:1"><b>${esc(i.type)} · ${SEVERITY[i.severity].l}</b> — ${esc(i.desc)}<div class="small">${esc(drv(i.driverId)?.name || '')} · ${fmtShort(i.at)}</div></div>${i.severity === 'critica' || !i.canRun ? `<button class="btn sm danger" data-go="seguro" data-vid="${id}">${ic('shield')}Acionar seguro</button>` : ''}${M ? `<button class="btn sm" data-act="iss-resolve" data-id="${i.id}">Resolver</button>` : ''}</div>`).join('')}
       ${t ? `<div class="note warn">${ic('swap')}<div style="flex:1"><b>Transferência:</b> ${esc(drv(t.fromDriverId).name)} → ${esc(drv(t.toDriverId).name)} · ${T_LABEL[t.status]}</div><button class="btn sm" data-go="transferencia" data-id="${t.id}">Abrir</button></div>` : ''}
@@ -304,6 +304,52 @@ ACTIONS['qr-new'] = a => {
   S.qrcodes.filter(q => q.vehicleId === id && q.active).forEach(q => { q.active = false; q.revokedAt = nowTs(); });
   S.qrcodes.push({ id: uid('qr'), vehicleId: id, token: newToken(), active: true, createdAt: nowTs() });
   log('qr', 'Novo QR Code gerado. O código anterior foi revogado', { vehicleId: id }); save(); toast('Novo QR Code gerado.'); render();
+};
+
+/* ---------- Exclusão de veículo (somente o proprietário) ----------
+   Remove o veículo e o histórico DELE (posses, checklists, abastecimentos, QR Code, manutenção, localização).
+   Outros veículos e condutores não são alterados; pedágios e multas (ligados à placa) continuam.
+   A permissão é conferida no banco (função delete_vehicle), não só pelo botão. */
+function vehicleLinks(id) {
+  const n = (arr, f) => (arr || []).filter(f).length;
+  return [
+    ['posse(s)', n(S.custody, x => x.vehicleId === id)], ['transferência(s)', n(S.transfers, x => x.vehicleId === id)],
+    ['checklist(s)', n(S.checklists, x => x.vehicleId === id)], ['abastecimento(s)', n(S.fuel, x => x.vehicleId === id)],
+    ['problema(s) informado(s)', n(S.issues, x => x.vehicleId === id)], ['serviço(s) de manutenção', n(S.maintRecords, x => x.vehicleId === id)]
+  ].filter(x => x[1]);
+}
+ACTIONS['veh-del'] = a => {
+  if (!isOwner()) return toast('Somente o proprietário do sistema pode excluir veículos.');
+  const v = veh(a.dataset.id); if (!v) return;
+  const c = activeCustody(v.id); const links = vehicleLinks(v.id);
+  openModal({
+    title: 'Excluir veículo',
+    body: `<div class="stack" style="gap:12px">
+      <div class="row" style="gap:12px">${plate(v.plate, true)}<div><b>${esc(v.brand)} ${esc(v.model)}</b><div class="muted small">${v.year || ''} · ${esc(v.fuelType || '')}</div></div></div>
+      <div class="note bad">${ic('alert')}<div><b>Esta ação é permanente e não pode ser desfeita.</b> Use para apagar veículos de teste antes da operação real.</div></div>
+      ${c ? `<div class="note warn"><div>Este veículo está com <b>${esc(drv(c.driverId)?.name || 'um condutor')}</b>. A posse em andamento também será apagada.</div></div>` : ''}
+      <div><b class="small">Será apagado junto com o veículo:</b><ul class="small" style="margin:6px 0 0 18px;padding:0">${links.length ? links.map(([l, q]) => `<li>${q} ${l}</li>`).join('') : '<li>Nenhum registro ligado a ele</li>'}<li>QR Code, plano de manutenção, documentos e localização do veículo</li></ul>
+      <p class="muted small" style="margin-top:6px">Nada de outros veículos ou condutores é alterado. Pedágios e multas lançados pela placa continuam no sistema.</p></div>
+      <label class="field"><span>Para confirmar, digite a placa <b>${esc(v.plate)}</b></span><input class="inp mono" id="vd-plate" autocomplete="off" autocapitalize="characters" placeholder="${esc(v.plate)}"></label>
+      <p class="err" id="vd-err" role="alert"></p></div>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn danger" data-act="veh-del-ok" data-id="${v.id}" id="vd-ok" disabled>${ic('trash')}Excluir definitivamente</button>`,
+    onMount: el => { const i = el.querySelector('#vd-plate'); const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); i.addEventListener('input', () => { el.querySelector('#vd-ok').disabled = norm(i.value) !== norm(v.plate); }); setTimeout(() => i.focus(), 50); }
+  });
+};
+ACTIONS['veh-del-ok'] = async a => {
+  const v = veh(a.dataset.id); if (!v || !isOwner()) return;
+  const btn = $('#vd-ok'); const err = $('#vd-err');
+  if (btn) { btn.disabled = true; btn.textContent = 'Excluindo…'; }
+  try {
+    if (APP_MODE !== 'cloud') throw new Error('Exclusão disponível apenas com o servidor conectado.');
+    await CLOUD.flush();                                   // envia antes o que estiver pendente
+    await CLOUD.rpc('delete_vehicle', { p_vehicle: v.id }); // o banco confere se é o proprietário
+    closeModal(); toast(`Veículo ${v.plate} excluído.`);
+    await CLOUD.reload(true, true); go('veiculos');
+  } catch (e) {
+    if (err) err.textContent = 'Não foi possível excluir: ' + friendlyError(e);
+    if (btn) { btn.disabled = false; btn.innerHTML = `${ic('trash')}Excluir definitivamente`; }
+  }
 };
 
 /* ---------- Transferência forçada ---------- */

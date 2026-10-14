@@ -47,6 +47,7 @@ const ICON = { // ícones Lucide (ISC) — https://lucide.dev
   obra: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>',
   xls: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
 };
 const ic = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k] || ''}</svg>`;
@@ -72,6 +73,7 @@ const NAV = [
 const PAGE_ROLES = { configuracoes: ['admin', 'gestor'] };
 const isManager = () => CUR && ['admin', 'gestor'].includes(CUR.role);
 const isStaff = () => CUR && CUR.role !== 'condutor';
+const isOwner = () => !!(CUR && CUR.owner && CUR.active !== false); // proprietário do sistema (o banco confere de novo)
 const canPage = page => !PAGE_ROLES[page] || PAGE_ROLES[page].includes(CUR.role);
 const myDriver = () => CUR?.driverId ? drv(CUR.driverId) : null;
 
@@ -161,7 +163,7 @@ function orgBrand(compact) {
 }
 function orgLine() { const o = orgOf(); const nm = o.displayName || o.name || ''; const org = orgLogoOk(o.logo) ? `<img class="org-logo sm" src="${o.logo}" alt="">` : ''; return nm || org ? `<div class="org-line" title="${esc(o.name || nm)}">${org}<span>${esc(nm)}</span></div>` : ''; }
 const brandMark = () => `<img class="brand-logo" src="${window.GV_LOGO || ''}" alt="GestaoVia">`;
-const PARENT = { veiculo: 'veiculos', condutor: 'condutores', transferencia: 'transferencias', scan_result: 'veiculos', checklist_view: 'checklists', forcar: 'transferencias', checklist_full: 'manutencao', scanner: 'veiculos', abastecer: 'abastecimento', obra: 'veiculos', problema: 'veiculos', seguro: 'veiculos' };
+const PARENT = { veiculo: 'veiculos', condutor: 'condutores', transferencia: 'transferencias', scan_result: 'veiculos', checklist_view: 'checklists', forcar: 'transferencias', checklist_full: 'manutencao', scanner: 'veiculos', abastecer: 'abastecimento', lancar_abastecimento: 'abastecimento', obra: 'veiculos', problema: 'veiculos', seguro: 'veiculos' };
 function topbar(pg) {
   const parent = PARENT[ROUTE.page];
   const parentTitle = parent ? NAV.flatMap(g => g.items).find(i => i[0] === parent)?.[1] : null;
@@ -180,15 +182,10 @@ function topbar(pg) {
   </header>`;
 }
 function driverTop() {
-  const unread = myNotifications().filter(n => !n.read).length;
+  // topo do condutor: só a logo do sistema no início; nas outras telas, voltar + título
   const home = ROUTE.page === 'inicio';
-  return `<header class="top" style="padding-inline:16px">
-    ${home ? orgBrand(true) : `<button class="icon-btn" data-go="inicio" aria-label="Voltar ao início">${ic('back')}</button><h1>${esc(typeof PAGES[ROUTE.page]?.title === 'function' ? PAGES[ROUTE.page].title(ROUTE.p) : PAGES[ROUTE.page]?.title || '')}</h1>`}
-    <div class="spacer"></div>
-    <button class="icon-btn" data-act="notifs" aria-label="Notificações">${ic('bell')}${unread ? `<span class="badge">${unread}</span>` : ''}</button>
-    ${themeBtn()}
-    <button class="icon-btn" data-go="perfil" aria-label="Meu perfil" style="padding:0;overflow:hidden">${av(CUR)}</button>
-    <button class="icon-btn" data-act="logout" aria-label="Sair">${ic('logout')}</button>
+  return `<header class="top drv-top" style="padding-inline:16px">
+    ${home ? `<span class="drv-logo">${brandMark()}</span>` : `<button class="icon-btn" data-go="inicio" aria-label="Voltar ao início">${ic('back')}</button><h1>${esc(typeof PAGES[ROUTE.page]?.title === 'function' ? PAGES[ROUTE.page].title(ROUTE.p) : PAGES[ROUTE.page]?.title || '')}</h1>`}
   </header>`;
 }
 function myNotifications() {

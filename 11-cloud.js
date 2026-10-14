@@ -30,7 +30,7 @@ const SPEC = [
   { key: 'transfers', table: 'transfers', cols: ['id', 'vehicleId', 'fromDriverId', 'toDriverId', 'status', 'requestedAt', 'forced', 'justification', 'requestedBy', 'fromCustodyId', 'toCustodyId', 'deliverChecklistId', 'receiveChecklistId', 'events'], ts: ['requestedAt'], sort: 'requestedAt' },
   { key: 'checklists', table: 'checklists', cols: ['id', 'type', 'vehicleId', 'driverId', 'userId', 'custodyId', 'at', 'km', 'fuelLevel', 'items', 'ok', 'problem', 'avarias', 'notes', 'photos', 'projectId', 'location', 'late', 'serverAt'], ts: ['at', 'serverAt'], sort: 'at' },
   { key: 'issues', table: 'issues', cols: ['id', 'vehicleId', 'driverId', 'at', 'type', 'desc', 'severity', 'canRun', 'photo', 'status', 'source', 'location', 'resolvedAt', 'resolvedBy', 'resolution'], ts: ['at', 'resolvedAt'], ren: { desc: 'description' }, sort: 'at' },
-  { key: 'fuel', table: 'fuel_records', cols: ['id', 'vehicleId', 'driverId', 'custodyId', 'projectId', 'at', 'km', 'liters', 'total', 'fuelType', 'station', 'receipt', 'location', 'serverAt'], ts: ['at', 'serverAt'], sort: 'at' },
+  { key: 'fuel', table: 'fuel_records', cols: ['id', 'vehicleId', 'driverId', 'custodyId', 'projectId', 'at', 'km', 'liters', 'total', 'fuelType', 'station', 'receipt', 'location', 'serverAt', 'enteredBy', 'source'], ts: ['at', 'serverAt'], sort: 'at' },
   { key: 'plans', table: 'maintenance_plans', cols: ['id', 'vehicleId', 'item', 'everyKm', 'everyDays', 'lastKm', 'lastDate'], ts: ['lastDate'] },
   { key: 'maintRecords', table: 'maintenance_records', cols: ['id', 'vehicleId', 'at', 'items', 'cost', 'shop', 'km', 'type'], ts: ['at'], sort: 'at' },
   { key: 'tolls', table: 'tolls', cols: ['id', 'plate', 'at', 'place', 'value', 'invoice', 'manual'], ts: ['at'], sort: 'at' },
@@ -75,7 +75,7 @@ const listOf = sp => sp.single ? [S.settings] : sp.asMap ? Object.entries(S.loca
 /* quem grava o quê (o banco confere de novo; aqui só evita mandar o que seria recusado) */
 const WRITES = {
   admin: null, gestor: null,
-  supervisor: new Set(['audit', 'notifications', 'locations']),
+  supervisor: new Set(['audit', 'notifications', 'locations', 'fuel']), // supervisor/assistente: lança abastecimentos
   condutor: new Set(['custody', 'transfers', 'checklists', 'issues', 'fuel', 'notifications', 'audit', 'locations', 'vehicles', 'trackerEvents'])
 };
 
@@ -221,6 +221,7 @@ const CLOUD = {
       if (op.sp.key === 'issues' && op.op !== 'insert') return false;
       if (op.sp.key === 'notifications' && op.op === 'update') { if (Object.keys(op.row).some(k => k !== 'id' && k !== 'read')) return false; }
     }
+    if (CUR.role === 'supervisor' && op.sp.key === 'fuel' && op.op !== 'insert') return false;
     if (CUR.role === 'supervisor' && op.sp.key === 'notifications' && op.op === 'update' && Object.keys(op.row).some(k => k !== 'id' && k !== 'read')) return false;
     return true;
   },
@@ -352,6 +353,8 @@ const CLOUD = {
 function friendlyError(e) {
   const m = String(e?.message || e || '');
   if (/custody_no_overlap/.test(m)) return 'o veículo já está com outro condutor.';
+  if (/delete_vehicle/.test(m) && /find|exist|schema cache/i.test(m)) return 'a função de exclusão ainda não foi instalada no banco (falta rodar o SQL da v1.7.0 no Supabase).';
+  if (/Somente o propriet|já foi registrado|não pode ser no futuro/.test(m)) return m.replace(/^Error:\s*/, '');
   if (/row-level security|Sem permissão|42501/.test(m) || e?.code === '42501') return 'seu perfil não tem permissão para esta ação.';
   if (/inativo/.test(m)) return 'seu acesso está inativo.';
   if (/JWT|expired|sess/i.test(m)) return 'sua sessão expirou. Entre novamente.';
@@ -447,7 +450,7 @@ function cloudUsersTab() {
     <td class="r nowrap">${u.id === CUR.id || u.owner ? '' : `<button class="btn sm" data-act="u-pass" data-id="${u.id}">Nova senha</button> <button class="btn sm ${u.active ? 'danger' : 'pri'}" data-act="u-toggle" data-id="${u.id}">${u.active ? 'Inativar' : 'Reativar'}</button>`}</td></tr>`);
   return `<div class="panel-b row" style="justify-content:space-between"><p class="muted small" style="max-width:640px">O acesso é criado aqui com uma senha provisória; no primeiro login a pessoa escolhe a própria senha. Inativar bloqueia o login na hora e todo o conteúdo deixa de ser lido pelo banco.</p><button class="btn pri" data-act="u-new">${ic('plus')}Novo usuário</button></div>
     ${tbl(['Nome', 'E-mail', 'Perfil', 'Condutor vinculado', 'Situação', ''], rows)}
-    <div class="panel-b"><h3 style="margin-bottom:8px">O que cada perfil pode fazer</h3>${tbl(['Ação', 'Condutor', 'Supervisor', 'Gestor de Frota', 'Administrador'], [['Escanear, receber, entregar, checklists e abastecer (somente o próprio)', 1, 0, 1, 1], ['Ver painel, veículos, condutores, custos e relatórios', 0, 1, 1, 1], ['Transferência forçada, pedágios, multas, manutenção e premiação', 0, 0, 1, 1], ['Cadastrar condutores e liberar o acesso deles', 0, 0, 1, 1], ['Criar usuários de qualquer perfil, regras e integrações', 0, 0, 0, 1]].map(([l, ...r]) => `<tr><td>${l}</td>${r.map(x => `<td>${x ? '<span class="st"><span class="dot ok"></span>Sim</span>' : '<span class="muted">—</span>'}</td>`).join('')}</tr>`))}
+    <div class="panel-b"><h3 style="margin-bottom:8px">O que cada perfil pode fazer</h3>${tbl(['Ação', 'Condutor', 'Supervisor', 'Gestor de Frota', 'Administrador'], [['Escanear, receber, entregar, checklists e abastecer (somente o próprio)', 1, 0, 1, 1], ['Lançar abastecimento de qualquer veículo (em nome do condutor)', 0, 1, 1, 1], ['Ver painel, veículos, condutores, custos e relatórios', 0, 1, 1, 1], ['Transferência forçada, pedágios, multas, manutenção e premiação', 0, 0, 1, 1], ['Cadastrar condutores e liberar o acesso deles', 0, 0, 1, 1], ['Criar usuários de qualquer perfil, regras e integrações', 0, 0, 0, 1], ['Excluir veículos (somente o proprietário do sistema)', 0, 0, 0, 1]].map(([l, ...r]) => `<tr><td>${l}</td>${r.map(x => `<td>${x ? '<span class="st"><span class="dot ok"></span>Sim</span>' : '<span class="muted">—</span>'}</td>`).join('')}</tr>`))}
       <p class="small muted" style="margin-top:8px">As regras valem no banco de dados (RLS): mesmo fora do aplicativo, um condutor não lê dados de outro condutor.</p></div>`;
 }
 function userForm() {

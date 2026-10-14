@@ -58,27 +58,40 @@ PAGES.inicio = {
     const daily = v ? dailyDoneToday(v.id) : null;
     const seg = currentSegment(c);
     const sc = driverScore(d.id);
-    const card = v ? `<div class="veh-card" data-go="meu_veiculo" style="cursor:pointer">
-        <div class="top-line">${plate(v.plate, true)}${stTag(vStatus(v))}</div>
+    const unread = myNotifications().filter(n => !n.read).length;
+    // a placa abre os dados do veículo (substitui o antigo botão "Meu veículo")
+    const card = v ? `<div class="veh-card">
+        <div class="top-line"><button type="button" class="plate-btn" data-go="meu_veiculo" aria-label="Ver dados do veículo ${esc(v.plate)}" title="Ver dados do veículo">${plate(v.plate, true)}<span class="plate-hint">${ic('chev')}</span></button>${stTag(vStatus(v))}</div>
         <dl class="pairs"><div><dt>Obra</dt><dd>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</dd></div><div><dt>Com você há</dt><dd>${dur(nowTs() - c.start)}</dd></div>
-        <div><dt>Checklist hoje</dt><dd>${daily ? `<span class="st"><span class="dot ok"></span>${fmtTime(daily.at)}</span>` : '<span class="st"><span class="dot warn"></span>Pendente</span>'}</dd></div><div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
+        ${daily ? `<div class="ck-done"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot ok"></span>Feito às ${fmtTime(daily.at)}</span></dd></div>` : `<div class="ck-pend" role="status"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot bad"></span>Pendente</span></dd></div>`}<div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
       </div>` : `<div class="veh-card" style="align-items:center;text-align:center;padding:22px"><span class="avatar lg" style="background:var(--border2);color:var(--text3)">${ic('car')}</span><b>Nenhum veículo com você</b><span class="muted small">Escaneie o QR Code do carro para receber.</span></div>`;
+    const dl = deadlineNow(); const [dh, dm] = dl.split(':');
+    const dlTxt = `${+dh}h${dm && dm !== '00' ? dm : ''}`;
+    // ação principal: com veículo, o checklist diário; sem veículo, escanear o QR Code para receber
+    const main = v
+      ? `<button class="tile primary scan main-act ${daily ? 'is-done' : ''}" data-go="diario" data-vid="${v.id}"><span class="ti">${ic('check')}</span><span><b>Checklist diário</b><small>${daily ? `Feito hoje às ${fmtTime(daily.at)}` : `Prazo até ${dlTxt}`}</small></span></button>`
+      : `<button class="tile primary scan main-act" data-go="scanner"><span class="ti">${ic('qr')}</span><span><b>Escanear veículo</b><small>Ler o QR Code do carro</small></span></button>`;
     const dis = v ? '' : 'disabled';
-    const T = (go, icon, t, s, cls = '', flag = '') => `<button class="tile ${cls}" data-go="${go}" ${v ? `data-vid="${v.id}"` : ''} ${go === 'scanner' ? '' : dis}><span class="ti">${ic(icon)}</span><span><b>${t}</b><small>${s}</small></span>${flag}</button>`;
+    const T = (go, icon, t, s, cls = '') => `<button class="tile ${cls}" data-go="${go}" ${v ? `data-vid="${v.id}"` : ''} ${dis}><span class="ti">${ic(icon)}</span><span><b>${t}</b><small>${s}</small></span></button>`;
     return `<div class="drv">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div><p class="muted small">${cap(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}</p><h1>Olá, ${esc(d.name.split(' ')[0])}</h1></div>
         <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}</button></div>
       ${v && openIssues(v.id).some(i => i.severity === 'critica' || !i.canRun) ? `<div class="note bad stack" style="gap:8px"><div><b>Problema crítico no ${esc(v.plate)}.</b> Se precisar de guincho, socorro ou houve acidente, acione o seguro.</div><button class="btn danger lg block" data-go="seguro" data-vid="${v.id}">${ic('shield')}Acionar seguro</button></div>` : ''}
+      ${unread ? `<button class="note neu notif-line" data-act="notifs">${ic('bell')}<span style="flex:1;text-align:left">${unread === 1 ? 'Você tem 1 aviso novo' : `Você tem ${unread} avisos novos`}</span>${ic('chev')}</button>` : ''}
       ${banners}${card}${v ? `<div>${gpsChip()}</div>` : ''}
+      ${main}
       <div class="tiles">
-        ${T('scanner', 'qr', 'Escanear veículo', 'Ler o QR Code do carro', 'primary scan')}
-        ${T('diario', 'check', 'Checklist diário', daily ? `Feito às ${fmtTime(daily.at)}` : 'Poucos segundos', daily ? 't-green' : '', v && !daily ? '<span class="flag pill warn">pendente</span>' : v ? '<span class="flag pill ok">ok</span>' : '')}
-        ${T('abastecer', 'fuel', 'Abastecer', 'Fotos do hodômetro e do cupom')}
-        ${T('problema', 'alert', 'Informar problema', 'Avaria ou defeito', 't-red')}
-        ${T('entregar', 'handoff', 'Entregar veículo', 'Devolver ou trocar', 't-violet')}
-        ${T('meu_veiculo', 'car', 'Meu veículo', v ? v.plate : 'Nenhum', '')}
-        ${T('obra', 'pin', 'Trocar obra', seg ? `Agora: ${prj(seg.projectId).code}` : 'Sem obra', 't-amber')}
-        <button class="tile" data-go="meus_checklists"><span class="ti">${ic('list')}</span><span><b>Meus checklists</b><small>Histórico de todas as posses</small></span></button>
+        ${T('entregar', 'handoff', 'Entregar veículo', 'Devolver ou trocar')}
+        ${T('obra', 'pin', 'Trocar obra', seg ? `Agora: ${esc(prj(seg.projectId).code)}` : 'Sem obra')}
+        ${T('problema', 'alert', 'Informar problema', 'Avaria ou defeito')}
+        ${T('abastecer', 'fuel', 'Registrar abastecimento', 'Opcional')}
+        <button class="tile tile-wide" data-go="meus_checklists"><span class="ti">${ic('list')}</span><span><b>Meus checklists</b><small>Histórico de todas as posses</small></span></button>
+      </div>
+      <div class="drv-account" aria-label="Conta">
+        <button data-act="notifs">${ic('bell')}<span>Avisos${unread ? ` (${unread})` : ''}</span></button>
+        <button data-go="perfil">${ic('user')}<span>Meu perfil</span></button>
+        <button data-act="theme">${ic(themeNow() === 'dark' ? 'sun' : 'moon')}<span>${themeNow() === 'dark' ? 'Modo claro' : 'Modo escuro'}</span></button>
+        <button data-act="logout">${ic('logout')}<span>Sair</span></button>
       </div></div>`;
   }
 };
@@ -179,7 +192,7 @@ PAGES.scan_result = {
         action = `<div class="note ok">Este veículo está sob sua responsabilidade.</div>
           <div class="actions">
             <button class="act" data-go="diario" data-vid="${vid}">${ic('check')}<span>Checklist diário</span></button>
-            <button class="act" data-go="abastecer" data-vid="${vid}">${ic('fuel')}<span>Abastecer</span></button>
+            <button class="act" data-go="abastecer" data-vid="${vid}">${ic('fuel')}<span>Registrar abastecimento</span></button>
             <button class="act" data-go="obra" data-vid="${vid}">${ic('pin')}<span>Alterar obra</span></button>
             <button class="act" data-go="problema" data-vid="${vid}">${ic('alert')}<span>Informar problema</span></button>
             <button class="act" data-go="entregar" data-vid="${vid}" ${t ? `data-tid="${t.id}"` : ''}>${ic('handoff')}<span>Entregar veículo</span></button>
@@ -259,6 +272,7 @@ function bindDraft(form) {
     const el = e.target; if (!el.name) return;
     if (el.name.startsWith('it_')) DRAFT.items[el.name.slice(3)] = el.value;
     else if (el.type === 'file') return;
+    else if (el.type === 'checkbox') DRAFT[el.name] = el.checked;
     else DRAFT[el.name] = el.value;
     DRAFT._onChange?.();
   };
@@ -267,7 +281,7 @@ function bindDraft(form) {
     const slot = e.target.dataset.photo; if (!slot || !e.target.files[0]) return;
     DRAFT.photos[slot] = await readPhoto(e.target.files[0]);
     const tile = form.querySelector(`[data-slot="${slot}"]`);
-    const lab = { cupom: 'Foto do cupom ou nota fiscal', hodometro: 'Foto do hodômetro (obrigatória)', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
+    const lab = tile?.dataset.label || { cupom: 'Foto do cupom ou nota fiscal', hodometro: 'Foto do hodômetro (obrigatória)', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
     if (tile) tile.outerHTML = ['cupom', 'hodometro', 'problema', 'painel_d'].includes(slot) ? singlePhoto(slot, lab) : photoTile(slot, lab);
     DRAFT._onChange?.();
   });
@@ -275,7 +289,7 @@ function bindDraft(form) {
 ACTIONS['ck-allok'] = () => { CK_ITEMS.forEach(([k]) => { DRAFT.items[k] = 'ok'; const r = $(`input[name="it_${k}"][value="ok"]`); if (r) r.checked = true; }); };
 function singlePhoto(slot, label) {
   const p = DRAFT.photos[slot];
-  return `<label class="ph ${p ? 'done' : ''}" data-slot="${slot}" style="aspect-ratio:auto;min-height:92px;flex-direction:row;gap:10px">${p ? `<img src="${esc(photoSrc(p))}" alt=""><span class="cap">${label} ✓ (toque para trocar)</span>` : `${ic('camera')}<span>${label}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${slot}" aria-label="${label}"></label>`;
+  return `<label class="ph ${p ? 'done' : ''}" data-slot="${slot}" data-label="${esc(label)}" style="aspect-ratio:auto;min-height:92px;flex-direction:row;gap:10px">${p ? `<img src="${esc(photoSrc(p))}" alt=""><span class="cap">${label} ✓ (toque para trocar)</span>` : `${ic('camera')}<span>${label}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${slot}" aria-label="${label}"></label>`;
 }
 function validateFull(v) {
   const e = [];
@@ -603,7 +617,7 @@ PAGES.abastecer = {
     const types = v.fuelType.startsWith('Diesel') ? ['Diesel S10', 'Diesel S500'] : ['Gasolina', 'Etanol'];
     const wrap = CUR.role === 'condutor' ? 'drv' : 'drv" style="margin:0;max-width:560px';
     return `<form class="${wrap}" id="fform" novalidate>
-      <div><h1>Abastecimento</h1></div>
+      <div><h1>Abastecimento</h1>${CUR.role === 'condutor' ? '<p class="muted small">Registro opcional. A gestão da frota também pode lançar este abastecimento; se ela já lançou, não precisa registrar de novo.</p>' : ''}</div>
       <div class="veh-card"><div class="top-line">${plate(v.plate, true)}<span class="muted small">${esc(v.model)}</span></div>
         <dl class="kv"><dt>Condutor</dt><dd>${esc(drv(c.driverId).name)}</dd><dt>Obra</dt><dd>${seg ? projLabel(seg.projectId) : projLabel(null)}</dd><dt>Data e hora</dt><dd>${fmtDT(nowTs())}</dd></dl></div>
       <div class="panel"><div class="panel-b form-grid">
@@ -645,6 +659,7 @@ PAGES.abastecer = {
       if (!k) errs.push('Informe a quilometragem.'); else if (k < lastRecordedKm(v.id)) errs.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
       if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.');
       if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.hodometro) errs.push('Envie a foto do hodômetro (vale pontos na premiação).'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
+      if (!errs.length && k && l) { const dup = fuelDuplicates(v.id, nowTs(), k, l); if (dup.same.length) errs.push(fuelByStaff(dup.same[0]) ? 'A gestão já lançou este abastecimento. Não é preciso registrar de novo.' : 'Este abastecimento já foi registrado.'); }
       if (errs.length) return showErrors(errs);
       const seg = currentSegment(c);
       const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: seg?.projectId || null, at: nowTs(), km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, odoPhoto: DRAFT.photos.hodometro, location: DRAFT.geo };
@@ -677,7 +692,7 @@ PAGES.meu_veiculo = {
       <div class="actions">
         ${!daily ? `<button class="act primary" data-go="diario" data-vid="${v.id}">${ic('check')}<span>Fazer checklist diário</span></button>` : ''}
         <button class="act" data-go="obra" data-vid="${v.id}">${ic('pin')}<span>Alterar obra<small>Sem encerrar a posse</small></span></button>
-        <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Abastecer</span></button>
+        <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Registrar abastecimento<small>Opcional</small></span></button>
         <button class="act" data-go="problema" data-vid="${v.id}">${ic('alert')}<span>Informar problema</span></button>
         <button class="act" data-go="seguro" data-vid="${v.id}">${ic('shield')}<span>Seguro e emergência<small>Assistência 24h e contatos</small></span></button>
         <button class="act" data-go="entregar" data-vid="${v.id}" ${t ? `data-tid="${t.id}"` : ''}>${ic('handoff')}<span>Entregar veículo</span></button>

@@ -621,3 +621,39 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
   .modal{min-height:100%;display:flex;flex-direction:column}
   .modal-b{flex:1 0 auto}
 }
+
+/* ===== v1.7.0 · painel do condutor ===== */
+.drv-top{justify-content:flex-start}
+.drv-logo{display:flex;align-items:center}
+.drv-logo .brand-logo{width:38px;height:38px;border-radius:9px;display:block}
+.plate-btn{display:inline-flex;align-items:center;gap:6px;border:0;background:none;padding:0;color:var(--text);cursor:pointer;border-radius:4px}
+.plate-btn:focus-visible{outline:2px solid var(--ring);outline-offset:3px}
+.plate-btn .plate-hint{display:flex;color:var(--text3)}
+.plate-btn .plate-hint svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+.plate-btn:hover .plate{border-color:var(--text2)}
+/* checklist pendente: vermelho e bem visível */
+.pairs>div.ck-pend{background:color-mix(in srgb,var(--danger) 58%,var(--surface));border:1.5px solid var(--danger)}
+.pairs>div.ck-pend dt{color:#6B0F0F}
+.pairs>div.ck-pend dd{color:#4A0A0A;font-weight:700}
+.pairs>div.ck-pend .dot{background:#8B1414}
+:root[data-theme="dark"] .pairs>div.ck-pend dt,:root[data-theme="dark"] .pairs>div.ck-pend dd{color:#FFFFFF}
+:root[data-theme="dark"] .pairs>div.ck-pend .dot{background:#FFFFFF}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .pairs>div.ck-pend dt,:root:not([data-theme="light"]) .pairs>div.ck-pend dd{color:#FFFFFF}:root:not([data-theme="light"]) .pairs>div.ck-pend .dot{background:#FFFFFF}}
+.pairs>div.ck-done .dot{background:var(--u-green)}
+/* ação principal (verde) */
+.tile.main-act{min-height:76px;padding:16px 18px;gap:14px}
+.tile.main-act .ti{width:48px;height:48px}
+.tile.main-act .ti svg{width:26px;height:26px;stroke-width:2.2}
+.tile.main-act b{font-size:1.18rem}
+.tile.main-act small{font-size:.86rem;font-weight:500}
+.tile.main-act.is-done{background:var(--surface);border-color:var(--confirm);color:var(--text)}
+.tile.main-act.is-done .ti{background:var(--u-green-soft);color:var(--u-green)}
+.tile.main-act.is-done small{color:var(--text3)}
+.tile.tile-wide{grid-column:1/-1;flex-direction:row;align-items:center;justify-content:flex-start;min-height:0}
+.notif-line{display:flex;align-items:center;gap:10px;width:100%;cursor:pointer;font:inherit}
+.notif-line svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;flex-shrink:0}
+.drv-account{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:6px;padding-top:12px;border-top:1px solid var(--border2)}
+.drv-account button{display:flex;flex-direction:column;align-items:center;gap:4px;border:0;background:none;color:var(--text3);font:inherit;font-size:.72rem;padding:8px 2px;border-radius:var(--r-sm);cursor:pointer;min-height:52px}
+.drv-account button:hover{background:var(--accent);color:var(--text2)}
+.drv-account svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7}
+@media (max-width:640px){.btn.fuel-add{width:100%;justify-content:center}}

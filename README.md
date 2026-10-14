@@ -1,6 +1,6 @@
 # gestaovia
 
-Gestão visual de frota: posse do veículo por QR Code, checklists com fotos, mapa da frota, calendário de manutenção, CRLV/IPVA, pedágios, multas, premiação de condutores e localização dos veículos pelo GPS do celular do condutor (sem rastreador nem serviço externo).
+Gestão visual de frota: posse do veículo por QR Code, checklists com fotos, mapa da frota, calendário de manutenção em oficinas credenciadas, seguro e acionamento de emergência, CRLV/IPVA, pedágios, multas, premiação de condutores conforme o regulamento (período 26–25, modalidades A/B/C, extrato) e localização dos veículos pelo GPS do celular do condutor (sem rastreador nem serviço externo).
 
 - **Front-end:** arquivo único `dist/index.html` (HTML + JS, sem build de framework). Fontes em `src/`.
 - **Banco, login e arquivos:** Supabase (PostgreSQL com RLS, Auth, Storage e Edge Functions).
@@ -38,9 +38,10 @@ O `build.py` recusa gerar o site se `config.json` tiver qualquer chave que não 
 
 | Perfil | Pode |
 |---|---|
-| Administrador | Tudo, inclusive usuários, regras e integrações |
+| Proprietário | Administrador marcado como proprietário; único que exclui veículos (função `delete_vehicle`) |
+| Administrador | Tudo, inclusive usuários, regras e integrações (exceto excluir veículos) |
 | Gestor de frota | Toda a operação: cadastros, transferência forçada, pedágios, multas, manutenção, premiação; cria acesso de **condutores** |
-| Supervisor | Lê tudo; não altera cadastros nem movimentações |
+| Supervisor (assistente administrativo) | Lê tudo; lança abastecimentos de qualquer veículo; não altera cadastros nem movimentações |
 | Condutor | Só o que é dele: a própria posse, checklists, abastecimentos, transferências e alertas; atualiza apenas a quilometragem do veículo que está com ele; não vê CNH/telefone de colegas |
 
 - Todas as tabelas têm RLS. Visitante sem login não lê nada. Perfil inativo não lê nada.
@@ -61,7 +62,7 @@ O `build.py` recusa gerar o site se `config.json` tiver qualquer chave que não 
 
 - Enquanto o condutor está com um veículo e o gestaovia aberto no celular, o navegador envia a posição a cada intervalo (padrão 2 min) ou ao andar ~300 m.
 - O painel mostra a última posição de cada veículo; a tela do veículo desenha o trajeto do dia.
-- Velocidade medida pelo GPS acima do limite gera alerta para a gestão e conta na premiação (no máximo 1 alerta a cada 10 min por veículo).
+- Velocidade medida pelo GPS acima do limite gera alerta para a gestão (no máximo 1 alerta a cada 10 min por veículo).
 - Configuração em **Configurações › Localização** (ligar/desligar, intervalo, velocidade máxima).
 - Limite da web: com a tela bloqueada ou o app fechado o navegador para de enviar.
 

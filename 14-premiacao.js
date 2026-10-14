@@ -91,7 +91,7 @@ function driverScore(did, key = curPeriod()) {
     if (c.start >= from && c.start < to) { const k = byId(S.checklists, c.receiveChecklistId); if (!ckComplete(k)) add({ key: `A:rec:${c.id}`, mod: 'A', at: c.start, pts: P.discA, why: k ? 'Checklist de recebimento incompleto (itens ou fotos faltando)' : 'Veículo recebido sem checklist de recebimento', ev: { checklistId: k?.id || null, vehicleId: c.vehicleId } }); }
     if (c.end && c.end >= from && c.end < to && !['forcada', 'manutencao'].includes(c.closedReason)) { const k = byId(S.checklists, c.deliverChecklistId); if (!ckComplete(k)) add({ key: `A:ent:${c.id}`, mod: 'A', at: c.end, pts: P.discA, why: k ? 'Checklist de entrega incompleto (itens ou fotos faltando)' : 'Veículo entregue sem checklist de entrega', ev: { checklistId: k?.id || null, vehicleId: c.vehicleId } }); }
   });
-  const fuels = S.fuel.filter(f => f.driverId === did && tsOf(f) >= from && tsOf(f) < to);
+  const fuels = S.fuel.filter(f => f.driverId === did && f.source !== 'gestao' && tsOf(f) >= from && tsOf(f) < to); // lançados pela gestão não geram desconto ao condutor
   fuels.forEach(f => { if (!S.custody.some(c => c.driverId === did && c.vehicleId === f.vehicleId && c.start <= f.at && (!c.end || c.end >= f.at))) add({ key: `A:fuel:${f.id}`, mod: 'A', at: f.at, pts: P.discA, why: 'Abastecimento em período sem posse aberta no sistema', ev: { fuelId: f.id, vehicleId: f.vehicleId } }); });
 
   // B · checklist diário em todo dia com posse (prazo P.deadline; atraso −10; ausência −15)
