@@ -253,7 +253,7 @@ PAGES.veiculo = {
     if (tab === 'fuel') body = `${isStaff() ? `<div class="panel-b" style="padding-bottom:0"><button class="btn ok sm" data-go="lancar_abastecimento" data-vid="${id}">${ic('plus')}Lançar abastecimento</button></div>` : ''}${fuelTable(S.fuel.filter(f => f.vehicleId === id))}`;
     if (tab === 'mnt') body = `${planEditor(v)}<div class="panel-h"><h3>Serviços realizados</h3></div>${maintRecordsTable(S.maintRecords.filter(r => r.vehicleId === id), { noVeh: true })}`;
     if (tab === 'docs') body = docsTab(v);
-    if (tab === 'tf') body = `<div class="panel-h"><h3>Pedágios</h3></div>${tollTable(S.tolls.filter(x => x.plate === v.plate))}<div class="panel-h"><h3>Multas</h3></div>${fineTable(S.fines.filter(x => x.plate === v.plate))}`;
+    if (tab === 'tf') body = `<div class="panel-h"><h3>Pedágios</h3></div>${tollTable(S.tolls.filter(x => x.plate === v.plate))}<div class="panel-h"><h3>Multas</h3></div>${fineTable(liveFines().filter(x => x.plate === v.plate))}`;
     return `<div class="stack">
       <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between;gap:16px">
         <div class="row" style="gap:16px">${plate(v.plate, true)}<div><h2 style="font-size:1.15rem">${esc(v.brand)} ${esc(v.model)}</h2><div class="row" style="gap:8px;margin-top:6px">${stTag(st)}${ownTag(v)}${seatsTag(v)}${docBadge(v) ? `<button style="border:none;background:none;padding:0" data-go="veiculo" data-id="${id}" data-tab="docs">${docBadge(v)}</button>` : ''}<span class="muted small">${v.year} · ${v.fuelType}</span></div></div></div>
@@ -276,9 +276,9 @@ PAGES.veiculo = {
           <dl class="pairs"><div><dt>Locadora</dt><dd>${esc(v.rental.company)}</dd></div><div><dt>Contrato</dt><dd>${esc(v.rental.contract || '—')}</dd></div><div><dt>Retirada</dt><dd>${fmtDate(v.rental.pickupDate)}</dd></div><div><dt>Devolver/renovar</dt><dd>${fmtDate(v.rental.dueDate)}</dd></div></dl>
           ${rs ? `<div class="bar ${M_LEVEL[rs.lvl].c === 'gray' ? '' : M_LEVEL[rs.lvl].c}"><i style="width:${Math.min(100, Math.max(3, (nowTs() - v.rental.pickupDate) / (v.rental.dueDate - v.rental.pickupDate) * 100))}%"></i></div>` : ''}
           ${M && rs ? `<div class="row"><button class="btn sm pri" data-act="rent-renew" data-id="${id}">Renovar</button><button class="btn sm" data-act="rent-return" data-id="${id}">Devolver</button></div>` : ''}</div></div>`
-          : `<div class="panel"><div class="panel-h"><h3>QR Code</h3></div><div class="panel-b row" style="align-items:flex-start;gap:14px"><div class="qr-img">${qrSvg(qr.token)}</div><div class="stack" style="gap:8px;flex:1;min-width:120px"><span class="tiny muted" style="word-break:break-all">${qr.token}</span>${M ? `<button class="btn sm" data-act="qr-new" data-id="${id}">Gerar novo</button>` : ''}</div></div></div>`}
+          : qrPanel(v, qr)}
       </div>
-      ${v.ownership === 'locada' ? `<div class="panel"><div class="panel-h"><h3>QR Code</h3></div><div class="panel-b row" style="gap:14px"><div class="qr-img">${qrSvg(qr.token)}</div><span class="tiny muted" style="word-break:break-all;max-width:240px">${qr.token}</span>${M ? `<button class="btn sm" data-act="qr-new" data-id="${id}">Gerar novo</button>` : ''}</div></div>` : ''}
+      ${v.ownership === 'locada' ? qrPanel(v, qr) : ''}
       <div class="grid2">${insurancePanel(v)}${v.maintenance ? `<div class="panel"><div class="panel-h"><h3>Na oficina</h3>${M ? `<button class="btn sm" data-act="mnt-entry-edit" data-id="${id}">${ic('edit')}Editar</button>` : ''}</div><div class="panel-b"><dl class="pairs"><div><dt>Oficina</dt><dd>${esc(shopName(v.maintenanceWorkshopId, 'Não informada'))}</dd></div><div><dt>Desde</dt><dd>${fmtDT(v.maintenanceSince)}</dd></div><div><dt>Motivo</dt><dd>${esc(v.maintenanceNote || '—')}</dd></div>${shopOf(v.maintenanceWorkshopId)?.phone ? `<div><dt>Telefone</dt><dd><a href="tel:${esc(onlyDigits(shopOf(v.maintenanceWorkshopId).phone))}">${esc(shopOf(v.maintenanceWorkshopId).phone)}</a></dd></div>` : ''}</dl></div></div>` : ''}</div>
       <div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="veiculo" data-id="${id}" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div>
     </div>`;
@@ -300,11 +300,45 @@ ACTIONS['iss-resolve-ok'] = a => {
   log('problema_resolvido', `Ocorrência resolvida (${i.type}): ${note}`, { vehicleId: i.vehicleId, driverId: i.driverId });
   save(); closeModal(); toast('Ocorrência resolvida. Veículo liberado.'); render();
 };
-ACTIONS['qr-new'] = a => {
-  const id = a.dataset.id;
-  S.qrcodes.filter(q => q.vehicleId === id && q.active).forEach(q => { q.active = false; q.revokedAt = nowTs(); });
-  S.qrcodes.push({ id: uid('qr'), vehicleId: id, token: newToken(), active: true, createdAt: nowTs() });
-  log('qr', 'Novo QR Code gerado. O código anterior foi revogado', { vehicleId: id }); save(); toast('Novo QR Code gerado.'); render();
+/* ---------- QR Code do veículo: único, gerado no cadastro. Não se gera outro: só se imprime o mesmo ---------- */
+function qrPanel(v, qr) {
+  if (!qr) return `<div class="panel"><div class="panel-h"><h3>QR Code</h3></div><div class="panel-b"><div class="note warn">Este veículo está sem QR Code ativo. Procure o administrador do sistema.</div></div></div>`;
+  return `<div class="panel"><div class="panel-h"><h3>QR Code</h3><span class="muted small">Único deste veículo</span></div><div class="panel-b row" style="align-items:flex-start;gap:14px"><div class="qr-img">${qrSvg(qr.token)}</div><div class="stack" style="gap:8px;flex:1;min-width:120px"><span class="tiny muted" style="word-break:break-all">${qr.token}</span>${isStaff() ? `<button class="btn sm" data-act="qr-print" data-id="${v.id}">${ic('qr')}Imprimir QR Code</button>` : ''}</div></div></div>`;
+}
+function qrLabelHTML(v, qr) {
+  return `<div class="qr-label"><img src="${window.GV_LOGO}" alt="" class="ql-logo"><div class="ql-plate">${esc(v.plate)}</div><div class="ql-model">${esc(v.brand)} ${esc(v.model)}</div><div class="ql-qr">${qrSvg(qr.token)}</div><div class="ql-hint">Escaneie no aplicativo GestaoVia para receber, fazer o checklist ou entregar o veículo.</div><div class="ql-token">${esc(qr.token)}</div></div>`;
+}
+ACTIONS['qr-print'] = a => {
+  const v = veh(a.dataset.id); const qr = S.qrcodes.find(q => q.vehicleId === v.id && q.active); if (!qr) return toast('Veículo sem QR Code ativo.');
+  openModal({
+    title: `Imprimir QR Code · ${v.plate}`, body: `<div class="qr-preview">${qrLabelHTML(v, qr)}</div><p class="small muted">Este é o QR Code único do veículo: ele não é gerado de novo. Se a etiqueta estragar, imprima esta mesma de novo e cole no veículo.</p>`,
+    foot: `<button class="btn" data-act="modal-close">Fechar</button><button class="btn" data-act="qr-pdf" data-id="${v.id}">${ic('fine')}Baixar PDF</button><button class="btn ok" data-act="qr-print-go" data-id="${v.id}">${ic('qr')}Imprimir</button>`
+  });
+};
+ACTIONS['qr-print-go'] = a => {
+  const v = veh(a.dataset.id); const qr = S.qrcodes.find(q => q.vehicleId === v.id && q.active); if (!qr) return;
+  $('#print-area')?.remove();
+  const el = document.createElement('div'); el.id = 'print-area'; el.innerHTML = qrLabelHTML(v, qr); document.body.appendChild(el);
+  document.body.classList.add('printing');
+  const done = () => { document.body.classList.remove('printing'); el.remove(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  log('qr', `QR Code impresso por ${CUR.name}`, { vehicleId: v.id }); save();
+  setTimeout(() => { try { window.print(); } catch (e) { } setTimeout(done, 1500); }, 60);
+};
+ACTIONS['qr-pdf'] = async a => {
+  if (!window.jspdf?.jsPDF || !window.qrcode) return toast('O gerador de PDF não carregou. Verifique a conexão.');
+  const v = veh(a.dataset.id); const qr = S.qrcodes.find(q => q.vehicleId === v.id && q.active); if (!qr) return;
+  const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' }); const W = 210;
+  const q = qrcode(0, 'M'); q.addData(qr.token); q.make(); const n = q.getModuleCount(); const size = 120; const cell = size / n; const x0 = (W - size) / 2, y0 = 78;
+  try { doc.addImage(window.GV_LOGO, 'PNG', W / 2 - 9, 16, 18, 18); } catch (e) { }
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(40); doc.setTextColor(30, 30, 30); doc.text(v.plate, W / 2, 52, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(13); doc.setTextColor(94, 90, 82); doc.text(`${v.brand} ${v.model}`, W / 2, 62, { align: 'center' });
+  doc.setDrawColor(210, 203, 187); doc.roundedRect(x0 - 8, y0 - 8, size + 16, size + 16, 3, 3);
+  doc.setFillColor(0, 0, 0); for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) doc.rect(x0 + c * cell, y0 + r * cell, cell + .02, cell + .02, 'F');
+  doc.setFontSize(12); doc.setTextColor(30, 30, 30); doc.text('Escaneie no aplicativo GestaoVia para receber, fazer o checklist ou entregar o veículo.', W / 2, y0 + size + 20, { align: 'center', maxWidth: 160 });
+  doc.setFont('courier', 'normal'); doc.setFontSize(10); doc.setTextColor(94, 90, 82); doc.text(qr.token, W / 2, y0 + size + 34, { align: 'center' });
+  log('qr', `QR Code (PDF) baixado por ${CUR.name}`, { vehicleId: v.id }); save();
+  await offerFile(`qrcode-${v.plate}.pdf`, doc.output('blob'));
 };
 
 /* ---------- Exclusão de veículo (somente o proprietário) ----------
@@ -399,14 +433,15 @@ PAGES.forcar = {
 PAGES.transferencias = {
   title: 'Transferências',
   render({ f = 'abertas' }) {
-    const flt = t => f === 'todas' || (f === 'abertas' ? !['concluida', 'cancelada'].includes(t.status) : t.status === 'concluida');
+    const inF = (t, k) => k === 'todas' || (k === 'abertas' ? tOpen(t) : k === 'nao' ? ['cancelada', 'negada'].includes(t.status) : t.status === 'concluida');
+    const flt = t => inF(t, f);
     const list = S.transfers.filter(flt).sort((a, b) => b.requestedAt - a.requestedAt);
-    const late = t => !['concluida', 'cancelada'].includes(t.status) && nowTs() - t.requestedAt > S.settings.transferAlertHours * 36e5;
+    const late = t => tOpen(t) && nowTs() - t.requestedAt > S.settings.transferAlertHours * 36e5;
     const order = T_STATUS.map(s => s[0]);
     const rows = list.map(t => { const i = order.indexOf(t.status); return `<tr class="click" data-go="transferencia" data-id="${t.id}"><td>${plate(veh(t.vehicleId).plate)}</td><td><div class="person"><span class="avatar">${initials(drv(t.fromDriverId)?.name || '—')}</span>${esc(drv(t.fromDriverId)?.name || '—')}</div></td><td>→</td><td><div class="person"><span class="avatar">${initials(drv(t.toDriverId)?.name || 'P')}</span>${esc(drv(t.toDriverId)?.name || 'Pátio')}</div></td>
-      <td style="min-width:150px"><div class="row" style="gap:6px;flex-wrap:nowrap">${pill(T_LABEL[t.status], t.status === 'concluida' ? 'ok' : t.status === 'cancelada' ? '' : late(t) ? 'urg' : 'warn')}${t.forced ? pill('forçada') : ''}</div>${t.status !== 'cancelada' ? `<div class="bar ${t.status === 'concluida' ? 'ok' : 'blue'}" style="margin-top:6px"><i style="width:${(i / (order.length - 1)) * 100}%"></i></div>` : ''}</td><td class="nowrap small muted">${fmtShort(t.requestedAt)}</td></tr>`; });
-    const n = s => S.transfers.filter(t => s === 'todas' || (s === 'abertas' ? !['concluida', 'cancelada'].includes(t.status) : t.status === 'concluida')).length;
-    return `<div class="page-head"><div class="filters">${[['abertas', 'Em andamento'], ['concluidas', 'Concluídas'], ['todas', 'Todas']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="transferencias" data-f="${k}">${l}<span class="n">${n(k)}</span></button>`).join('')}</div>${isManager() ? `<button class="btn" data-act="force-pick">${ic('swap')}Transferência forçada</button>` : ''}</div>
+      <td style="min-width:150px"><div class="row" style="gap:6px;flex-wrap:nowrap">${pill(T_LABEL[t.status], t.status === 'concluida' ? 'ok' : t.status === 'cancelada' ? '' : t.status === 'negada' ? 'bad' : late(t) ? 'urg' : 'warn')}${t.forced ? pill('forçada') : ''}</div>${!['cancelada', 'negada'].includes(t.status) ? `<div class="bar ${t.status === 'concluida' ? 'ok' : 'blue'}" style="margin-top:6px"><i style="width:${(i / (order.length - 1)) * 100}%"></i></div>` : ''}</td><td class="nowrap small muted">${fmtShort(t.requestedAt)}</td></tr>`; });
+    const n = s => S.transfers.filter(t => inF(t, s)).length;
+    return `<div class="page-head"><div class="filters">${[['abertas', 'Em andamento'], ['concluidas', 'Concluídas'], ['nao', 'Negadas ou canceladas'], ['todas', 'Todas']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="transferencias" data-f="${k}">${l}<span class="n">${n(k)}</span></button>`).join('')}</div>${isManager() ? `<button class="btn" data-act="force-pick">${ic('swap')}Transferência forçada</button>` : ''}</div>
       <div class="panel">${tbl(['Veículo', 'De', '', 'Para', 'Situação', 'Solicitada'], rows, 'Nenhuma transferência neste filtro.')}</div>`;
   }
 };
@@ -420,7 +455,7 @@ ACTIONS['force-go'] = () => { const vid = $('#fp-v').value; closeModal(); go('fo
 function checklistTable(list) {
   return tbl(['Data', 'Tipo', 'Veículo', 'Condutor', '>Km', 'Resultado', 'Fotos'], list.sort((a, b) => b.at - a.at).slice(0, 150).map(k => {
     const nph = k.photos ? Object.values(k.photos).filter(Boolean).length : 0;
-    return `<tr class="click" data-act="ck-view" data-id="${k.id}"><td class="nowrap">${fmtShort(k.at)}${k.late ? ' ' + pill('atraso', 'warn') : ''}</td><td>${CK_TYPES[k.type]}</td><td>${plate(veh(k.vehicleId).plate)}</td><td>${k.driverId ? esc(drv(k.driverId).name) : '<span class="muted">Gestão</span>'}</td><td class="r">${nf(k.km)}</td><td>${k.ok === false ? pill(k.problem ? 'Problema' : 'Apontamentos', k.problem ? 'bad' : 'warn') : pill('Regular', 'ok')}</td><td class="num">${nph || '—'}</td></tr>`;
+    return `<tr class="click" data-act="ck-view" data-id="${k.id}"><td class="nowrap">${fmtShort(k.at)}${k.late ? ' ' + pill('atraso', 'warn') : ''}</td><td>${CK_TYPES[k.type]}</td><td>${plate(veh(k.vehicleId).plate)}</td><td>${k.driverId ? esc(drv(k.driverId).name) : '<span class="muted">Gestão</span>'}</td><td class="r">${nf(k.km)}</td><td>${k.ok === false ? pill(k.problem ? 'Problema' : 'Apontamentos', k.problem ? 'bad' : 'warn') : pill('Regular', 'ok')}${k.quick ? ' ' + pill('Rápida') : ''}${k.audit?.diffs?.length ? ' ' + pill('Divergência', 'urg') : ''}</td><td class="num">${nph || '—'}</td></tr>`;
   }), 'Nenhum checklist.');
 }
 PAGES.checklists = {
@@ -491,7 +526,7 @@ ACTIONS['drv-toggle'] = a => {
   if (driverActive(d)) {
     const c = driverCustodies(d.id)[0];
     if (c) return toast(`${d.name} está com o ${veh(c.vehicleId).plate}. Faça a entrega (ou a transferência forçada) antes de inativar.`);
-    if (S.transfers.some(t => !['concluida', 'cancelada'].includes(t.status) && (t.fromDriverId === d.id || t.toDriverId === d.id))) return toast(`${d.name} tem uma transferência em andamento. Conclua ou cancele antes de inativar.`);
+    if (S.transfers.some(t => tOpen(t) && (t.fromDriverId === d.id || t.toDriverId === d.id))) return toast(`${d.name} tem uma transferência em andamento. Conclua ou cancele antes de inativar.`);
     openModal({
       title: `Inativar ${d.name}`, body: `<p>O condutor perde o acesso ao aplicativo e não pode receber veículos. O histórico de posses, multas e checklists continua guardado.</p><label class="field"><span>Motivo</span><input class="inp" id="dt-why" placeholder="Ex.: desligamento, afastamento, CNH suspensa"></label><p class="err" id="dt-err"></p>`,
       foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn danger" data-act="drv-toggle-ok" data-id="${d.id}">Inativar</button>`
@@ -511,7 +546,7 @@ PAGES.condutor = {
     const d = drv(id); const c = driverCustodies(id)[0]; const pk = per || curPeriod(); const sc = driverScore(id, pk); const clRow = closingOf(pk)?.rows.find(r => r.driverId === id); const from = startOfMonth(nowTs());
     const cs = S.custody.filter(x => x.driverId === id).sort((a, b) => b.start - a.start);
     const kmM = kmInPeriod(from, nowTs() + 1, x => x.driverId === id);
-    const fines = S.fines.filter(f => fineMatch(f).driverId === id);
+    const fines = liveFines().filter(f => fineMatch(f).driverId === id);
     const iss = S.issues.filter(i => i.driverId === id);
     const avar = S.checklists.filter(k => k.driverId === id && (k.avarias || (k.items && Object.values(k.items).includes('ruim'))));
     const tabs = [['posses', 'Posses'], ['score', 'Pontuação'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['multas', 'Multas'], ['ocor', 'Ocorrências'], ['tl', 'Histórico']];

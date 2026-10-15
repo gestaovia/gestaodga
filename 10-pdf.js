@@ -79,6 +79,8 @@ async function checklistPDF(id) {
   }
   const para = (label, body, color) => { if (!body) return; const lines = doc.splitTextToSize(body, W - 2 * M - 8); need(10 + lines.length * 4.5); doc.setFillColor(...(color || SOFT)); doc.roundedRect(M, y - 4, W - 2 * M, 8 + lines.length * 4.5, 2, 2, 'F'); text(label, M + 4, y + 0.5, { bold: true, size: 8.5 }); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...INK); doc.text(lines, M + 4, y + 5.2); y += 10 + lines.length * 4.5; };
   y += 3;
+  if (k.quick) para('Entrega com confirmação rápida', 'O condutor confirmou que não houve alterações no veículo desde o recebimento com checklist completo. Quem recebe faz o checklist completo e confere.');
+  if (k.audit) para('Conferência com o checklist anterior', k.audit.diffs?.length ? k.audit.diffs.map(diffText).join('\n') : 'Sem divergências.', k.audit.diffs?.length ? [254, 243, 199] : null);
   para('Avarias', k.avarias, [254, 243, 199]);
   para('Observações', k.notes);
   if (iss) para(`Problema: ${iss.type} · criticidade ${SEVERITY[iss.severity].l.toLowerCase()}${iss.canRun ? '' : ' · veículo não pode circular'}`, iss.desc, [254, 226, 226]);

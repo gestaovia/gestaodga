@@ -170,7 +170,7 @@ function kpiCompute(key) {
   const dueOk = due.filter(t => t.onTime);
   const openAtEnd = tasks.filter(t => t.dueAt < cut && (!t.done || t.done.at >= cut)).sort((a, b) => a.dueAt - b.dueAt);
   // multas e incidentes do mês
-  const fines = S.fines.filter(f => f.at >= from && f.at < to).map(f => ({ f, m: fineMatch(f) })).filter(({ m }) => kpiRowPass({ vehicleId: m.vehicleId, projectId: m.projectId }));
+  const fines = liveFines().filter(f => f.at >= from && f.at < to).map(f => ({ f, m: fineMatch(f) })).filter(({ m }) => kpiRowPass({ vehicleId: m.vehicleId, projectId: m.projectId }));
   const incs = S.issues.filter(i => i.at >= from && i.at < to).map(i => { const c = custodyAt(i.vehicleId, i.at); return { i, projectId: c ? segmentAt(c, i.at)?.projectId || null : null }; })
     .filter(x => kpiRowPass({ vehicleId: x.i.vehicleId, projectId: x.projectId }));
   return {
@@ -187,7 +187,7 @@ function kpiMonthTotals(key) {
   o.total = sum(rows, r => r.value); o.key = key; return o;
 }
 function kpiFirstMonth() {
-  const ts = [...S.fuel.map(f => f.at), ...S.maintRecords.map(r => r.at), ...S.fines.map(f => f.at), ...S.tolls.map(t => t.at), ...S.custody.map(c => c.start), ...S.issues.map(i => i.at)].filter(Boolean);
+  const ts = [...S.fuel.map(f => f.at), ...S.maintRecords.map(r => r.at), ...liveFines().map(f => f.at), ...S.tolls.map(t => t.at), ...S.custody.map(c => c.start), ...S.issues.map(i => i.at)].filter(Boolean);
   return ts.length ? monthKey(Math.min(...ts)) : monthKey(nowTs());
 }
 

@@ -175,37 +175,62 @@ ACTIONS['toll-adj-ok'] = a => {
 };
 
 /* ---------- Multas ---------- */
+const fineNo = f => f.notice || f.voidedNotice || '—';
 function fineTable(list) {
   return tbl(['Data e hora', 'Placa', 'Infração', '>Valor', 'Notificação', 'Condutor no momento', 'Obra', 'Identificação'], list.sort((a, b) => b.at - a.at).map(f => {
     const m = fineMatch(f);
     return `<tr class="click" data-act="fine-view" data-id="${f.id}"><td class="nowrap">${fmtShort(f.at)}</td><td>${plate(f.plate)}</td><td class="small">${esc(f.infraction)} ${pill(f.gravity === 'gravissima' ? 'Gravíssima' : f.gravity[0].toUpperCase() + f.gravity.slice(1), '')}</td>
-      <td class="r">${money(f.value)}</td><td class="mono small">${esc(f.notice)}</td><td>${m.driverId ? esc(drv(m.driverId).name) : '<span class="muted">—</span>'}</td><td>${m.projectId ? esc(prj(m.projectId).code) : '—'}</td>
+      <td class="r">${money(f.value)}</td><td class="mono small">${esc(fineNo(f))}</td><td>${m.driverId ? esc(drv(m.driverId).name) : '<span class="muted">—</span>'}</td><td>${m.projectId ? esc(prj(m.projectId).code) : '—'}</td>
       <td>${m.how === 'auto' ? pill('Automática', 'ok') : m.how === 'manual' ? pill('Manual', '') : pill('Sem posse no horário', 'warn')}</td></tr>`;
   }), 'Nenhuma multa.');
 }
 PAGES.multas = {
   title: 'Multas',
-  render() {
-    const un = S.fines.filter(f => fineMatch(f).how === 'sem');
-    return `<div class="page-head"><span></span>${isManager() ? `<button class="btn pri" data-act="fine-new">${ic('plus')}Registrar multa</button>` : ''}</div>
-      <div class="stack"><div class="kpis">${kpi('Multas', S.fines.length, 'fine', 'c-red')}${kpi('Valor total', money(sum(S.fines, f => f.value)), 'report')}${kpi('Pontos na CNH', sum(S.fines, f => f.points), 'alert')}${kpi('Sem condutor', un.length, 'user', un.length ? 'c-yellow' : '')}</div>
-      <div class="panel">${fineTable(S.fines.slice())}</div></div>`;
+  render({ f: flt = '' }) {
+    const live = liveFines(); const gone = S.fines.filter(f => f.voidedAt);
+    const un = live.filter(f => fineMatch(f).how === 'sem');
+    const tabs = `<div class="filters"><button class="chip ${flt !== 'apagadas' ? 'on' : ''}" data-go="multas">Multas<span class="n">${live.length}</span></button>${gone.length ? `<button class="chip ${flt === 'apagadas' ? 'on' : ''}" data-go="multas" data-f="apagadas">Apagadas<span class="n">${gone.length}</span></button>` : ''}</div>`;
+    const goneTable = tbl(['Data e hora', 'Placa', 'Infração', '>Valor', 'Notificação', 'Apagada por', 'Motivo'], gone.sort((a, b) => b.voidedAt - a.voidedAt).map(f => `<tr class="click" data-act="fine-view" data-id="${f.id}"><td class="nowrap">${fmtShort(f.at)}</td><td>${plate(f.plate)}</td><td class="small">${esc(f.infraction)}</td><td class="r">${money(f.value)}</td><td class="mono small">${esc(fineNo(f))}</td><td class="small">${esc(userName(f.voidedBy))}<br><span class="muted">${fmtShort(f.voidedAt)}</span></td><td class="small">${esc(f.voidReason || '')}</td></tr>`), 'Nenhuma multa apagada.');
+    return `<div class="page-head">${tabs}${isManager() ? `<button class="btn pri" data-act="fine-new">${ic('plus')}Registrar multa</button>` : ''}</div>
+      <div class="stack">${flt === 'apagadas' ? `<div class="note">${ic('fine')}<div>Multas apagadas não entram nos custos, relatórios, indicadores nem no histórico do condutor. O registro fica guardado com quem apagou, quando e o motivo.</div></div><div class="panel">${goneTable}</div>`
+        : `<div class="kpis">${kpi('Multas', live.length, 'fine', 'c-red')}${kpi('Valor total', money(sum(live, f => f.value)), 'report')}${kpi('Pontos na CNH', sum(live, f => f.points), 'alert')}${kpi('Sem condutor', un.length, 'user', un.length ? 'c-yellow' : '')}</div>
+      <div class="panel">${fineTable(live.slice())}</div>`}</div>`;
   }
 };
 ACTIONS['fine-view'] = a => {
   const f = byId(S.fines, a.dataset.id); const m = fineMatch(f); const c = m.custody || (m.custodyId && byId(S.custody, m.custodyId));
   const hist = m.vehicleId ? S.audit.filter(x => x.vehicleId === m.vehicleId && Math.abs(x.at - f.at) < 18 * 36e5).sort((x, y) => y.at - x.at) : [];
+  const gone = !!f.voidedAt; const M = isManager() && !gone;
   openModal({
-    title: `Multa ${f.notice}`, wide: true,
-    body: `<dl class="dl"><dt>Placa</dt><dd>${plate(f.plate)}</dd><dt>Data e hora</dt><dd>${fmtDT(f.at)}</dd><dt>Local</dt><dd>${esc(f.place)}</dd><dt>Infração</dt><dd>${esc(f.infraction)}</dd><dt>Valor</dt><dd>${money(f.value)} · ${f.points} pontos</dd></dl>
+    title: `Multa ${fineNo(f)}${gone ? ' (apagada)' : ''}`, wide: true,
+    body: `${gone ? `<div class="note bad">${ic('trash')}<div><b>Multa apagada</b> por ${esc(userName(f.voidedBy))} em ${fmtDT(f.voidedAt)}.<br>Motivo: ${esc(f.voidReason || '—')}</div></div>` : ''}<dl class="dl"><dt>Placa</dt><dd>${plate(f.plate)}</dd><dt>Data e hora</dt><dd>${fmtDT(f.at)}</dd><dt>Local</dt><dd>${esc(f.place)}</dd><dt>Infração</dt><dd>${esc(f.infraction)}</dd><dt>Valor</dt><dd>${money(f.value)} · ${f.points} pontos</dd></dl>
       <div class="panel"><div class="panel-h"><h3>Responsável no momento da infração</h3>${m.how === 'auto' ? pill('Identificado pela posse', 'ok') : m.how === 'manual' ? pill('Indicado manualmente', '') : pill('Sem posse no horário', 'warn')}</div><div class="panel-b">
         ${m.driverId ? `<dl class="dl"><dt>Condutor</dt><dd><b>${esc(drv(m.driverId).name)}</b> · CNH ${drv(m.driverId).cnhCat}</dd><dt>Obra associada</dt><dd>${projFull(m.projectId)}</dd>${c ? `<dt>Período de posse</dt><dd>${fmtDT(c.start)} até ${c.end ? fmtDT(c.end) : 'agora'}</dd>` : ''}</dl>`
-        : `<p>Não havia posse registrada para ${f.plate} neste horário. ${isManager() ? 'Indique o condutor manualmente:' : ''}</p>${isManager() ? `<div class="row" style="margin-top:8px"><select class="inp" id="fine-drv" style="max-width:260px">${driverOptions('')}</select><button class="btn" data-act="fine-assign" data-id="${f.id}">Indicar condutor</button></div>` : ''}`}</div></div>
+        : `<p>Não havia posse registrada para ${f.plate} neste horário. ${M ? 'Indique o condutor manualmente:' : ''}</p>${M ? `<div class="row" style="margin-top:8px"><select class="inp" id="fine-drv" style="max-width:260px">${driverOptions('')}</select><button class="btn" data-act="fine-assign" data-id="${f.id}">Indicar condutor</button></div>` : ''}`}</div></div>
       <div><p class="label" style="margin-bottom:6px">Anexos</p>${f.attachments.length ? f.attachments.map((x, i) => typeof x === 'string' ? `<div class="row small">${ic('fine')} ${esc(x)}</div>` : `<div class="row small">${ic('fine')} <button class="link" data-act="fine-file-open" data-id="${f.id}" data-i="${i}">${esc(x.name)}</button>${x.size ? ` <span class="muted">${nf(x.size / 1024)} KB</span>` : ''}</div>`).join('') : '<span class="muted small">Nenhum documento anexado.</span>'}
-        ${isManager() ? `<label class="btn sm" style="position:relative;margin-top:8px">Anexar documento<input type="file" id="fine-file" data-id="${f.id}" style="position:absolute;inset:0;opacity:0"></label>` : ''}</div>
+        ${M ? `<label class="btn sm" style="position:relative;margin-top:8px">Anexar documento<input type="file" id="fine-file" data-id="${f.id}" style="position:absolute;inset:0;opacity:0"></label>` : ''}</div>
       <div><p class="label" style="margin-bottom:4px">Histórico do veículo próximo ao horário</p>${timelineHTML(hist)}</div>`,
+    foot: `<button class="btn" data-act="modal-close">Fechar</button>${M ? `<button class="btn danger" data-act="fine-void" data-id="${f.id}">${ic('trash')}Apagar multa</button>` : ''}`,
     onMount: el => { el.querySelector('#fine-file')?.addEventListener('change', async e => { const file = e.target.files[0]; if (!file) return; const doc = await readDocFile(file); if (doc.tooBig) return toast('Arquivo acima de 10 MB. Envie um arquivo menor.'); f.attachments.push(doc); log('multa', `Documento anexado à multa ${f.notice}: ${file.name}`, { vehicleId: m.vehicleId }); save(); ACTIONS['fine-view']({ dataset: { id: f.id } }); }); }
   });
+};
+ACTIONS['fine-void'] = a => {
+  const f = byId(S.fines, a.dataset.id); if (!f || f.voidedAt || !isManager()) return;
+  openModal({
+    title: `Apagar multa ${fineNo(f)}`, body: `<p>${plate(f.plate)} · ${fmtDT(f.at)} · ${money(f.value)}<br><span class="small">${esc(f.infraction)}</span></p>
+      <p class="small muted">A multa sai das listas, custos, relatórios, indicadores e do histórico do condutor. O registro fica guardado (Multas › Apagadas) com seu nome, data, hora e o motivo.</p>
+      <label class="field"><span>Motivo</span><textarea class="inp" id="fv-why" maxlength="300" placeholder="Ex.: lançada em duplicidade; recurso deferido; placa errada"></textarea></label><p class="err" id="fv-err" role="alert"></p>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn danger" data-act="fine-void-ok" data-id="${f.id}">Apagar multa</button>`
+  });
+};
+ACTIONS['fine-void-ok'] = a => {
+  const f = byId(S.fines, a.dataset.id); if (!f || f.voidedAt || !isManager()) return closeModal();
+  const why = ($('#fv-why')?.value || '').trim();
+  if (why.length < 5) return $('#fv-err').textContent = 'Informe o motivo (mínimo 5 letras).';
+  const m = fineMatch(f);
+  f.voidedAt = nowTs(); f.voidedBy = CUR.id; f.voidReason = why; f.voidedNotice = f.notice; f.notice = null; // libera o número para um novo lançamento correto
+  log('multa', `Multa ${f.voidedNotice} (${money(f.value)}) apagada por ${CUR.name}: ${why}`, { vehicleId: m.vehicleId || vehicleByPlate(f.plate)?.id, driverId: m.driverId || null });
+  save(); closeModal(); toast('Multa apagada. O registro fica em Multas › Apagadas.'); render();
 };
 ACTIONS['fine-assign'] = a => { const f = byId(S.fines, a.dataset.id); f.manualDriverId = $('#fine-drv').value; log('multa', `Multa ${f.notice} indicada manualmente para ${drv(f.manualDriverId).name}`, { vehicleId: vehicleByPlate(f.plate)?.id, driverId: f.manualDriverId }); save(); closeModal(); render(); };
 ACTIONS['fine-new'] = () => openModal({
@@ -224,6 +249,7 @@ ACTIONS['fine-new'] = () => openModal({
 ACTIONS['fine-save'] = async () => {
   const form = $('#fnform'); const d = formData(form); const v = parseFloat(d.value.replace(/\./g, '').replace(',', '.'));
   if (!d.notice || !d.date || !d.time || !d.place || !d.infraction || !v) return $('#fn-err').textContent = 'Preencha todos os campos.';
+  if (S.fines.some(x => x.notice && x.notice.trim().toUpperCase() === d.notice.trim().toUpperCase())) return $('#fn-err').textContent = 'Já existe uma multa com este número de notificação.';
   const file = form.querySelector('[name=file]').files[0]; const doc = file ? await readDocFile(file) : null;
   if (doc?.tooBig) return $('#fn-err').textContent = 'Arquivo acima de 10 MB. Envie um arquivo menor.';
   const f = { id: uid('fin'), plate: d.plate, at: new Date(d.date + 'T' + d.time).getTime(), place: d.place, infraction: d.infraction, gravity: d.gravity, value: v, notice: d.notice, points: { leve: 3, media: 4, grave: 5, gravissima: 7 }[d.gravity], attachments: doc ? [doc] : [], manualDriverId: null };

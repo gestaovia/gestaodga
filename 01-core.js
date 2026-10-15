@@ -36,7 +36,10 @@ const T_STATUS = [
   ['entrega_andamento', 'Checklist de entrega em andamento'], ['aguardando_recebimento', 'Aguardando recebimento'],
   ['recebimento_andamento', 'Checklist de recebimento em andamento'], ['concluida', 'Transferência concluída']
 ];
-const T_LABEL = Object.fromEntries([...T_STATUS, ['cancelada', 'Cancelada']]);
+const T_LABEL = Object.fromEntries([...T_STATUS, ['cancelada', 'Cancelada'], ['negada', 'Entrega negada']]);
+// situações finais da transferência (não estão mais em andamento)
+const T_DONE = ['concluida', 'cancelada', 'negada'];
+const tOpen = t => !T_DONE.includes(t.status);
 const CK_TYPES = {
   recebimento: 'Recebimento', entrega: 'Entrega', devolucao: 'Devolução', diario: 'Diário',
   manut_entrada: 'Entrada em manutenção', manut_saida: 'Saída de manutenção', avaria: 'Registro de avaria'

@@ -50,7 +50,7 @@ function monthReport(key) {
   }).filter(o => o.km || o.total || o.checklists).sort((a, b) => b.total - a.total);
   const drivers = S.drivers.filter(d => !d._ro).map(d => {
     const f = r => r.driverId === d.id; const sc = driverScore(d.id, key);
-    const fines = S.fines.filter(x => inP(x.at) && fineMatch(x).driverId === d.id);
+    const fines = liveFines().filter(x => inP(x.at) && fineMatch(x).driverId === d.id);
     const o = { condutor: d.name, km: Math.round(kmInPeriod(from, to, c => c.driverId === d.id)), posses: S.custody.filter(c => c.driverId === d.id && c.start < to && (!c.end || c.end > from)).length,
       diarios: sc.req ? `${sc.done}/${sc.req}` : '—', atrasos: sc.late, possDias: sc.eligible ? `${sc.possDays}/${sc.bizDays}` : '—', abastecimentos: S.fuel.filter(x => x.driverId === d.id && inP(x.at)).length,
       combustivel: sumK(f, 'Combustível'), pedagios: sumK(f, 'Pedágios'), multasQtd: fines.length, multas: sumK(f, 'Multas'), pontuacao: Math.round(sc.total), premio: 0 };

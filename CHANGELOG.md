@@ -7,6 +7,17 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.9.0 — 15/10/2026
+- **Checklist de recebimento completo, entrega com confirmação rápida:** todo condutor que recebe um veículo faz o checklist completo (itens + 5 fotos). Na entrega ou transferência, quem fez o recebimento completo só responde "Houve alguma alteração no veículo desde o seu recebimento?": **Não, sem alterações** pede só a quilometragem (foto do painel opcional); **Sim, houve** abre o checklist completo. Quem recebeu sem checklist completo (registros antigos) continua fazendo a entrega completa.
+- **Recebimento confere o checklist anterior (auditoria):** a tela de recebimento mostra o último checklist completo do veículo (de quem, quando, km, combustível, apontamentos e avarias) e avisa quando o condutor anterior entregou com a confirmação rápida. O que o novo condutor marcar pior do que no checklist anterior (ex.: Lataria OK → Ruim) ou avaria nova fica registrado como **divergência**: aparece no checklist, no PDF, na lista de checklists ("Divergência") e a gestão recebe aviso.
+- **Premiação (modalidade A):** a entrega com confirmação rápida não gera desconto quando o recebimento daquela posse teve checklist completo. O recebimento sem checklist completo continua com desconto.
+- **Negar a entrega:** o condutor que está com o veículo pode negar a solicitação (antes ou depois de aceitar, enquanto não entregou), com motivo obrigatório. O veículo continua com ele; quem pediu e a gestão recebem o motivo, que aparece na transferência e no início do solicitante por 24 h. Nova situação "Entrega negada" e filtro "Negadas ou canceladas" em Transferências.
+- **Cancelar a solicitação:** quem pediu o veículo cancela pelo início, pela tela do veículo ou pela transferência, com motivo opcional; o condutor atual é avisado.
+- **Multas: apagar pelo gestor:** botão "Apagar multa" (motivo obrigatório). A multa sai das listas, custos, relatórios, indicadores e do histórico do condutor, mas fica em **Multas › Apagadas** com quem apagou, quando e o motivo. O número da notificação é liberado para um novo lançamento correto.
+- **QR Code único:** o QR Code do veículo não é mais gerado de novo. O botão "Gerar novo" virou **Imprimir QR Code** (etiqueta com logo, placa, modelo e o código; imprimir ou baixar PDF). O banco recusa criar um segundo QR Code, trocar ou revogar o existente.
+- Ajustes: a quilometragem mínima aceita nos checklists considera o hodômetro atual do veículo; textos dos avisos sem quebras estranhas no celular.
+- Banco: migration `20261015000011_gestaovia_checklist_transferencia_multas_qr`.
+
 ## v1.8.0 — 14/10/2026
 - **Indicadores mensais** (menu Visão geral › Indicadores; gestão e supervisor): mês com setas, filtros por obra, veículo e frota própria/locada, que valem para todos os gráficos.
   - Resumo: custo total (com variação contra o mês anterior; no mês atual, contra o mesmo período do mês anterior), custo médio por km, consumo médio e preventiva em dia.

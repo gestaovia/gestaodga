@@ -140,7 +140,7 @@ function render() {
 const homePage = () => CUR.role === 'condutor' ? 'inicio' : 'dashboard';
 
 function sidebar() {
-  const counts = { transferencias: S.transfers.filter(t => !['concluida', 'cancelada'].includes(t.status)).length, dashboard: attentionItems().filter(a => ['bad', 'urg'].includes(a.c)).length };
+  const counts = { transferencias: S.transfers.filter(tOpen).length, dashboard: attentionItems().filter(a => ['bad', 'urg'].includes(a.c)).length };
   const groups = NAV.map(g => {
     const items = g.items.filter(([k]) => canPage(k));
     if (!items.length) return '';

@@ -67,7 +67,6 @@ const nextDay = t => { const d = new Date(t); d.setDate(d.getDate() + 1); return
 
 /* ----- evidências ----- */
 const tsOf = r => r?.serverAt || r?.at;           // horário gravado pelo servidor (registros antigos: horário do aparelho)
-const ckComplete = k => !!k && CK_ITEMS.every(([x]) => k.items && k.items[x]) && PHOTO_SLOTS.every(([x]) => k.photos && k.photos[x] && !String(k.photos[x]).startsWith('removida'));
 const fuelHasOdo = f => f.at >= (bonusCfg().odoSince || 0) ? !!f.odoPhoto : !!(f.odoPhoto || f.receipt);
 const blockedAt = (vid, ts) => S.issues.some(i => i.vehicleId === vid && !i.canRun && i.at <= ts && (i.status === 'aberta' || (i.resolvedAt && i.resolvedAt > ts)));
 const adjOf = (did, key) => (S.bonusAdj || []).filter(a => a.driverId === did && a.period === key);
@@ -86,10 +85,11 @@ function driverScore(did, key = curPeriod()) {
   const days = daysBetween(from, to); const biz = days.filter(isBizDay);
   const possDays = biz.filter(d => d <= now && cs.some(c => c.start < nextDay(d) && (!c.end || c.end > d)));
 
-  // A · entrega e recebimento (−50 por transferência sem checklist completo)
+  // A · entrega e recebimento (−50 por recebimento sem checklist completo, ou entrega sem checklist válido:
+  //     completo, ou confirmação rápida quando o recebimento daquela posse foi completo)
   cs.forEach(c => {
     if (c.start >= from && c.start < to) { const k = byId(S.checklists, c.receiveChecklistId); if (!ckComplete(k)) add({ key: `A:rec:${c.id}`, mod: 'A', at: c.start, pts: P.discA, why: k ? 'Checklist de recebimento incompleto (itens ou fotos faltando)' : 'Veículo recebido sem checklist de recebimento', ev: { checklistId: k?.id || null, vehicleId: c.vehicleId } }); }
-    if (c.end && c.end >= from && c.end < to && !['forcada', 'manutencao'].includes(c.closedReason)) { const k = byId(S.checklists, c.deliverChecklistId); if (!ckComplete(k)) add({ key: `A:ent:${c.id}`, mod: 'A', at: c.end, pts: P.discA, why: k ? 'Checklist de entrega incompleto (itens ou fotos faltando)' : 'Veículo entregue sem checklist de entrega', ev: { checklistId: k?.id || null, vehicleId: c.vehicleId } }); }
+    if (c.end && c.end >= from && c.end < to && !['forcada', 'manutencao'].includes(c.closedReason)) { const k = byId(S.checklists, c.deliverChecklistId); if (!deliveryOk(c, k)) add({ key: `A:ent:${c.id}`, mod: 'A', at: c.end, pts: P.discA, why: k ? (k.quick ? 'Entrega com confirmação rápida, mas o recebimento desta posse não teve checklist completo' : 'Checklist de entrega incompleto (itens ou fotos faltando)') : 'Veículo entregue sem checklist de entrega', ev: { checklistId: k?.id || null, vehicleId: c.vehicleId } }); }
   });
   const fuels = S.fuel.filter(f => f.driverId === did && f.source !== 'gestao' && tsOf(f) >= from && tsOf(f) < to); // lançados pela gestão não geram desconto ao condutor
   fuels.forEach(f => { if (!S.custody.some(c => c.driverId === did && c.vehicleId === f.vehicleId && c.start <= f.at && (!c.end || c.end >= f.at))) add({ key: `A:fuel:${f.id}`, mod: 'A', at: f.at, pts: P.discA, why: 'Abastecimento em período sem posse aberta no sistema', ev: { fuelId: f.id, vehicleId: f.vehicleId } }); });
@@ -308,7 +308,7 @@ PAGES.bonificacao = {
     if (tab === 'ocorrencias') {
       const all = el.flatMap(({ d, sc }) => sc.occurrences.map(o => ({ d, o })));
       return `<div class="stack">${tabs}<div class="page-head" style="margin:0">${nav}${M && !c ? `<button class="btn pri" data-act="bn-occ-new" data-p="${key}">${ic('plus')}Registrar ocorrência</button>` : ''}</div>
-        <div class="note">${ic('alert')}<div>Os descontos de entrega/recebimento, checklist diário e foto do hodômetro são identificados automaticamente pelos registros. Abastecimento <b>sem registro</b> no aplicativo é lançado pela gestão a partir do extrato do cartão combustível. Abonos exigem justificativa e o original fica visível.</div></div>
+        <div class="note">${ic('alert')}<div>Os descontos de entrega/recebimento, checklist diário e foto do hodômetro são identificados automaticamente pelos registros. O recebimento exige o checklist completo; quem recebeu com checklist completo entrega com a confirmação rápida (sem alterações), sem desconto. Abastecimento <b>sem registro</b> no aplicativo é lançado pela gestão a partir do extrato do cartão combustível. Abonos exigem justificativa e o original fica visível.</div></div>
         <div class="panel">${tbl(['Condutor', 'Data', 'Mod.', 'Motivo e evidência', '>Pontos', ...(M ? [''] : [])], all.sort((a, b) => b.o.at - a.o.at).map(({ d, o }) => occRow(o, { manage: M, did: d.id, key, closed: !!c, who: d })), 'Nenhum desconto neste período.')}</div></div>`;
     }
     const medal = ['var(--u-green)', 'var(--text3)', 'var(--border)'];

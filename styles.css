@@ -779,3 +779,21 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
   .meter-v{font-size:2.2rem}
 }
 .viz-note .delta svg{stroke:currentColor}
+/* etiqueta do QR Code (pré-visualização e impressão) */
+.qr-preview{display:flex;justify-content:center;background:var(--surface2,var(--surface));padding:12px;border-radius:var(--r-sm)}
+.qr-label{background:#fff;color:#1e1e1e;border:1px solid #d2cbbb;border-radius:8px;padding:18px 20px;width:100%;max-width:300px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.qr-label .ql-logo{width:34px;height:34px}
+.qr-label .ql-plate{font-family:'Geist Mono',ui-monospace,monospace;font-size:1.9rem;font-weight:700;letter-spacing:.04em}
+.qr-label .ql-model{font-size:.9rem;color:#5e5a52}
+.qr-label .ql-qr{line-height:0;margin:6px 0}
+.qr-label .ql-qr svg{width:210px;height:210px}
+.qr-label .ql-hint{font-size:.78rem;line-height:1.35}
+.qr-label .ql-token{font-family:ui-monospace,monospace;font-size:.68rem;color:#5e5a52;word-break:break-all}
+#print-area{display:none}
+@media print{
+  body.printing > *:not(#print-area){display:none !important}
+  body.printing #print-area{display:flex !important;justify-content:center;padding-top:24mm}
+  body.printing{background:#fff !important}
+  #print-area .qr-label{max-width:90mm;border-color:#999}
+  #print-area .ql-qr svg{width:70mm;height:70mm}
+}

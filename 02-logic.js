@@ -11,7 +11,7 @@ const driverCustodies = did => S.custody.filter(c => c.driverId === did && !c.en
 const custodyAt = (vid, ts) => S.custody.find(c => c.vehicleId === vid && c.start <= ts && (!c.end || ts < c.end)) || null;
 const segmentAt = (c, ts) => c ? (c.segments.filter(s => s.at <= ts).at(-1) || null) : null;
 const currentSegment = c => c ? (c.segments.at(-1) || null) : null;
-const activeTransfer = vid => S.transfers.find(t => t.vehicleId === vid && !['concluida', 'cancelada'].includes(t.status)) || null;
+const activeTransfer = vid => S.transfers.find(t => t.vehicleId === vid && tOpen(t)) || null;
 const openIssues = vid => S.issues.filter(i => i.vehicleId === vid && i.status === 'aberta');
 const vehicleByPlate = p => S.vehicles.find(v => v.plate === String(p).toUpperCase().replace(/[^A-Z0-9]/g, ''));
 
@@ -34,6 +34,12 @@ function dailyDoneToday(vid) {
   return S.checklists.find(k => k.vehicleId === vid && k.custodyId === c.id && ['diario', 'recebimento'].includes(k.type) && isToday(k.at)) || null;
 }
 function needsDaily(v) { const c = activeCustody(v.id); return !!c && !v.maintenance && !dailyDoneToday(v.id); }
+/* checklist completo = todos os itens avaliados e as 5 fotos */
+const ckComplete = k => !!k && CK_ITEMS.every(([x]) => k.items && k.items[x]) && PHOTO_SLOTS.every(([x]) => k.photos && k.photos[x] && !String(k.photos[x]).startsWith('removida'));
+/* a entrega pode ser só a confirmação rápida quando o recebimento daquela posse teve o checklist completo */
+const quickDeliveryOk = c => !!c && ckComplete(byId(S.checklists, c.receiveChecklistId));
+/* entrega válida para a premiação: checklist completo, ou confirmação rápida sobre um recebimento completo */
+const deliveryOk = (c, k) => ckComplete(k) || (!!k && k.quick === true && quickDeliveryOk(c));
 function lastChecklist(vid) { return S.checklists.filter(k => k.vehicleId === vid).sort((a, b) => b.at - a.at)[0] || null; }
 
 /* ----- manutenção ----- */
@@ -81,6 +87,9 @@ function vehicleAvgKmL(vid, before = Infinity) {
 }
 const fuelOutlier = f => { const m = fuelMetrics(f); return m.delta != null && Math.abs(m.delta) > S.settings.fuelDeviationPct ? m : null; };
 
+/* ----- multas válidas (as apagadas pelo gestor ficam só no histórico) ----- */
+const liveFines = () => S.fines.filter(f => !f.voidedAt);
+
 /* ----- cruzamento pedágio / multa com a posse ----- */
 function matchAt(plate, ts) {
   const v = vehicleByPlate(plate); if (!v) return { v: null };
@@ -108,7 +117,7 @@ function periodCosts(from, to) {
   const rows = [];
   S.fuel.filter(f => inP(f.at)).forEach(f => rows.push({ kind: 'Combustível', value: f.total, vehicleId: f.vehicleId, driverId: f.driverId, projectId: f.projectId }));
   S.tolls.filter(t => inP(t.at)).forEach(t => { const m = tollMatch(t); rows.push({ kind: 'Pedágios', value: t.value, vehicleId: m.vehicleId, driverId: m.driverId, projectId: m.projectId }); });
-  S.fines.filter(f => inP(f.at)).forEach(f => { const m = fineMatch(f); rows.push({ kind: 'Multas', value: f.value, vehicleId: m.vehicleId, driverId: m.driverId, projectId: m.projectId }); });
+  liveFines().filter(f => inP(f.at)).forEach(f => { const m = fineMatch(f); rows.push({ kind: 'Multas', value: f.value, vehicleId: m.vehicleId, driverId: m.driverId, projectId: m.projectId }); });
   S.maintRecords.filter(r => inP(r.at)).forEach(r => { const c = custodyAt(r.vehicleId, r.at); rows.push({ kind: 'Manutenção', value: r.cost, vehicleId: r.vehicleId, driverId: null, projectId: c ? segmentAt(c, r.at)?.projectId : null }); });
   rows.push(...docCosts(from, to));
   return rows;
@@ -175,7 +184,7 @@ function attentionItems() {
     const rs = rentalState(v);
     if (rs && rs.lvl !== 'normal') out.push({ c: M_LEVEL[rs.lvl].c, r: rs.lvl === 'vencido' ? 9 : rs.lvl === 'urgente' ? 6 : 2, icon: 'key', title: `${v.plate} · locação`, sub: rs.days < 0 ? `Devolução vencida há ${-rs.days} dias` : rs.days === 0 ? 'Devolver ou renovar hoje' : `Devolver ou renovar em ${rs.days} dias`, text: `Locação do ${v.plate} vence em ${rs.days} dias.`, at: null, go: { page: 'veiculo', id: v.id } });
   });
-  S.transfers.filter(t => !['concluida', 'cancelada'].includes(t.status)).forEach(t => {
+  S.transfers.filter(tOpen).forEach(t => {
     const age = nowTs() - t.requestedAt; const late = age > S.settings.transferAlertHours * 36e5;
     const who = ['solicitada', 'aguardando_entrega', 'entrega_andamento'].includes(t.status) ? drv(t.fromDriverId).name : drv(t.toDriverId).name;
     out.push({ c: late ? 'urg' : 'warn', r: late ? 6 : 3, icon: 'swap', title: `${veh(t.vehicleId).plate} · transferência`, sub: `${who} · ${T_LABEL[t.status].toLowerCase()} há ${dur(age)}`, text: `Condutor ${who} possui transferência pendente.`, at: t.requestedAt, go: { page: 'transferencia', id: t.id } });
@@ -184,7 +193,7 @@ function attentionItems() {
   S.fuel.filter(f => nowTs() - f.at < 7 * DAY).forEach(f => { const m = fuelOutlier(f); if (m && m.delta < 0) out.push({ c: 'warn', r: 2, icon: 'fuel', title: `${veh(f.vehicleId).plate} · consumo alto`, sub: `${nf(m.kmL, 1)} km/l (${nf(m.delta, 0)}% da média)`, text: '', at: f.at, go: { page: 'abastecimento' } }); });
   const unT = S.tolls.filter(t => tollMatch(t).how === 'sem').length;
   if (unT) out.push({ c: 'warn', r: 1, icon: 'toll', title: `${unT} pedágio(s) sem condutor`, sub: 'Aguardam ajuste manual', text: '', at: null, go: { page: 'pedagios', f: 'sem' } });
-  const unF = S.fines.filter(f => fineMatch(f).how === 'sem').length;
+  const unF = liveFines().filter(f => fineMatch(f).how === 'sem').length;
   if (unF) out.push({ c: 'warn', r: 1, icon: 'fine', title: `${unF} multa(s) sem condutor`, sub: 'Sem posse no horário', text: '', at: null, go: { page: 'multas' } });
   out.push(...docAttention());
   return out.sort((a, b) => b.r - a.r);
