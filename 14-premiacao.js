@@ -102,11 +102,16 @@ function driverScore(did, key = curPeriod()) {
     const dl = d + hm(P.deadline) * MIN;
     if (vehs.length && vehs.every(v => blockedAt(v, dl))) { exempt++; return; } // veículo parado por problema crítico
     const dk = cks.filter(k => tsOf(k) >= d && tsOf(k) < nextDay(d));
-    if (dk.some(k => k.type !== 'diario') || dk.some(k => tsOf(k) <= dl)) { onTime++; return; }
+    // o prazo vale para quem estava com o veículo no horário do prazo: precisa de um checklist (diário, recebimento
+    // ou entrega) até o prazo; entregar depois não tira o atraso nem a ausência.
+    // Quem entregou antes do prazo ou recebeu depois dele: o checklist de entrega/recebimento vale como o do dia.
+    const heldAtDl = cs.some(c => c.start <= dl && (!c.end || c.end > dl));
+    if (dk.some(k => tsOf(k) <= dl) || (!heldAtDl && dk.length)) { onTime++; return; }
     const lk = dk.find(k => k.type === 'diario');
     if (lk) { late++; add({ key: `B:${dayKey(d)}`, mod: 'B', at: tsOf(lk), pts: P.discLate, why: `Checklist diário enviado às ${fmtTime(tsOf(lk))}, depois do prazo (${P.deadline})`, ev: { checklistId: lk.id, vehicleId: lk.vehicleId } }); return; }
     if (now < nextDay(d)) { pending++; return; } // hoje: ainda dá tempo até 23h59 (sem desconto por enquanto)
-    absent++; add({ key: `B:${dayKey(d)}`, mod: 'B', at: d, pts: P.discAbsent, why: 'Nenhum checklist diário enviado no dia', ev: { vehicleId: vehs[0] || null } });
+    const lo = dk.filter(k => k.type !== 'diario').sort((x, y) => tsOf(x) - tsOf(y))[0];
+    absent++; add({ key: `B:${dayKey(d)}`, mod: 'B', at: d, pts: P.discAbsent, why: lo ? `Nenhum checklist diário até o prazo (${P.deadline}); a ${CK_TYPES[lo.type].toLowerCase()} às ${fmtTime(tsOf(lo))} não substitui o diário` : 'Nenhum checklist diário enviado no dia', ev: { vehicleId: vehs[0] || null, checklistId: lo?.id || null } });
   });
 
   // C · abastecimento com foto do hodômetro (−10 por abastecimento sem foto)
@@ -308,7 +313,7 @@ PAGES.bonificacao = {
     if (tab === 'ocorrencias') {
       const all = el.flatMap(({ d, sc }) => sc.occurrences.map(o => ({ d, o })));
       return `<div class="stack">${tabs}<div class="page-head" style="margin:0">${nav}${M && !c ? `<button class="btn pri" data-act="bn-occ-new" data-p="${key}">${ic('plus')}Registrar ocorrência</button>` : ''}</div>
-        <div class="note">${ic('alert')}<div>Os descontos de entrega/recebimento, checklist diário e foto do hodômetro são identificados automaticamente pelos registros. O recebimento exige o checklist completo; quem recebeu com checklist completo entrega com a confirmação rápida (sem alterações), sem desconto. Abastecimento <b>sem registro</b> no aplicativo é lançado pela gestão a partir do extrato do cartão combustível. Abonos exigem justificativa e o original fica visível.</div></div>
+        <div class="note">${ic('alert')}<div>Os descontos de entrega/recebimento, checklist diário e foto do hodômetro são identificados automaticamente pelos registros. O recebimento exige o checklist completo; quem recebeu com checklist completo entrega com a confirmação rápida (sem alterações), sem desconto. No checklist diário, quem está com o veículo no horário do prazo precisa de um checklist até o prazo (entregar mais tarde não tira o atraso); quem entrega antes do prazo ou recebe depois dele fica liberado do diário naquele dia. Abastecimento <b>sem registro</b> no aplicativo é lançado pela gestão a partir do extrato do cartão combustível. Abonos exigem justificativa e o original fica visível.</div></div>
         <div class="panel">${tbl(['Condutor', 'Data', 'Mod.', 'Motivo e evidência', '>Pontos', ...(M ? [''] : [])], all.sort((a, b) => b.o.at - a.o.at).map(({ d, o }) => occRow(o, { manage: M, did: d.id, key, closed: !!c, who: d })), 'Nenhum desconto neste período.')}</div></div>`;
     }
     const medal = ['var(--u-green)', 'var(--text3)', 'var(--border)'];

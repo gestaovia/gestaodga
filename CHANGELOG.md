@@ -7,6 +7,12 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.9.1 — 15/10/2026
+- **Correção na premiação (modalidade B, checklist diário):** o prazo passa a valer para quem estava com o veículo no horário do prazo (10h). Essa pessoa precisa de um checklist até o prazo (diário, recebimento ou entrega); entregar o veículo mais tarde **não tira mais** o desconto de atraso (−10) nem o de ausência (−15). Antes, qualquer entrega ou recebimento no mesmo dia, em qualquer horário, apagava o desconto.
+- Continua igual: quem entrega antes do prazo fica liberado do diário naquele dia; quem recebe depois do prazo tem o recebimento valendo como checklist do dia.
+- O extrato explica a ausência quando houve entrega depois do prazo ("a entrega às 17:00 não substitui o diário").
+- Vale para o período em aberto (recalculado automaticamente); períodos já fechados não mudam.
+
 ## v1.9.0 — 15/10/2026
 - **Checklist de recebimento completo, entrega com confirmação rápida:** todo condutor que recebe um veículo faz o checklist completo (itens + 5 fotos). Na entrega ou transferência, quem fez o recebimento completo só responde "Houve alguma alteração no veículo desde o seu recebimento?": **Não, sem alterações** pede só a quilometragem (foto do painel opcional); **Sim, houve** abre o checklist completo. Quem recebeu sem checklist completo (registros antigos) continua fazendo a entrega completa.
 - **Recebimento confere o checklist anterior (auditoria):** a tela de recebimento mostra o último checklist completo do veículo (de quem, quando, km, combustível, apontamentos e avarias) e avisa quando o condutor anterior entregou com a confirmação rápida. O que o novo condutor marcar pior do que no checklist anterior (ex.: Lataria OK → Ruim) ou avaria nova fica registrado como **divergência**: aparece no checklist, no PDF, na lista de checklists ("Divergência") e a gestão recebe aviso.
