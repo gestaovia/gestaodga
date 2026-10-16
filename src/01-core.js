@@ -24,17 +24,22 @@ const byId = (arr, id) => arr.find(x => x.id === id);
 
 /* ----- rótulos ----- */
 const ROLES = { admin: 'Administrador', gestor: 'Gestor de Frota', supervisor: 'Supervisor', condutor: 'Condutor' };
+// cor do status do veículo: amarelo = disponível, verde = com condutor, vermelho = com problema
 const V_STATUS = {
-  disponivel: { l: 'Disponível', c: 'ok' }, em_uso: { l: 'Em uso', c: 'neu' }, deslocamento: { l: 'Em deslocamento', c: 'neu' },
-  parado: { l: 'Parado', c: 'gray' }, aguardando_transferencia: { l: 'Aguardando transferência', c: 'warn' },
-  manutencao: { l: 'Em manutenção', c: 'gray' }, bloqueado: { l: 'Bloqueado', c: 'bad' }, pendencia: { l: 'Com pendência', c: 'warn' }
+  disponivel: { l: 'Disponível', c: 'vs-free' }, em_uso: { l: 'Em uso', c: 'vs-drv' }, deslocamento: { l: 'Em deslocamento', c: 'vs-drv' },
+  parado: { l: 'Parado', c: 'gray' }, aguardando_transferencia: { l: 'Aguardando transferência', c: 'vs-drv' },
+  manutencao: { l: 'Em manutenção', c: 'gray' }, bloqueado: { l: 'Bloqueado', c: 'vs-prob' }, pendencia: { l: 'Com pendência', c: 'vs-prob' }
 };
+const VS_LEGEND = [['vs-free', 'Disponível'], ['vs-drv', 'Com condutor'], ['vs-prob', 'Com problema'], ['gray', 'Em manutenção']];
 const T_STATUS = [
   ['posse', 'Posse ativa'], ['solicitada', 'Transferência solicitada'], ['aguardando_entrega', 'Aguardando entrega'],
   ['entrega_andamento', 'Checklist de entrega em andamento'], ['aguardando_recebimento', 'Aguardando recebimento'],
   ['recebimento_andamento', 'Checklist de recebimento em andamento'], ['concluida', 'Transferência concluída']
 ];
-const T_LABEL = Object.fromEntries([...T_STATUS, ['cancelada', 'Cancelada']]);
+const T_LABEL = Object.fromEntries([...T_STATUS, ['cancelada', 'Cancelada'], ['negada', 'Entrega negada']]);
+// situações finais da transferência (não estão mais em andamento)
+const T_DONE = ['concluida', 'cancelada', 'negada'];
+const tOpen = t => !T_DONE.includes(t.status);
 const CK_TYPES = {
   recebimento: 'Recebimento', entrega: 'Entrega', devolucao: 'Devolução', diario: 'Diário',
   manut_entrada: 'Entrada em manutenção', manut_saida: 'Saída de manutenção', avaria: 'Registro de avaria'

@@ -35,8 +35,9 @@ async function checklistPDF(id) {
 
   // cabeçalho
   doc.setFillColor(...BLUE); doc.rect(0, 0, W, 28, 'F');
-  text('gestaovia', M, 11, { bold: true, size: 11, color: [255, 255, 255] });
+  const org = orgOf(); text(`${org.displayName || org.name || 'GestaoVia'}${org.cnpj ? ` · CNPJ ${cnpjFmt(org.cnpj)}` : ''}`, M, 11, { bold: true, size: 11, color: [255, 255, 255] });
   text({ diario: 'Checklist diário', avaria: 'Registro de avaria' }[k.type] || `Checklist de ${CK_TYPES[k.type].toLowerCase()}`, M, 20, { bold: true, size: 16, color: [255, 255, 255] });
+  try { doc.addImage(window.GV_LOGO, 'PNG', W - M - 64, 7, 15, 15); } catch (e) { }
   doc.setFillColor(255, 255, 255); doc.roundedRect(W - M - 46, 7, 46, 15, 2, 2, 'F');
   doc.setFillColor(46, 46, 46); doc.rect(W - M - 46, 7, 46, 3, 'F');
   text(v.plate, W - M - 23, 19, { bold: true, size: 15, color: INK, align: 'center' });
@@ -55,7 +56,7 @@ async function checklistPDF(id) {
     ['Veículo', `${v.brand} ${v.model} · ${v.year}`], ['Placa', v.plate],
     ['Condutor', who], ['Quilometragem', `${nf(k.km)} km`],
     ['Combustível', k.fuelLevel || '—'], ['Obra', seg ? `${prj(seg.projectId).code} · ${prj(seg.projectId).name}` : '—'],
-    ['Centro de custo', seg ? `${ccOf(seg.ccId).code} – ${ccOf(seg.ccId).name}` : '—'], ['Localização', k.location ? `${k.location.lat.toFixed(5)}, ${k.location.lng.toFixed(5)} (${k.location.source === 'celular' ? 'GPS do celular' : 'rastreador'})` : '—']
+    ['Localização', k.location ? `${k.location.lat.toFixed(5)}, ${k.location.lng.toFixed(5)} (${k.location.source === 'celular' ? 'GPS do celular' : 'rastreador'})` : '—']
   ];
   if (t) rows.push(['Transferência', `${drv(t.fromDriverId)?.name || '—'} para ${drv(t.toDriverId)?.name || 'pátio'}`], ['Situação', T_LABEL[t.status]]);
   const cw = (W - 2 * M) / 2;
@@ -78,6 +79,8 @@ async function checklistPDF(id) {
   }
   const para = (label, body, color) => { if (!body) return; const lines = doc.splitTextToSize(body, W - 2 * M - 8); need(10 + lines.length * 4.5); doc.setFillColor(...(color || SOFT)); doc.roundedRect(M, y - 4, W - 2 * M, 8 + lines.length * 4.5, 2, 2, 'F'); text(label, M + 4, y + 0.5, { bold: true, size: 8.5 }); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...INK); doc.text(lines, M + 4, y + 5.2); y += 10 + lines.length * 4.5; };
   y += 3;
+  if (k.quick) para('Entrega com confirmação rápida', 'O condutor confirmou que não houve alterações no veículo desde o recebimento com checklist completo. Quem recebe faz o checklist completo e confere.');
+  if (k.audit) para('Conferência com o checklist anterior', k.audit.diffs?.length ? k.audit.diffs.map(diffText).join('\n') : 'Sem divergências.', k.audit.diffs?.length ? [254, 243, 199] : null);
   para('Avarias', k.avarias, [254, 243, 199]);
   para('Observações', k.notes);
   if (iss) para(`Problema: ${iss.type} · criticidade ${SEVERITY[iss.severity].l.toLowerCase()}${iss.canRun ? '' : ' · veículo não pode circular'}`, iss.desc, [254, 226, 226]);

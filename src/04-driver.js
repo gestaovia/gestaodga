@@ -1,7 +1,8 @@
 /* ===================== Fluxos do condutor: QR, posse, checklists, abastecimento ===================== */
 const PRESENCE = ['estepe', 'ferramentas', 'documentacao'];
 const lastRecordedKm = vid => {
-  const ks = [...S.checklists.filter(k => k.vehicleId === vid && k.km).map(k => k.km), ...S.fuel.filter(f => f.vehicleId === vid).map(f => f.km), ...S.custody.filter(c => c.vehicleId === vid).map(c => c.endKm || c.startKm)];
+  // inclui o hodômetro do veículo: o condutor não lê checklists de outros condutores, mas lê a quilometragem atual
+  const ks = [veh(vid)?.odometer || 0, ...S.checklists.filter(k => k.vehicleId === vid && k.km).map(k => k.km), ...S.fuel.filter(f => f.vehicleId === vid).map(f => f.km), ...S.custody.filter(c => c.vehicleId === vid).map(c => c.endKm || c.startKm)];
   return ks.length ? Math.max(...ks) : 0;
 };
 const suggestedKm = v => v.odometer;
@@ -35,7 +36,7 @@ function requestTransfer(v, did) {
   const t = { id: uid('trf'), vehicleId: v.id, fromDriverId: c.driverId, toDriverId: did, status: 'solicitada', requestedAt: nowTs(), forced: false, justification: '', requestedBy: CUR.id, fromCustodyId: c.id, toCustodyId: null, deliverChecklistId: null, receiveChecklistId: null, events: [{ at: nowTs(), status: 'solicitada', by: CUR.id, note: `Solicitado por ${drv(did).name}` }] };
   S.transfers.push(t);
   log('transferencia', `${drv(did).name} solicitou a transferência do veículo`, { vehicleId: v.id, driverId: did });
-  notify(c.driverId, `${drv(did).name} solicitou a transferência do ${v.plate}. Faça a entrega com o checklist.`, { level: 'warn', link: { page: 'transferencia', id: t.id } });
+  notify(c.driverId, `${drv(did).name} solicitou a transferência do ${v.plate}. Aceite e faça a entrega, ou negue informando o motivo.`, { level: 'warn', link: { page: 'transferencia', id: t.id } });
   save();
   return t;
 }
@@ -46,41 +47,56 @@ PAGES.inicio = {
   render() {
     const d = myDriver(); if (!d) return '<div class="drv"><p>Usuário sem cadastro de condutor.</p></div>';
     const cs = driverCustodies(d.id); const c = cs[0]; const v = c ? veh(c.vehicleId) : null;
-    const trs = S.transfers.filter(t => !['concluida', 'cancelada'].includes(t.status) && (t.fromDriverId === d.id || t.toDriverId === d.id));
+    const trs = S.transfers.filter(t => tOpen(t) && (t.fromDriverId === d.id || t.toDriverId === d.id));
     const banners = trs.map(t => {
       const tv = veh(t.vehicleId);
-      if (t.fromDriverId === d.id && t.status === 'solicitada') return `<div class="note warn stack" style="gap:8px"><div><b>${esc(drv(t.toDriverId).name)}</b> solicitou a transferência do ${plate(tv.plate)}.</div><div class="row"><button class="btn ok" data-act="t-accept" data-id="${t.id}">Aceitar e fazer a entrega</button><button class="btn" data-go="transferencia" data-id="${t.id}">Ver detalhes</button></div></div>`;
-      if (t.fromDriverId === d.id && ['aguardando_entrega', 'entrega_andamento'].includes(t.status)) return `<div class="note warn stack" style="gap:8px"><div>Entrega pendente do ${plate(tv.plate)} para <b>${esc(drv(t.toDriverId).name)}</b>.</div><button class="btn pri" data-go="entregar" data-vid="${tv.id}" data-tid="${t.id}">Fazer checklist de entrega</button></div>`;
+      if (t.fromDriverId === d.id && t.status === 'solicitada') return `<div class="note warn stack" style="gap:8px"><div><b>${esc(drv(t.toDriverId).name)}</b> solicitou a transferência do ${plate(tv.plate)}.</div><div class="row"><button class="btn ok" data-act="t-accept" data-id="${t.id}">Aceitar e fazer a entrega</button><button class="btn danger" data-act="t-deny" data-id="${t.id}">Negar</button><button class="btn" data-go="transferencia" data-id="${t.id}">Ver detalhes</button></div></div>`;
+      if (t.fromDriverId === d.id && ['aguardando_entrega', 'entrega_andamento'].includes(t.status)) return `<div class="note warn stack" style="gap:8px"><div>Entrega pendente do ${plate(tv.plate)} para <b>${esc(drv(t.toDriverId).name)}</b>.</div><div class="row"><button class="btn pri" data-go="entregar" data-vid="${tv.id}" data-tid="${t.id}">Fazer a entrega</button><button class="btn danger" data-act="t-deny" data-id="${t.id}">Negar entrega</button></div></div>`;
       if (t.toDriverId === d.id && ['aguardando_recebimento', 'recebimento_andamento'].includes(t.status)) return `<div class="note ok stack" style="gap:8px"><div>O ${plate(tv.plate)} foi entregue e está liberado para você.</div><button class="btn pri" data-go="receber" data-vid="${tv.id}">Fazer checklist de recebimento</button></div>`;
-      if (t.toDriverId === d.id) return `<div class="note">Você solicitou o ${plate(tv.plate)}. Aguardando ${esc(drv(t.fromDriverId).name)} realizar a entrega (${T_LABEL[t.status].toLowerCase()}).</div>`;
+      if (t.toDriverId === d.id) return `<div class="note stack" style="gap:8px"><div>Você solicitou o ${plate(tv.plate)}. Aguardando ${esc(drv(t.fromDriverId).name)} realizar a entrega (${T_LABEL[t.status].toLowerCase()}).</div>${tCanCancel(t) ? `<div class="row"><button class="btn danger" data-act="t-cancel" data-id="${t.id}">Cancelar solicitação</button></div>` : ''}</div>`;
       return '';
-    }).join('');
+    }).join('') + S.transfers.filter(t => t.status === 'negada' && t.toDriverId === d.id && nowTs() - (t.deniedAt || 0) < DAY).map(t => `<div class="note bad"><div>${esc(drv(t.fromDriverId)?.name || 'O condutor')} negou a entrega do ${plate(veh(t.vehicleId).plate)}: <b>${esc(t.denyReason || '')}</b></div></div>`).join('');
     const daily = v ? dailyDoneToday(v.id) : null;
     const seg = currentSegment(c);
     const sc = driverScore(d.id);
-    const card = v ? `<div class="veh-card" data-go="meu_veiculo" style="cursor:pointer">
-        <div class="top-line">${plate(v.plate, true)}${stTag(vStatus(v))}</div>
+    const unread = myNotifications().filter(n => !n.read).length;
+    // a placa abre os dados do veículo (substitui o antigo botão "Meu veículo")
+    const card = v ? `<div class="veh-card">
+        <div class="top-line"><button type="button" class="plate-btn" data-go="meu_veiculo" aria-label="Ver dados do veículo ${esc(v.plate)}" title="Ver dados do veículo">${plate(v.plate, true)}<span class="plate-hint">${ic('chev')}</span></button>${stTag(vStatus(v))}</div>
         <dl class="pairs"><div><dt>Obra</dt><dd>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</dd></div><div><dt>Com você há</dt><dd>${dur(nowTs() - c.start)}</dd></div>
-        <div><dt>Checklist hoje</dt><dd>${daily ? `<span class="st"><span class="dot ok"></span>${fmtTime(daily.at)}</span>` : '<span class="st"><span class="dot warn"></span>Pendente</span>'}</dd></div><div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
+        ${daily ? `<div class="ck-done"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot ok"></span>Feito às ${fmtTime(daily.at)}</span></dd></div>` : `<div class="ck-pend" role="status"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot bad"></span>Pendente</span></dd></div>`}<div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
       </div>` : `<div class="veh-card" style="align-items:center;text-align:center;padding:22px"><span class="avatar lg" style="background:var(--border2);color:var(--text3)">${ic('car')}</span><b>Nenhum veículo com você</b><span class="muted small">Escaneie o QR Code do carro para receber.</span></div>`;
+    const dl = deadlineNow(); const [dh, dm] = dl.split(':');
+    const dlTxt = `${+dh}h${dm && dm !== '00' ? dm : ''}`;
+    // ação principal: com veículo, o checklist diário; sem veículo, escanear o QR Code para receber
+    const main = v
+      ? `<button class="tile primary scan main-act ${daily ? 'is-done' : ''}" data-go="diario" data-vid="${v.id}"><span class="ti">${ic('check')}</span><span><b>Checklist diário</b><small>${daily ? `Feito hoje às ${fmtTime(daily.at)}` : `Prazo até ${dlTxt}`}</small></span></button>`
+      : `<button class="tile primary scan main-act" data-go="scanner"><span class="ti">${ic('qr')}</span><span><b>Escanear veículo</b><small>Ler o QR Code do carro</small></span></button>`;
     const dis = v ? '' : 'disabled';
-    const T = (go, icon, t, s, cls = '', flag = '') => `<button class="tile ${cls}" data-go="${go}" ${v ? `data-vid="${v.id}"` : ''} ${go === 'scanner' ? '' : dis}><span class="ti">${ic(icon)}</span><span><b>${t}</b><small>${s}</small></span>${flag}</button>`;
-    return `<div class="drv">
-      <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div><p class="muted small">${cap(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}</p><h1>Olá, ${esc(d.name.split(' ')[0])}</h1></div>
-        <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${ring(sc.total, true)}</button></div>
+    const T = (go, icon, t, s, cls = '') => `<button class="tile ${cls}" data-go="${go}" ${v ? `data-vid="${v.id}"` : ''} ${dis}><span class="ti">${ic(icon)}</span><span><b>${t}</b><small>${s}</small></span></button>`;
+    return `<div class="drv drv-home">
+      <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div class="drv-who"><button type="button" data-go="perfil" aria-label="Meu perfil" style="border:0;background:none;padding:0;cursor:pointer">${av(CUR)}</button><div style="min-width:0"><p class="muted small">${cap(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}</p><h1>Olá, ${esc(d.name.split(' ')[0])}</h1></div></div>
+        <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}</button></div>
+      ${v && openIssues(v.id).some(i => i.severity === 'critica' || !i.canRun) ? `<div class="note bad stack" style="gap:8px"><div><b>Problema crítico no ${esc(v.plate)}.</b> Se precisar de guincho, socorro ou houve acidente, acione o seguro.</div><button class="btn danger lg block" data-go="seguro" data-vid="${v.id}">${ic('shield')}Acionar seguro</button></div>` : ''}
+      ${unread ? `<button class="note neu notif-line" data-act="notifs">${ic('bell')}<span style="flex:1;text-align:left">${unread === 1 ? 'Você tem 1 aviso novo' : `Você tem ${unread} avisos novos`}</span>${ic('chev')}</button>` : ''}
       ${banners}${card}${v ? `<div>${gpsChip()}</div>` : ''}
+      ${main}
       <div class="tiles">
-        ${T('scanner', 'qr', 'Escanear veículo', 'Ler o QR Code do carro', 'primary scan')}
-        ${T('diario', 'check', 'Checklist diário', daily ? `Feito às ${fmtTime(daily.at)}` : 'Poucos segundos', daily ? 't-green' : '', v && !daily ? '<span class="flag pill warn">pendente</span>' : v ? '<span class="flag pill ok">ok</span>' : '')}
-        ${T('abastecer', 'fuel', 'Abastecer', 'Com foto do cupom')}
-        ${T('problema', 'alert', 'Informar problema', 'Avaria ou defeito', 't-red')}
-        ${T('entregar', 'handoff', 'Entregar veículo', 'Devolver ou trocar', 't-violet')}
-        ${T('meu_veiculo', 'car', 'Meu veículo', v ? v.plate : 'Nenhum', '')}
-        ${T('obra', 'pin', 'Trocar obra', seg ? `Agora: ${prj(seg.projectId).code}` : 'Sem obra', 't-amber')}
+        ${T('entregar', 'handoff', 'Entregar veículo', 'Devolver ou trocar')}
+        ${T('obra', 'pin', 'Trocar obra', seg ? `Agora: ${esc(prj(seg.projectId).code)}` : 'Sem obra')}
+        ${T('problema', 'alert', 'Informar problema', 'Avaria ou defeito')}
+        ${T('abastecer', 'fuel', 'Registrar abastecimento', 'Opcional')}
+        ${T('documento', 'doc', 'Documento do veículo', 'CRLV para a fiscalização')}
+        <button class="tile" data-go="meus_checklists"><span class="ti">${ic('list')}</span><span><b>Meus checklists</b><small>Histórico de todas as posses</small></span></button>
+      </div>
+      <div class="drv-account" aria-label="Conta">
+        <button data-act="notifs">${ic('bell')}<span>Avisos${unread ? ` (${unread})` : ''}</span></button>
+        <button data-go="perfil">${ic('user')}<span>Meu perfil</span></button>
+        <button data-act="theme">${ic(themeNow() === 'dark' ? 'sun' : 'moon')}<span>${themeNow() === 'dark' ? 'Modo claro' : 'Modo escuro'}</span></button>
+        <button data-act="logout">${ic('logout')}<span>Sair</span></button>
       </div></div>`;
   }
 };
-ACTIONS['my-score'] = () => { const sc = driverScore(CUR.driverId); openModal({ title: `Minha pontuação · ${monthLabel()}`, body: scoreBreakdown(sc) }); };
 ACTIONS['t-accept'] = a => {
   const t = byId(S.transfers, a.dataset.id);
   setTransfer(t, 'aguardando_entrega', 'Condutor atual aceitou a solicitação');
@@ -178,7 +194,7 @@ PAGES.scan_result = {
         action = `<div class="note ok">Este veículo está sob sua responsabilidade.</div>
           <div class="actions">
             <button class="act" data-go="diario" data-vid="${vid}">${ic('check')}<span>Checklist diário</span></button>
-            <button class="act" data-go="abastecer" data-vid="${vid}">${ic('fuel')}<span>Abastecer</span></button>
+            <button class="act" data-go="abastecer" data-vid="${vid}">${ic('fuel')}<span>Registrar abastecimento</span></button>
             <button class="act" data-go="obra" data-vid="${vid}">${ic('pin')}<span>Alterar obra</span></button>
             <button class="act" data-go="problema" data-vid="${vid}">${ic('alert')}<span>Informar problema</span></button>
             <button class="act" data-go="entregar" data-vid="${vid}" ${t ? `data-tid="${t.id}"` : ''}>${ic('handoff')}<span>Entregar veículo</span></button>
@@ -187,8 +203,8 @@ PAGES.scan_result = {
         action = `<button class="btn pri lg block" data-go="receber" data-vid="${vid}">Receber este veículo</button><p class="muted small">Você fará o checklist de recebimento e escolherá a obra. A posse começa quando o checklist for concluído.</p>`;
       } else if (rc.other) {
         const mineT = t && t.toDriverId === me;
-        action = `<div class="note warn"><b>Veículo atualmente sob responsabilidade de ${esc(drv(rc.other.driverId).name)}.</b><br>Para receber este veículo, o atual responsável deve realizar a entrega.</div>
-          ${mineT ? `<div class="note">Sua solicitação foi enviada em ${fmtDT(t.requestedAt)}. Situação: <b>${T_LABEL[t.status]}</b>.</div><button class="btn block" data-go="transferencia" data-id="${t.id}">Acompanhar transferência</button>`
+        action = `<div class="note warn"><div><b>Veículo atualmente sob responsabilidade de ${esc(drv(rc.other.driverId).name)}.</b><br>Para receber este veículo, o atual responsável deve realizar a entrega.</div></div>
+          ${mineT ? `<div class="note">Sua solicitação foi enviada em ${fmtDT(t.requestedAt)}. Situação: <b>${T_LABEL[t.status]}</b>.</div><div class="row"><button class="btn" style="flex:1" data-go="transferencia" data-id="${t.id}">Acompanhar transferência</button>${tCanCancel(t) ? `<button class="btn danger" data-act="t-cancel" data-id="${t.id}">Cancelar solicitação</button>` : ''}</div>`
             : t ? `<div class="note">Já existe uma transferência em andamento para ${esc(drv(t.toDriverId).name)}.</div>`
               : `<button class="btn ok lg block" data-act="t-request" data-vid="${vid}">Enviar solicitação de transferência</button>`}`;
       } else {
@@ -251,13 +267,14 @@ function fullChecklistBody(v) {
 }
 function photoTile(k, l) {
   const p = DRAFT.photos[k];
-  return `<label class="ph ${p ? 'done' : ''}" data-slot="${k}">${p ? `<img src="${photoSrc(p)}" alt=""><span class="cap">${l} ✓</span>` : `${ic('camera')}<span>${l}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${k}" aria-label="Foto ${l}"></label>`;
+  return `<label class="ph ${p ? 'done' : ''}" data-slot="${k}">${p ? `<img src="${esc(photoSrc(p))}" alt=""><span class="cap">${l} ✓</span>` : `${ic('camera')}<span>${l}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${k}" aria-label="Foto ${l}"></label>`;
 }
 function bindDraft(form) {
   const upd = e => {
     const el = e.target; if (!el.name) return;
     if (el.name.startsWith('it_')) DRAFT.items[el.name.slice(3)] = el.value;
     else if (el.type === 'file') return;
+    else if (el.type === 'checkbox') DRAFT[el.name] = el.checked;
     else DRAFT[el.name] = el.value;
     DRAFT._onChange?.();
   };
@@ -266,15 +283,15 @@ function bindDraft(form) {
     const slot = e.target.dataset.photo; if (!slot || !e.target.files[0]) return;
     DRAFT.photos[slot] = await readPhoto(e.target.files[0]);
     const tile = form.querySelector(`[data-slot="${slot}"]`);
-    const lab = { cupom: 'Foto do cupom ou nota fiscal', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
-    if (tile) tile.outerHTML = slot === 'cupom' || slot === 'problema' || slot === 'painel_d' ? singlePhoto(slot, lab) : photoTile(slot, lab);
+    const lab = tile?.dataset.label || { cupom: 'Foto do cupom ou nota fiscal', hodometro: 'Foto do hodômetro (obrigatória)', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
+    if (tile) tile.outerHTML = ['cupom', 'hodometro', 'problema', 'painel_d'].includes(slot) ? singlePhoto(slot, lab) : photoTile(slot, lab);
     DRAFT._onChange?.();
   });
 }
 ACTIONS['ck-allok'] = () => { CK_ITEMS.forEach(([k]) => { DRAFT.items[k] = 'ok'; const r = $(`input[name="it_${k}"][value="ok"]`); if (r) r.checked = true; }); };
 function singlePhoto(slot, label) {
   const p = DRAFT.photos[slot];
-  return `<label class="ph ${p ? 'done' : ''}" data-slot="${slot}" style="aspect-ratio:auto;min-height:92px;flex-direction:row;gap:10px">${p ? `<img src="${photoSrc(p)}" alt=""><span class="cap">${label} ✓ (toque para trocar)</span>` : `${ic('camera')}<span>${label}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${slot}" aria-label="${label}"></label>`;
+  return `<label class="ph ${p ? 'done' : ''}" data-slot="${slot}" data-label="${esc(label)}" style="aspect-ratio:auto;min-height:92px;flex-direction:row;gap:10px">${p ? `<img src="${esc(photoSrc(p))}" alt=""><span class="cap">${label} ✓ (toque para trocar)</span>` : `${ic('camera')}<span>${label}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${slot}" aria-label="${label}"></label>`;
 }
 function validateFull(v) {
   const e = [];
@@ -297,6 +314,41 @@ function saveFullChecklist(type, v, driverId, custodyId, kmv) {
 }
 const showErrors = e => { const el = $('#ck-err'); el.innerHTML = e.map(x => `<div>${esc(x)}</div>`).join(''); el.hidden = !e.length; if (e.length) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
 
+/* ---------- Conferência do checklist anterior (auditoria no recebimento) ---------- */
+const CK_RANK = { ok: 0, regular: 1, ruim: 2 };
+const ckVal = (x, v) => PRESENCE.includes(x) ? ({ ok: 'Presente', ruim: 'Ausente' }[v] || '—') : ({ ok: 'OK', regular: 'Regular', ruim: 'Ruim' }[v] || '—');
+function loadCkRef(vid) {
+  if (!CLOUD.on || !DRAFT || DRAFT.ref !== undefined) return;
+  DRAFT.ref = null; DRAFT.refLoading = true;
+  CLOUD.client().rpc('vehicle_checklist_reference', { p_vehicle: vid }).then(({ data, error }) => {
+    if (!DRAFT || DRAFT.vid !== vid) return;
+    DRAFT.refLoading = false; DRAFT.ref = error ? { err: true } : (data || {});
+    const el = $('#ck-ref'); if (el) el.outerHTML = refPanel();
+  });
+}
+function refPanel() {
+  const D = DRAFT; const r = D?.ref?.ref; const pv = D?.ref?.prev;
+  let body;
+  if (D?.refLoading) body = '<span class="muted small">Carregando o checklist anterior…</span>';
+  else if (D?.ref?.err) body = '<span class="muted small">Não foi possível carregar o checklist anterior agora. Faça o checklist com atenção: a gestão compara depois.</span>';
+  else if (!r) body = '<span class="muted small">Este veículo ainda não tem checklist completo anterior. O seu será a primeira referência.</span>';
+  else {
+    const at = Date.parse(r.at); const marks = CK_ITEMS.filter(([x]) => r.items?.[x] && r.items[x] !== 'ok').map(([x, l]) => `${l}: <b>${ckVal(x, r.items[x])}</b>`);
+    body = `<dl class="dl"><dt>Último checklist completo</dt><dd>${CK_TYPES[r.type] || r.type} · ${fmtDT(at)}${r.driverName ? ` · ${esc(r.driverName)}` : ''}</dd><dt>Quilometragem</dt><dd class="num">${km(r.km)}</dd>${r.fuelLevel ? `<dt>Combustível</dt><dd>${esc(r.fuelLevel)}</dd>` : ''}
+      <dt>Apontamentos</dt><dd>${marks.length ? marks.join('<br>') : 'Todos os itens OK ou presentes'}</dd>${r.avarias ? `<dt>Avarias</dt><dd>${esc(r.avarias)}</dd>` : ''}</dl>
+      ${pv && pv.quick ? `<div class="note warn small">${esc(pv.driverName || 'O condutor anterior')} entregou com a confirmação rápida (sem alterações) em ${fmtDT(Date.parse(pv.deliverAt))}. Confira o veículo com atenção.</div>` : ''}`;
+  }
+  return `<div class="panel" id="ck-ref"><div class="panel-h"><h3>Conferência do checklist anterior</h3></div><div class="panel-b stack" style="gap:10px">${body}<p class="small muted">O que estiver pior do que no checklist anterior fica registrado como divergência e a gestão é avisada.</p></div></div>`;
+}
+function ckDiffs(ref) {
+  if (!ref?.items) return [];
+  const out = CK_ITEMS.filter(([x]) => ref.items[x] && DRAFT.items[x] && CK_RANK[DRAFT.items[x]] > CK_RANK[ref.items[x]]).map(([x, l]) => ({ item: x, label: l, before: ref.items[x], after: DRAFT.items[x] }));
+  const av = (DRAFT.avarias || '').trim();
+  if (av && av !== (ref.avarias || '').trim()) out.push({ item: 'avarias', label: 'Avarias', before: ref.avarias || '', after: av });
+  return out;
+}
+const diffText = d => d.item === 'avarias' ? `Avarias: ${d.after}` : `${d.label}: ${ckVal(d.item, d.before)} → ${ckVal(d.item, d.after)}`;
+
 /* ---------- Recebimento ---------- */
 PAGES.receber = {
   driver: true, title: 'Recebimento do veículo',
@@ -309,16 +361,17 @@ PAGES.receber = {
       if (t && t.status === 'aguardando_recebimento') { setTransfer(t, 'recebimento_andamento', 'Novo condutor iniciou o checklist de recebimento'); log('transferencia', `${drv(t.toDriverId).name} iniciou o checklist de recebimento`, { vehicleId: vid, driverId: t.toDriverId }); save(); }
       captureLocation(v);
     }
-    const tInfo = rc.t ? `<div class="note">Transferência de ${esc(drv(rc.t.fromDriverId).name)} para você. Estado: <b>${T_LABEL[rc.t.status]}</b>.</div>` : '';
-    const first = !S.custody.some(c => c.vehicleId === vid);
+    loadCkRef(vid);
+    const tInfo = rc.t ? `<div class="note"><div>Transferência de ${esc(drv(rc.t.fromDriverId).name)} para você. Estado: <b>${T_LABEL[rc.t.status]}</b>.</div></div>` : '';
+    const first = !S.custody.some(c => c.vehicleId === vid) && !DRAFT.ref?.prev && !DRAFT.refLoading;
     return `<form class="drv" id="ckform" novalidate>
-      <div><p class="label">Checklist completo · ${first ? 'Primeiro recebimento' : rc.t ? 'Troca de condutor' : 'Recebimento'}</p><h1>Recebimento do veículo</h1></div>
+      <div><p class="label">Checklist completo · ${rc.t ? 'Troca de condutor' : first ? 'Primeiro recebimento' : 'Recebimento'}</p><h1>Recebimento do veículo</h1></div>
       ${tInfo}${ckHeader(v)}
       <div class="panel"><div class="panel-h"><h3>Obra e finalidade</h3><span class="muted small">Obrigatório para iniciar a posse</span></div><div class="panel-b form-grid">
         <label class="field full"><span>Obra</span><select class="inp" name="projectId" id="f-proj"><option value="">Selecione a obra</option>${projectOptions(DRAFT.projectId)}</select></label>
-        <label class="field"><span>Centro de custo</span><select class="inp" name="ccId" id="f-cc"><option value="">Automático pela obra</option>${ccOptions(DRAFT.ccId)}</select></label>
         <label class="field"><span>Atividade ou finalidade</span><select class="inp" name="purpose">${purposeOptions(DRAFT.purpose)}</select></label>
       </div></div>
+      ${refPanel()}
       ${fullChecklistBody(v)}
       <div class="note bad" id="ck-err" hidden role="alert"></div>
       <div class="sticky-foot"><button type="button" class="btn lg" data-go="scan_result" data-vid="${vid}">Cancelar</button><button class="btn ok lg" style="flex:1">Concluir e assumir a posse</button></div>
@@ -326,30 +379,41 @@ PAGES.receber = {
   },
   mount({ vid }) {
     const f = $('#ckform'); if (!f) return; bindDraft(f);
-    $('#f-proj').addEventListener('change', e => { const p = prj(e.target.value); if (p) { DRAFT.ccId = p.ccId; $('#f-cc').value = p.ccId; } });
     f.addEventListener('submit', e => {
       e.preventDefault();
       const v = veh(vid); const { e: errs, km: k } = validateFull(v);
-      if (!DRAFT.projectId) errs.unshift('Selecione a obra ou centro de custo.');
+      if (!DRAFT.projectId) errs.unshift('Selecione a obra.');
       if (errs.length) return showErrors(errs);
       const rc = receiveCheck(v, CUR.driverId); if (!rc.ok) return showErrors([rc.msg]);
       const did = CUR.driverId; const p = prj(DRAFT.projectId);
-      const c = { id: uid('cus'), vehicleId: vid, driverId: did, start: nowTs() + 1, end: null, startKm: k, endKm: null, receiveChecklistId: null, deliverChecklistId: null, segments: [{ at: nowTs(), projectId: p.id, ccId: DRAFT.ccId || p.ccId, purpose: DRAFT.purpose, by: did }], closedReason: null, transferId: rc.t?.id || null };
+      const c = { id: uid('cus'), vehicleId: vid, driverId: did, start: nowTs() + 1, end: null, startKm: k, endKm: null, receiveChecklistId: null, deliverChecklistId: null, segments: [{ at: nowTs(), projectId: p.id, ccId: null, purpose: DRAFT.purpose, by: did }], closedReason: null, transferId: rc.t?.id || null };
       const ck = saveFullChecklist('recebimento', v, did, c.id, k);
       c.receiveChecklistId = ck.id; S.custody.push(c);
+      // auditoria: compara com o último checklist completo do veículo (normalmente o do condutor anterior)
+      const ref = DRAFT.ref?.ref || null; const pv = DRAFT.ref?.prev || null; const diffs = ckDiffs(ref);
+      if (ref || pv) ck.audit = { refId: ref?.id || null, refType: ref?.type || null, refAt: ref ? Date.parse(ref.at) : null, refDriverId: ref?.driverId || null, prevDriverId: pv?.driverId || null, prevCustodyId: pv?.id || null, prevQuick: !!pv?.quick, diffs };
+      if (diffs.length) {
+        const who = pv?.driverName || ref?.driverName || 'condutor anterior';
+        log('checklist', `Recebimento com ${diffs.length} divergência(s) em relação ao checklist anterior (${who}): ${diffs.map(diffText).join('; ')}`, { vehicleId: vid, driverId: did, data: { checklistId: ck.id } });
+        notify('gestao', `Recebimento do ${v.plate} por ${drv(did).name}: ${diffs.length} divergência(s) em relação ao checklist de ${who}. ${diffs.map(diffText).join('; ')}`, { level: 'warn', link: { page: 'veiculo', id: vid } });
+      }
       log('posse_inicio', `${drv(did).name} recebeu o veículo. Posse iniciada`, { vehicleId: vid, driverId: did, at: nowTs() + 1 });
-      log('obra', `Vinculado à ${p.code} · ${ccOf(DRAFT.ccId || p.ccId).code} · ${DRAFT.purpose}`, { vehicleId: vid, driverId: did, at: nowTs() + 2 });
+      log('obra', `Vinculado à ${p.code} · ${DRAFT.purpose}`, { vehicleId: vid, driverId: did, at: nowTs() + 2 });
       if (rc.t) {
         rc.t.receiveChecklistId = ck.id; rc.t.toCustodyId = c.id; setTransfer(rc.t, 'concluida', 'Checklist de recebimento aprovado; posse transferida');
         log('transferencia', `Transferência concluída: ${drv(rc.t.fromDriverId).name} → ${drv(did).name}`, { vehicleId: vid, driverId: did, at: nowTs() + 3 });
         notify(rc.t.fromDriverId, `${drv(did).name} recebeu o ${v.plate}. Transferência concluída.`);
       }
-      save(); toast(`Posse iniciada: ${v.plate} está com você.`); go('meu_veiculo', { vid });
+      save(); toast(diffs.length ? `Posse iniciada. ${diffs.length} divergência(s) registrada(s) para a gestão.` : `Posse iniciada: ${v.plate} está com você.`); go('meu_veiculo', { vid });
     });
   }
 };
 
-/* ---------- Entrega ---------- */
+/* ---------- Entrega ----------
+   Quem fez o checklist COMPLETO no recebimento entrega só com a confirmação rápida (km + "sem alterações"),
+   como no checklist diário. Se algo mudou, abre o checklist completo. Quem recebe faz sempre o completo
+   e confere o checklist anterior (auditoria). */
+const openTransferOf = (vid, tid) => { const t = tid ? byId(S.transfers, tid) : activeTransfer(vid); return t && tOpen(t) && t.vehicleId === vid ? t : null; };
 PAGES.entregar = {
   driver: true, title: 'Entrega do veículo',
   render({ vid, tid }) {
@@ -358,40 +422,67 @@ PAGES.entregar = {
     if (!vid) return `<div class="drv"><h1>Entregar veículo</h1><div class="note">Você não está com nenhum veículo.</div></div>`;
     const v = veh(vid); const c = activeCustody(vid);
     if (!c || c.driverId !== CUR.driverId) return `<div class="drv"><h1>Entregar veículo</h1><div class="note bad">Somente o condutor responsável pode entregar este veículo.</div></div>`;
-    const t = tid ? byId(S.transfers, tid) : activeTransfer(vid);
+    const t = openTransferOf(vid, tid);
+    const quick = quickDeliveryOk(c);
     if (!DRAFT || DRAFT.kind !== 'entregar') {
-      newDraft('entregar', vid, { mode: t ? 'transfer' : 'devolucao' });
+      newDraft('entregar', vid, { mode: t ? 'transfer' : 'devolucao', tid: t?.id || null, changed: quick ? null : 'sim' });
       if (t && t.status === 'solicitada') { setTransfer(t, 'aguardando_entrega', 'Condutor atual aceitou a solicitação'); }
-      if (t && t.status === 'aguardando_entrega') { setTransfer(t, 'entrega_andamento', 'Checklist de entrega iniciado'); log('transferencia', `${drv(c.driverId).name} iniciou o checklist de entrega`, { vehicleId: vid, driverId: c.driverId }); save(); }
+      if (t && t.status === 'aguardando_entrega') { setTransfer(t, 'entrega_andamento', 'Entrega iniciada'); log('transferencia', `${drv(c.driverId).name} iniciou a entrega`, { vehicleId: vid, driverId: c.driverId }); save(); }
       captureLocation(v);
     }
-    const seg = currentSegment(c);
+    const seg = currentSegment(c); const D = DRAFT; const rk = byId(S.checklists, c.receiveChecklistId);
+    const full = !quick || D.changed === 'sim';
+    const who = t ? `Entrega para <b>${esc(drv(t.toDriverId).name)}</b>. Depois da entrega sua posse é encerrada e ${esc(drv(t.toDriverId).name.split(' ')[0])} faz o checklist completo de recebimento.` : `Devolução do veículo. Depois da entrega sua posse é encerrada e o veículo fica disponível.`;
     return `<form class="drv" id="ckform" novalidate>
-      <div><p class="label">Checklist completo · ${t ? 'Troca de condutor' : 'Devolução'}</p><h1>Entrega do veículo</h1></div>
-      ${t ? `<div class="note">Entrega para <b>${esc(drv(t.toDriverId).name)}</b>. Após este checklist sua posse é encerrada e ${esc(drv(t.toDriverId).name.split(' ')[0])} poderá fazer o recebimento.</div>` : `<div class="note">Devolução do veículo. Após este checklist sua posse é encerrada e o veículo fica disponível.</div>`}
+      <div><p class="label">${full ? 'Checklist completo' : 'Confirmação rápida'} · ${t ? 'Troca de condutor' : 'Devolução'}</p><h1>Entrega do veículo</h1></div>
+      <div class="note"><div>${who}</div></div>
       ${ckHeader(v, `<dt>Obra atual</dt><dd>${seg ? projLabel(seg.projectId) : projLabel(null)}</dd><dt>Posse desde</dt><dd>${fmtDT(c.start)}</dd><dt>Km inicial</dt><dd class="num">${km(c.startKm)}</dd>`)}
-      ${fullChecklistBody(v)}
+      ${quick ? `<p class="big-q">Houve alguma alteração no veículo desde o seu recebimento?</p>
+        <p class="muted small" style="margin-top:-6px">Recebimento com checklist completo em ${fmtDT(rk.at)}. Os checklists diários seguem valendo.</p>
+        <div class="yn"><button type="button" class="${D.changed === 'nao' ? 'on-ok' : ''}" data-act="e-ans" data-v="nao">Não, sem alterações</button><button type="button" class="${D.changed === 'sim' ? 'on-bad' : ''}" data-act="e-ans" data-v="sim">Sim, houve</button></div>`
+        : `<div class="note warn">O recebimento desta posse não teve o checklist completo. Por isso a entrega precisa do checklist completo.</div>`}
+      ${D.changed === 'nao' ? `<div class="panel"><div class="panel-b stack" style="gap:12px">
+        <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}"><small>Último registro: ${km(lastRecordedKm(v.id))}. Confira no painel.</small></label>
+        ${singlePhoto('painel_d', 'Foto do painel (opcional)')}
+        <p class="small muted">Ao concluir você confirma que o veículo está como no recebimento. Quem receber vai conferir tudo no checklist completo.</p>
+      </div></div>` : ''}
+      ${full && D.changed ? (quick ? '<div class="note warn">Registre no checklist o que mudou no veículo.</div>' : '') + fullChecklistBody(v) : ''}
       <div class="note bad" id="ck-err" hidden role="alert"></div>
-      <div class="sticky-foot"><button type="button" class="btn lg" data-go="inicio">Depois</button><button class="btn ok lg" style="flex:1">Concluir entrega</button></div>
+      <div class="sticky-foot"><button type="button" class="btn lg" data-go="inicio">Depois</button>${D.changed ? `<button class="btn ok lg" style="flex:1">Concluir entrega</button>` : ''}</div>
     </form>`;
   },
   mount({ vid, tid }) {
     const f = $('#ckform'); if (!f) return; bindDraft(f);
     f.addEventListener('submit', e => {
       e.preventDefault();
-      const v = veh(DRAFT.vid); const c = activeCustody(v.id); const t = tid ? byId(S.transfers, tid) : activeTransfer(v.id);
-      const { e: errs, km: k } = validateFull(v); if (errs.length) return showErrors(errs);
-      const ck = saveFullChecklist(t ? 'entrega' : 'devolucao', v, c.driverId, c.id, k);
+      const v = veh(DRAFT.vid); const c = activeCustody(v.id);
+      if (!c || c.driverId !== CUR.driverId) return showErrors(['Este veículo não está mais com você.']);
+      const t = openTransferOf(v.id, DRAFT.tid || tid);
+      if (DRAFT.mode === 'transfer' && !t) return showErrors(['A solicitação de transferência foi cancelada. Volte ao início: o veículo continua com você.']);
+      const quick = quickDeliveryOk(c) && DRAFT.changed === 'nao';
+      let ck, k;
+      if (quick) {
+        k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10); const errs = [];
+        if (!k) errs.push('Informe a quilometragem.'); else if (k < lastRecordedKm(v.id)) errs.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
+        if (errs.length) return showErrors(errs);
+        ck = { id: uid('ck'), type: t ? 'entrega' : 'devolucao', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: k, ok: true, problem: null, photos: { painel: DRAFT.photos.painel_d || null }, location: DRAFT.geo, late: false, quick: true, noChanges: true, refChecklistId: c.receiveChecklistId };
+        S.checklists.push(ck); v.odometer = Math.max(v.odometer, k); if (S.locations[v.id]) S.locations[v.id].km = v.odometer;
+        log('checklist', `Entrega com confirmação rápida: sem alterações desde o recebimento (${nf(k)} km)`, { vehicleId: v.id, driverId: c.driverId, data: { checklistId: ck.id } });
+      } else {
+        const r = validateFull(v); if (r.e.length) return showErrors(r.e); k = r.km;
+        ck = saveFullChecklist(t ? 'entrega' : 'devolucao', v, c.driverId, c.id, k);
+      }
       c.end = nowTs() + 1; c.endKm = k; c.deliverChecklistId = ck.id; c.closedReason = t ? 'transferencia' : 'entrega'; c.transferId = t?.id || null;
       log('posse_fim', `${drv(c.driverId).name} entregou o veículo. Posse encerrada (${nf(k - c.startKm)} km rodados)`, { vehicleId: v.id, driverId: c.driverId, at: nowTs() + 1 });
       if (t) {
-        t.deliverChecklistId = ck.id; setTransfer(t, 'aguardando_recebimento', 'Checklist de entrega aprovado; posse anterior encerrada');
-        notify(t.toDriverId, `${drv(c.driverId).name} entregou o ${v.plate}. Faça o checklist de recebimento para assumir a posse.`, { level: 'ok', link: { page: 'inicio' } });
+        t.deliverChecklistId = ck.id; setTransfer(t, 'aguardando_recebimento', quick ? 'Entrega confirmada sem alterações; posse anterior encerrada' : 'Checklist de entrega aprovado; posse anterior encerrada');
+        notify(t.toDriverId, `${drv(c.driverId).name} entregou o ${v.plate}. Faça o checklist completo de recebimento para assumir a posse.`, { level: 'ok', link: { page: 'inicio' } });
       }
       save(); toast(t ? `Entrega concluída. Aguardando recebimento de ${drv(t.toDriverId).name}.` : 'Veículo devolvido. Posse encerrada.'); go('inicio');
     });
   }
 };
+ACTIONS['e-ans'] = a => { DRAFT.changed = a.dataset.v; go('entregar', { vid: DRAFT.vid, tid: DRAFT.tid || undefined }, { keepDraft: true, noPush: true }); };
 
 /* ---------- Checklist diário ---------- */
 PAGES.diario = {
@@ -437,7 +528,7 @@ PAGES.diario = {
       if (D.answer === 'nao') errs.push(...problemErrors());
       if (errs.length) return showErrors(errs);
       const kmv = k || suggestedKm(v);
-      const [h, m] = S.settings.dailyDeadline.split(':').map(Number); const n = new Date();
+      const [h, m] = deadlineNow().split(':').map(Number); const n = new Date();
       const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: n.getHours() * 60 + n.getMinutes() > h * 60 + m };
       S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv);
       if (D.answer === 'sim') {
@@ -449,7 +540,7 @@ PAGES.diario = {
         const iss = createIssue(v, c.driverId, 'diario');
         ck.problem = { issueId: iss.id };
         log('checklist', `Checklist diário: veículo com problema (${nf(kmv)} km)`, { vehicleId: v.id, driverId: c.driverId });
-        save(); toast(iss.severity === 'critica' ? 'Problema crítico registrado. A gestão foi alertada.' : 'Checklist registrado com o problema informado.'); go('inicio');
+        save(); const crit = iss.severity === 'critica' || !iss.canRun; toast(crit ? 'Problema crítico registrado. A gestão foi alertada.' : 'Checklist registrado com o problema informado.'); crit ? go('seguro', { vid: v.id }) : go('inicio');
       }
     });
   }
@@ -460,7 +551,7 @@ function problemFields() {
   const D = DRAFT;
   return `<div class="field"><span>Tipo de problema</span><div class="seg">${PROBLEM_TYPES.map(t => `<label><input type="radio" name="type" value="${t}" ${D.type === t ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
     <label class="field"><span>Descrição</span><textarea class="inp" name="desc" placeholder="O que aconteceu? Onde está o problema?">${esc(D.desc)}</textarea></label>
-    <div class="field"><span>Criticidade</span><div class="seg">${Object.entries(SEVERITY).map(([k, s]) => `<label><input type="radio" name="severity" value="${k}" ${D.severity === k ? 'checked' : ''}><span>${s.l}</span></label>`).join('')}</div><small>Crítica gera alerta imediato para o gestor.</small></div>
+    <div class="field"><span>Criticidade</span><div class="seg">${Object.entries(SEVERITY).map(([k, s]) => `<label><input type="radio" name="severity" value="${k}" ${D.severity === k ? 'checked' : ''}><span>${s.l}</span></label>`).join('')}</div><small>Crítica gera alerta imediato para o gestor e abre o acionamento do seguro.</small></div>
     ${singlePhoto('problema', 'Foto do problema')}
     <div class="field"><span>O veículo pode continuar circulando?</span><div class="seg bad"><label><input type="radio" name="canRun" value="1" ${D.canRun === '1' ? 'checked' : ''}><span>Sim</span></label><label><input type="radio" name="canRun" value="0" ${D.canRun === '0' ? 'checked' : ''}><span>Não, veículo parado</span></label></div></div>`;
 }
@@ -503,7 +594,10 @@ PAGES.problema = {
       e.preventDefault(); const errs = problemErrors(); if (errs.length) return showErrors(errs);
       const v = veh(DRAFT.vid); const c = activeCustody(v.id);
       const iss = createIssue(v, CUR.driverId || c?.driverId, 'informado'); save();
-      toast(iss.severity === 'critica' || !iss.canRun ? 'Problema registrado. A gestão foi alertada.' : 'Problema registrado.'); go(CUR.role === 'condutor' ? 'inicio' : 'veiculo', { id: v.id });
+      const crit = iss.severity === 'critica' || !iss.canRun;
+      toast(crit ? 'Problema registrado. A gestão foi alertada.' : 'Problema registrado.');
+      if (crit) return go('seguro', { vid: v.id });
+      go(CUR.role === 'condutor' ? 'inicio' : 'veiculo', { id: v.id });
     });
   }
 };
@@ -515,11 +609,12 @@ PAGES.checklist_full = {
     const v = veh(vid);
     if (['manut_entrada', 'manut_saida'].includes(type) && !isManager()) return '<div class="drv"><div class="note bad">Somente gestores registram entrada e saída de manutenção.</div></div>';
     if (type === 'manut_entrada' && activeCustody(vid)) return `<div class="drv" style="margin:0"><h1>Entrada em manutenção</h1><div class="note warn">O veículo está com ${esc(drv(activeCustody(vid).driverId).name)}. O condutor precisa fazer a entrega (ou use a transferência forçada) antes da entrada em manutenção.</div><button class="btn" data-go="veiculo" data-id="${vid}">Voltar ao veículo</button></div>`;
-    if (!DRAFT || DRAFT.kind !== 'full_' + type) { newDraft('full_' + type, vid, { shop: v.maintenanceNote || '', doneItems: [], cost: '' }); captureLocation(v); }
-    const extra = type === 'manut_entrada' ? `<div class="panel"><div class="panel-h"><h3>Manutenção</h3></div><div class="panel-b"><label class="field"><span>Oficina e motivo</span><input class="inp" name="shop" value="${esc(DRAFT.shop)}" placeholder="Ex.: Oficina Alvorada – revisão dos 120 mil km"></label></div></div>`
+    if (['manut_entrada', 'manut_saida'].includes(type) && !activeShops().length && !(type === 'manut_saida' && v.maintenanceWorkshopId)) return `<div class="drv" style="margin:0"><h1>${CK_TYPES[type]}</h1>${noShopsNote()}</div>`;
+    if (!DRAFT || DRAFT.kind !== 'full_' + type) { newDraft('full_' + type, vid, { shop: type === 'manut_entrada' ? '' : v.maintenanceNote || '', workshopId: v.maintenanceWorkshopId || '', doneItems: [], cost: '' }); captureLocation(v); }
+    const extra = type === 'manut_entrada' ? `<div class="panel"><div class="panel-h"><h3>Manutenção</h3></div><div class="panel-b form-grid"><label class="field"><span>Oficina credenciada</span>${shopSelect('workshopId', DRAFT.workshopId)}</label><label class="field"><span>Motivo</span><input class="inp" name="shop" value="${esc(DRAFT.shop)}" placeholder="Ex.: revisão dos 120 mil km"></label></div></div>`
       : type === 'manut_saida' ? `<div class="panel"><div class="panel-h"><h3>Serviços realizados</h3></div><div class="panel-b stack" style="gap:12px">
           <div class="seg">${MAINT_ITEMS.map(i => `<label><input type="checkbox" name="done_${i}" ${DRAFT.doneItems.includes(i) ? 'checked' : ''}><span>${i}</span></label>`).join('')}</div>
-          <div class="form-grid"><label class="field"><span>Custo total (R$)</span><input class="inp num" name="cost" inputmode="decimal" value="${esc(DRAFT.cost)}"></label><label class="field"><span>Oficina</span><input class="inp" name="shop" value="${esc(DRAFT.shop)}"></label></div></div></div>` : '';
+          <div class="form-grid"><label class="field"><span>Custo total (R$)</span><input class="inp num" name="cost" inputmode="decimal" value="${esc(DRAFT.cost)}"></label><label class="field"><span>Oficina credenciada</span>${shopSelect('workshopId', DRAFT.workshopId)}</label></div></div></div>` : '';
     const wrap = CUR.role === 'condutor' ? 'drv' : 'drv" style="margin:0;max-width:760px';
     return `<form class="${wrap}" id="ckform" novalidate>
       <div><p class="label">Checklist completo</p><h1>${CK_TYPES[type]}</h1></div>
@@ -535,16 +630,19 @@ PAGES.checklist_full = {
       e.preventDefault();
       const v = veh(vid); const { e: errs, km: k } = validateFull(v);
       if (type === 'manut_saida' && !DRAFT.doneItems.length) errs.push('Marque ao menos um serviço realizado.');
+      if (['manut_entrada', 'manut_saida'].includes(type) && !shopOk(DRAFT.workshopId) && !(type === 'manut_saida' && DRAFT.workshopId && DRAFT.workshopId === v.maintenanceWorkshopId)) errs.unshift('Escolha a oficina credenciada.');
+      if (type === 'manut_entrada' && (DRAFT.shop || '').length < 3) errs.unshift('Informe o motivo da manutenção.');
       if (errs.length) return showErrors(errs);
       const c = activeCustody(vid);
       saveFullChecklist(type, v, c?.driverId || null, c?.id || null, k);
-      if (type === 'manut_entrada') { v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = DRAFT.shop; log('manutencao', `Entrada em manutenção${DRAFT.shop ? ': ' + DRAFT.shop : ''}`, { vehicleId: vid }); }
+      if (type === 'manut_entrada') { v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = DRAFT.shop; v.maintenanceWorkshopId = DRAFT.workshopId; log('manutencao', `Entrada em manutenção na ${shopName(DRAFT.workshopId)}: ${DRAFT.shop}`, { vehicleId: vid }); }
       if (type === 'manut_saida') {
         const cost = parseFloat(String(DRAFT.cost).replace(/\./g, '').replace(',', '.')) || 0;
-        S.maintRecords.push({ id: uid('mr'), vehicleId: vid, at: nowTs(), items: DRAFT.doneItems, cost, shop: DRAFT.shop, km: k, type: 'preventiva' });
+        S.maintRecords.push({ id: uid('mr'), vehicleId: vid, at: nowTs(), items: DRAFT.doneItems, cost, shop: shopName(DRAFT.workshopId), workshopId: DRAFT.workshopId, km: k, type: 'preventiva', notes: v.maintenanceNote || '', planPrev: planSnapshot(vid, DRAFT.doneItems) });
         DRAFT.doneItems.forEach(i => S.plans.filter(p => p.vehicleId === vid && (p.item === i || (i === 'Alinhamento' && p.item === 'Balanceamento' && false))).forEach(p => { p.lastKm = k; p.lastDate = startOfDay(nowTs()); }));
-        v.maintenance = false; v.maintenanceSince = null; v.maintenanceNote = '';
-        log('manutencao', `Saída de manutenção: ${DRAFT.doneItems.join(', ')}${cost ? ' · ' + money(cost) : ''}`, { vehicleId: vid });
+        v.maintenance = false; v.maintenanceSince = null; v.maintenanceNote = ''; v.maintenanceWorkshopId = null;
+        openIssues(vid).forEach(i => { i.status = 'resolvida'; i.resolvedAt = nowTs(); i.resolvedBy = CUR.id; i.resolution = `Resolvido na manutenção: ${DRAFT.doneItems.join(', ')}`; });
+        log('manutencao', `Saída de manutenção (${shopName(DRAFT.workshopId)}): ${DRAFT.doneItems.join(', ')}${cost ? ' · ' + money(cost) : ''}`, { vehicleId: vid });
       }
       save(); toast('Checklist concluído.'); go(CUR.role === 'condutor' ? 'inicio' : 'veiculo', { id: vid });
     });
@@ -554,7 +652,7 @@ PAGES.checklist_full = {
 /* ---------- Troca de obra durante a posse ---------- */
 function changeProject(c, projectId, ccId, purpose) {
   const p = prj(projectId);
-  c.segments.push({ at: nowTs(), projectId, ccId: ccId || p.ccId, purpose, by: CUR.driverId || CUR.id });
+  c.segments.push({ at: nowTs(), projectId, ccId: null, purpose, by: CUR.driverId || CUR.id });
   log('obra', `Alteração para ${p.code}${purpose ? ' · ' + purpose : ''}`, { vehicleId: c.vehicleId, driverId: c.driverId });
 }
 PAGES.obra = {
@@ -569,7 +667,6 @@ PAGES.obra = {
         <div><p class="label" style="margin-bottom:4px">Histórico da posse</p>${c.segments.slice(-6).map(s => `<div class="row small"><span class="mono num">${fmtShort(s.at)}</span><span>${esc(prj(s.projectId).code)}</span><span class="muted">${esc(s.purpose || '')}</span></div>`).join('') || '<span class="muted small">Sem obra registrada</span>'}</div></div>
       <div class="panel"><div class="panel-b stack" style="gap:12px">
         <label class="field"><span>Nova obra</span><select class="inp" name="projectId" id="o-proj" required><option value="">Selecione</option>${projectOptions('')}</select></label>
-        <label class="field"><span>Centro de custo</span><select class="inp" name="ccId" id="o-cc">${ccOptions(seg?.ccId)}</select></label>
         <label class="field"><span>Finalidade</span><select class="inp" name="purpose">${purposeOptions(seg?.purpose)}</select></label>
       </div></div>
       <div class="note bad" id="ck-err" hidden></div>
@@ -577,7 +674,6 @@ PAGES.obra = {
   },
   mount({ vid }) {
     const f = $('#oform'); if (!f) return;
-    $('#o-proj').addEventListener('change', e => { const p = prj(e.target.value); if (p) $('#o-cc').value = p.ccId; });
     f.addEventListener('submit', e => {
       e.preventDefault(); const d = formData(f); const c = activeCustody(vid);
       if (!d.projectId) return showErrors(['Selecione a obra.']);
@@ -599,7 +695,7 @@ PAGES.abastecer = {
     const types = v.fuelType.startsWith('Diesel') ? ['Diesel S10', 'Diesel S500'] : ['Gasolina', 'Etanol'];
     const wrap = CUR.role === 'condutor' ? 'drv' : 'drv" style="margin:0;max-width:560px';
     return `<form class="${wrap}" id="fform" novalidate>
-      <div><h1>Abastecimento</h1></div>
+      <div><h1>Abastecimento</h1>${CUR.role === 'condutor' ? '<p class="muted small">Registro opcional. A gestão da frota também pode lançar este abastecimento; se ela já lançou, não precisa registrar de novo.</p>' : ''}</div>
       <div class="veh-card"><div class="top-line">${plate(v.plate, true)}<span class="muted small">${esc(v.model)}</span></div>
         <dl class="kv"><dt>Condutor</dt><dd>${esc(drv(c.driverId).name)}</dd><dt>Obra</dt><dd>${seg ? projLabel(seg.projectId) : projLabel(null)}</dd><dt>Data e hora</dt><dd>${fmtDT(nowTs())}</dd></dl></div>
       <div class="panel"><div class="panel-b form-grid">
@@ -608,7 +704,7 @@ PAGES.abastecer = {
         <label class="field"><span>Valor total (R$)</span><input class="inp num" name="total" inputmode="decimal" value="${esc(DRAFT.total)}" placeholder="0,00"></label>
         <div class="field full"><span>Combustível</span><div class="seg">${types.map(t => `<label><input type="radio" name="fuelType" value="${t}" ${DRAFT.fuelType === t ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
         <label class="field full"><span>Posto</span><input class="inp" name="station" list="stations" value="${esc(DRAFT.station)}" placeholder="Nome do posto"><datalist id="stations">${stations.map(s => `<option value="${esc(s)}">`).join('')}</datalist></label>
-        <div class="full">${singlePhoto('cupom', 'Foto do cupom ou nota fiscal')}</div>
+        <div class="full stack" style="gap:8px">${singlePhoto('hodometro', 'Foto do hodômetro (obrigatória)')}${singlePhoto('cupom', 'Foto do cupom ou nota fiscal')}</div>
       </div></div>
       <div class="panel"><div class="panel-h"><h3>Cálculo automático</h3></div><div class="panel-b" id="fuel-calc"></div></div>
       <div class="note bad" id="ck-err" hidden role="alert"></div>
@@ -640,10 +736,11 @@ PAGES.abastecer = {
       const k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10); const l = num(DRAFT.liters); const t = num(DRAFT.total);
       if (!k) errs.push('Informe a quilometragem.'); else if (k < lastRecordedKm(v.id)) errs.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
       if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.');
-      if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
+      if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.hodometro) errs.push('Envie a foto do hodômetro (vale pontos na premiação).'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
+      if (!errs.length && k && l) { const dup = fuelDuplicates(v.id, nowTs(), k, l); if (dup.same.length) errs.push(fuelByStaff(dup.same[0]) ? 'A gestão já lançou este abastecimento. Não é preciso registrar de novo.' : 'Este abastecimento já foi registrado.'); }
       if (errs.length) return showErrors(errs);
       const seg = currentSegment(c);
-      const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: seg?.projectId || null, at: nowTs(), km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, location: DRAFT.geo };
+      const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: seg?.projectId || null, at: nowTs(), km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, odoPhoto: DRAFT.photos.hodometro, location: DRAFT.geo };
       S.fuel.push(rec); v.odometer = Math.max(v.odometer, k);
       log('abastecimento', `Abastecimento: ${nf(l, 1)} L, ${money(t)} em ${rec.station}`, { vehicleId: v.id, driverId: c.driverId });
       const m = fuelOutlier(rec);
@@ -666,15 +763,17 @@ PAGES.meu_veiculo = {
       <div class="veh-card"><div class="top-line">${plate(v.plate, true)}${stTag(vStatus(v))}</div>
         <dl class="kv"><dt>Veículo</dt><dd>${esc(v.brand)} ${esc(v.model)} · ${v.year}</dd>
         <dt>Posse iniciada</dt><dd>${fmtDT(c.start)}</dd><dt>Km inicial</dt><dd class="num">${km(c.startKm)}</dd><dt>Km atual</dt><dd class="num">${km(v.odometer)}</dd>
-        <dt>Obra</dt><dd>${seg ? projFull(seg.projectId) : projLabel(null)}</dd><dt>Centro de custo</dt><dd>${seg ? ccLabel(seg.ccId) : '—'}</dd>
+        <dt>Obra</dt><dd>${seg ? projFull(seg.projectId) : projLabel(null)}</dd>
         <dt>Checklist hoje</dt><dd>${daily ? `Feito às ${fmtTime(daily.at)}` : '<span class="st"><span class="dot warn"></span>Pendente</span>'}</dd>
         <dt>Próxima manutenção</dt><dd>${mt.next ? `${esc(mt.next.p.item)} em ${nf(mt.next.s.remKm)} km ${mLvl(mt.next.s.lvl)}` : '—'}</dd></dl></div>
       ${t ? `<div class="note warn">Transferência em andamento para ${esc(drv(t.toDriverId).name)}: ${T_LABEL[t.status]}.</div>` : ''}
       <div class="actions">
         ${!daily ? `<button class="act primary" data-go="diario" data-vid="${v.id}">${ic('check')}<span>Fazer checklist diário</span></button>` : ''}
         <button class="act" data-go="obra" data-vid="${v.id}">${ic('pin')}<span>Alterar obra<small>Sem encerrar a posse</small></span></button>
-        <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Abastecer</span></button>
+        <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Registrar abastecimento<small>Opcional</small></span></button>
         <button class="act" data-go="problema" data-vid="${v.id}">${ic('alert')}<span>Informar problema</span></button>
+        <button class="act" data-go="seguro" data-vid="${v.id}">${ic('shield')}<span>Seguro e emergência<small>Assistência 24h e contatos</small></span></button>
+        <button class="act" data-go="documento" data-vid="${v.id}">${ic('doc')}<span>Documento do veículo<small>CRLV para apresentar à fiscalização</small></span></button>
         <button class="act" data-go="entregar" data-vid="${v.id}" ${t ? `data-tid="${t.id}"` : ''}>${ic('handoff')}<span>Entregar veículo</span></button>
       </div>
       <div class="panel"><div class="panel-h"><h3>Obras nesta posse</h3></div><div class="panel-b">${c.segments.map(s => `<div class="row small" style="padding:3px 0"><span class="mono num" style="min-width:92px">${fmtShort(s.at)}</span><b>${esc(prj(s.projectId).code)}</b><span class="muted">${esc(s.purpose || '')}</span></div>`).join('') || '<span class="muted">Sem obra</span>'}</div></div>
@@ -686,7 +785,7 @@ PAGES.meu_veiculo = {
 /* ---------- Transferência de posse (detalhe) ---------- */
 function transferStepper(t) {
   const order = T_STATUS.map(s => s[0]);
-  const cur = t ? (t.status === 'cancelada' ? -1 : order.indexOf(t.status)) : 0;
+  const cur = t ? (['cancelada', 'negada'].includes(t.status) ? -1 : order.indexOf(t.status)) : 0;
   return `<div class="steps">${T_STATUS.map(([k, l], i) => `<div class="step ${i < cur || (t?.status === 'concluida') ? 'done' : ''} ${i === cur && t?.status !== 'concluida' ? 'cur' : ''}">${l}</div>`).join('')}</div>`;
 }
 PAGES.transferencia = {
@@ -696,9 +795,10 @@ PAGES.transferencia = {
     const v = veh(t.vehicleId); const me = CUR.driverId;
     let act = '';
     if (t.status === 'solicitada' && me === t.fromDriverId) act = `<button class="btn ok lg" data-act="t-accept" data-id="${t.id}">Aceitar e fazer a entrega</button>`;
-    else if (['aguardando_entrega', 'entrega_andamento'].includes(t.status) && me === t.fromDriverId) act = `<button class="btn pri lg" data-go="entregar" data-vid="${v.id}" data-tid="${t.id}">Fazer checklist de entrega</button>`;
+    else if (['aguardando_entrega', 'entrega_andamento'].includes(t.status) && me === t.fromDriverId) act = `<button class="btn pri lg" data-go="entregar" data-vid="${v.id}" data-tid="${t.id}">Fazer a entrega</button>`;
     else if (['aguardando_recebimento', 'recebimento_andamento'].includes(t.status) && me === t.toDriverId) act = `<button class="btn pri lg" data-go="receber" data-vid="${v.id}">Fazer checklist de recebimento</button>`;
-    const canCancel = !['concluida', 'cancelada', 'aguardando_recebimento', 'recebimento_andamento'].includes(t.status) && (me === t.toDriverId || isManager());
+    if (tCanDeny(t)) act += `<button class="btn danger lg" data-act="t-deny" data-id="${t.id}">Negar entrega</button>`;
+    const canCancel = tCanCancel(t);
     const wrap = CUR.role === 'condutor' ? 'drv' : 'stack';
     return `<div class="${wrap}">
       <div class="page-head" style="margin:0"><div><p class="label">Transferência de posse${t.forced ? ' · forçada' : ''}</p><h1 class="row">${plate(v.plate, true)} ${esc(drv(t.fromDriverId)?.name || '—')} → ${esc(drv(t.toDriverId)?.name || 'Pátio')}</h1></div></div>
@@ -706,18 +806,59 @@ PAGES.transferencia = {
         <dl class="dl"><dt>Situação</dt><dd><b>${T_LABEL[t.status]}</b></dd><dt>Solicitada em</dt><dd>${fmtDT(t.requestedAt)} por ${esc(userName(t.requestedBy))}</dd>
         <dt>Condutor anterior</dt><dd>${drvLink(t.fromDriverId)}</dd><dt>Novo condutor</dt><dd>${drvLink(t.toDriverId)}</dd>
         ${t.forced ? `<dt>Justificativa</dt><dd>${esc(t.justification)}</dd>` : ''}
+        ${t.status === 'negada' ? `<dt>Entrega negada</dt><dd><b>${esc(t.denyReason || '—')}</b><br><span class="small muted">${esc(userName(t.deniedBy))} · ${fmtDT(t.deniedAt)}</span></dd>` : ''}
+        ${t.status === 'cancelada' && t.cancelReason ? `<dt>Motivo do cancelamento</dt><dd>${esc(t.cancelReason)}</dd>` : ''}
         <dt>Checklist de entrega</dt><dd>${t.deliverChecklistId ? ckLink(t.deliverChecklistId) : '—'}</dd><dt>Checklist de recebimento</dt><dd>${t.receiveChecklistId ? ckLink(t.receiveChecklistId) : '—'}</dd></dl>
         <div class="row">${act}${canCancel ? `<button class="btn danger" data-act="t-cancel" data-id="${t.id}">Cancelar solicitação</button>` : ''}${isStaff() ? `<button class="btn" data-go="veiculo" data-id="${v.id}">Histórico do veículo</button>` : ''}</div>
       </div></div>
-      <div class="panel"><div class="panel-h"><h3>Registro</h3></div><div class="panel-b"><ul class="tl">${t.events.slice().reverse().map(e => `<li class="${e.status === 'concluida' ? 'ok' : e.status === 'cancelada' ? 'gray' : ''}"><span class="t">${fmtDate(e.at)} ${fmtTime(e.at)}</span><div class="x">${T_LABEL[e.status]}<small>${esc(e.note || '')} · ${esc(userName(e.by))}</small></div></li>`).join('')}</ul></div></div>
+      <div class="panel"><div class="panel-h"><h3>Registro</h3></div><div class="panel-b"><ul class="tl">${t.events.slice().reverse().map(e => `<li class="${e.status === 'concluida' ? 'ok' : e.status === 'cancelada' ? 'gray' : e.status === 'negada' ? 'bad' : ''}"><span class="t">${fmtDate(e.at)} ${fmtTime(e.at)}</span><div class="x">${T_LABEL[e.status]}<small>${esc(e.note || '')} · ${esc(userName(e.by))}</small></div></li>`).join('')}</ul></div></div>
     </div>`;
   }
 };
 const ckLink = id => { const k = byId(S.checklists, id); return k ? `<button class="link" data-act="ck-view" data-id="${k.id}">${CK_TYPES[k.type]} · ${fmtShort(k.at)} · ${nf(k.km)} km</button>` : '—'; };
+/* quem pode negar: o condutor que está com o veículo, enquanto a entrega não foi concluída */
+const tCanDeny = t => !!t && ['solicitada', 'aguardando_entrega', 'entrega_andamento'].includes(t.status) && !t.forced && !!CUR.driverId && CUR.driverId === t.fromDriverId;
+/* quem pode cancelar: quem pediu (novo condutor) ou a gestão, enquanto a entrega não foi concluída */
+const tCanCancel = t => !!t && ['solicitada', 'aguardando_entrega', 'entrega_andamento'].includes(t.status) && ((!!CUR.driverId && CUR.driverId === t.toDriverId) || isManager());
 ACTIONS['t-cancel'] = a => {
-  const t = byId(S.transfers, a.dataset.id); setTransfer(t, 'cancelada', `Cancelada por ${CUR.name}`);
-  log('transferencia', `Solicitação de transferência cancelada por ${CUR.name}`, { vehicleId: t.vehicleId, driverId: t.toDriverId });
-  notify(t.fromDriverId, `A solicitação de transferência do ${veh(t.vehicleId).plate} foi cancelada.`); save(); toast('Solicitação cancelada.'); render();
+  const t = byId(S.transfers, a.dataset.id); if (!tCanCancel(t)) return toast('Esta solicitação não pode mais ser cancelada.');
+  const mine = CUR.driverId && CUR.driverId === t.toDriverId;
+  openModal({
+    title: 'Cancelar solicitação de transferência', body: `<p>${mine ? `Você deixa de pedir o ${plate(veh(t.vehicleId).plate)}. ${esc(drv(t.fromDriverId).name)} continua com o veículo e será avisado.` : `A solicitação de ${esc(drv(t.toDriverId).name)} para o ${plate(veh(t.vehicleId).plate)} será cancelada. Os dois condutores serão avisados.`}</p>
+      <label class="field"><span>Motivo (opcional)</span><input class="inp" id="tc-why" maxlength="200" placeholder="Ex.: não vou mais precisar do veículo"></label>`,
+    foot: `<button class="btn" data-act="modal-close">Voltar</button><button class="btn danger" data-act="t-cancel-ok" data-id="${t.id}">Cancelar solicitação</button>`
+  });
+};
+ACTIONS['t-cancel-ok'] = a => {
+  const t = byId(S.transfers, a.dataset.id); if (!tCanCancel(t)) { closeModal(); return toast('Esta solicitação não pode mais ser cancelada.'); }
+  const why = ($('#tc-why')?.value || '').trim(); const v = veh(t.vehicleId);
+  t.cancelReason = why || null; t.cancelledAt = nowTs(); t.cancelledBy = CUR.id;
+  setTransfer(t, 'cancelada', `Cancelada por ${CUR.name}${why ? ': ' + why : ''}`);
+  log('transferencia', `Solicitação de transferência cancelada por ${CUR.name}${why ? ': ' + why : ''}`, { vehicleId: t.vehicleId, driverId: t.toDriverId });
+  notify(t.fromDriverId, `${CUR.driverId === t.toDriverId ? drv(t.toDriverId).name + ' cancelou' : 'A gestão cancelou'} a solicitação de transferência do ${v.plate}. O veículo continua com você.`, { link: { page: 'inicio' } });
+  if (CUR.driverId !== t.toDriverId) notify(t.toDriverId, `A gestão cancelou sua solicitação de transferência do ${v.plate}${why ? ': ' + why : ''}.`, { level: 'warn' });
+  save(); closeModal(); toast('Solicitação cancelada.'); CUR.role === 'condutor' ? go('inicio') : render();
+};
+ACTIONS['t-deny'] = a => {
+  const t = byId(S.transfers, a.dataset.id); if (!tCanDeny(t)) return toast('Esta entrega não pode mais ser negada.');
+  openModal({
+    title: `Negar entrega · ${veh(t.vehicleId).plate}`, body: `<p><b>${esc(drv(t.toDriverId).name)}</b> pediu este veículo. Ao negar, o veículo continua com você e ${esc(drv(t.toDriverId).name.split(' ')[0])} e a gestão recebem o motivo.</p>
+      <label class="field"><span>Motivo</span><textarea class="inp" id="td-why" maxlength="300" placeholder="Ex.: estou usando o veículo na obra até as 17h"></textarea></label><p class="err" id="td-err" role="alert"></p>`,
+    foot: `<button class="btn" data-act="modal-close">Voltar</button><button class="btn danger" data-act="t-deny-ok" data-id="${t.id}">Negar entrega</button>`
+  });
+};
+ACTIONS['t-deny-ok'] = a => {
+  const t = byId(S.transfers, a.dataset.id); if (!tCanDeny(t)) { closeModal(); return toast('Esta entrega não pode mais ser negada.'); }
+  const why = ($('#td-why')?.value || '').trim();
+  if (why.length < 5) return $('#td-err').textContent = 'Informe o motivo (mínimo 5 letras).';
+  const v = veh(t.vehicleId); const me = drv(t.fromDriverId);
+  t.denyReason = why; t.deniedAt = nowTs(); t.deniedBy = CUR.id;
+  setTransfer(t, 'negada', `Entrega negada por ${me.name}: ${why}`);
+  log('transferencia', `${me.name} negou a entrega do veículo para ${drv(t.toDriverId).name}: ${why}`, { vehicleId: v.id, driverId: me.id });
+  notify(t.toDriverId, `${me.name} negou a entrega do ${v.plate}: ${why}`, { level: 'bad', link: { page: 'transferencia', id: t.id } });
+  notify('gestao', `${me.name} negou a entrega do ${v.plate} para ${drv(t.toDriverId).name}: ${why}`, { level: 'warn', link: { page: 'transferencia', id: t.id } });
+  if (DRAFT?.kind === 'entregar' && DRAFT.vid === v.id) DRAFT = null;
+  save(); closeModal(); toast('Entrega negada. O veículo continua com você.'); CUR.role === 'condutor' ? go('inicio') : render();
 };
 ACTIONS['ck-view'] = a => showChecklist(a.dataset.id);
 function showChecklist(id) {
@@ -726,11 +867,15 @@ function showChecklist(id) {
     title: `Checklist ${CK_TYPES[k.type].toLowerCase()} · ${v.plate}`, wide: true,
     body: `<dl class="dl"><dt>Data e hora</dt><dd>${fmtDT(k.at)}${k.late ? ' ' + pill('fora do prazo', 'warn') : ''}</dd><dt>Condutor</dt><dd>${k.driverId ? esc(drv(k.driverId).name) : esc(userName(k.userId || 'u_gestor'))}</dd>
       <dt>Quilometragem</dt><dd class="num">${km(k.km)}</dd>${k.fuelLevel ? `<dt>Combustível</dt><dd>${k.fuelLevel}</dd>` : ''}
-      <dt>Resultado</dt><dd>${k.ok ? pill('Sem apontamentos', 'ok') : pill('Com apontamentos', 'warn')}</dd>
+      <dt>Resultado</dt><dd>${k.ok ? pill('Sem apontamentos', 'ok') : pill('Com apontamentos', 'warn')}${k.quick ? ' ' + pill('Confirmação rápida') : ''}</dd>
+      ${k.quick ? `<dt>Entrega</dt><dd>Sem alterações desde o recebimento${byId(S.checklists, k.refChecklistId) ? ` (${ckLink(k.refChecklistId)})` : ''}</dd>` : ''}
       ${k.location ? `<dt>Localização</dt><dd class="small">${geoText(k.location)}</dd>` : ''}</dl>
       ${k.items ? `<div class="tbl-wrap"><table class="tbl"><tbody>${CK_ITEMS.map(([x, l]) => `<tr><td>${l}</td><td class="r">${{ ok: PRESENCE.includes(x) ? pill('Presente', 'ok') : pill('OK', 'ok'), regular: pill('Regular', 'warn'), ruim: PRESENCE.includes(x) ? pill('Ausente', 'bad') : pill('Ruim', 'bad') }[k.items[x]] || '—'}</td></tr>`).join('')}</tbody></table></div>` : ''}
-      ${k.avarias ? `<div class="note warn"><b>Avarias:</b> ${esc(k.avarias)}</div>` : ''}${k.notes ? `<p><b>Observações:</b> ${esc(k.notes)}</p>` : ''}
-      ${iss ? `<div class="note ${SEVERITY[iss.severity].c === 'gray' ? '' : SEVERITY[iss.severity].c}"><b>${esc(iss.type)} · ${SEVERITY[iss.severity].l}</b> — ${esc(iss.desc)} ${iss.canRun ? '' : '(veículo não pode circular)'}</div>` : ''}
+      ${k.audit ? `<div class="note ${k.audit.diffs?.length ? 'warn' : 'ok'}"><div><b>Conferência com o checklist anterior</b>${k.audit.refAt ? ` (${CK_TYPES[k.audit.refType] || ''} de ${fmtDT(k.audit.refAt)}${k.audit.refDriverId && drv(k.audit.refDriverId) ? ` · ${esc(drv(k.audit.refDriverId).name)}` : ''})` : ''}:
+        ${k.audit.diffs?.length ? `<br>${k.audit.diffs.map(d => esc(diffText(d))).join('<br>')}` : ' sem divergências.'}${k.audit.prevQuick ? '<br><span class="small">O condutor anterior entregou com a confirmação rápida (sem alterações).</span>' : ''}
+        ${isStaff() && k.audit.refId && byId(S.checklists, k.audit.refId) ? `<br><span class="small">Ver o checklist anterior:</span> ${ckLink(k.audit.refId)}` : ''}</div></div>` : ''}
+      ${k.avarias ? `<div class="note warn"><div><b>Avarias:</b> ${esc(k.avarias)}</div></div>` : ''}${k.notes ? `<p><b>Observações:</b> ${esc(k.notes)}</p>` : ''}
+      ${iss ? `<div class="note ${SEVERITY[iss.severity].c === 'gray' ? '' : SEVERITY[iss.severity].c}"><div><b>${esc(iss.type)} · ${SEVERITY[iss.severity].l}</b> — ${esc(iss.desc)} ${iss.canRun ? '' : '(veículo não pode circular)'}</div></div>` : ''}
       <div><p class="label" style="margin-bottom:6px">Fotos</p>${thumbs(k.photos)}</div>`,
     foot: `<button class="btn" data-act="modal-close">Fechar</button><button class="btn pri" data-act="ck-pdf" data-id="${k.id}">${ic('fine')}Gerar PDF</button>`
   });
