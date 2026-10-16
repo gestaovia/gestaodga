@@ -797,3 +797,8 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
   #print-area .qr-label{max-width:90mm;border-color:#999}
   #print-area .ql-qr svg{width:70mm;height:70mm}
 }
+/* documento do veículo (CRLV) no aplicativo do condutor */
+.vdoc-img{display:block;width:100%;padding:0;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);overflow:hidden;cursor:zoom-in}
+.vdoc-img img{display:block;width:100%;height:auto;max-height:60vh;object-fit:contain;background:#fff}
+.vdoc-full{position:fixed;inset:0;z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:calc(12px + env(safe-area-inset-top,0px)) 12px calc(12px + env(safe-area-inset-bottom,0px));background:rgba(0,0,0,.92)}
+.vdoc-full img{max-width:100%;max-height:calc(100% - 64px);object-fit:contain;background:#fff;border-radius:6px}

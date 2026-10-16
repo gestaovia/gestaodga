@@ -55,7 +55,8 @@ function docsTab(v) {
     ${c ? `<dl class="pairs"><div><dt>Exercício</dt><dd>${c.year}</dd></div><div><dt>RENAVAM</dt><dd class="num">${esc(c.renavam || '—')}</dd></div><div><dt>Emitido em</dt><dd>${fmtDate(c.issuedAt)}</dd></div><div><dt>Próximo licenciamento</dt><dd>${c.licDue ? `${fmtDate(c.licDue)} ${lvlPill(lic)}` : '—'}</dd></div></dl>
       <div class="row">${fileChip(c.file, `crlv:${v.id}:${c.year}`)}${c.fee ? `<span class="small muted">Taxa de licenciamento ${money(c.fee)}</span>` : ''}</div>
       ${d.crlv.length > 1 ? `<div class="small muted">Anteriores: ${d.crlv.filter(x => x !== c).sort((a, b) => b.year - a.year).map(x => `<button class="link" data-act="doc-file" data-k="crlv:${v.id}:${x.year}">${x.year}</button>`).join(' · ')}</div>` : ''}`
-      : empty('Nenhum CRLV cadastrado. Anexe o CRLV-e (PDF) ou uma foto do documento.')}</div></div>`;
+      : empty('Nenhum CRLV cadastrado. Anexe o CRLV-e (PDF) ou uma foto do documento.')}
+      <p class="small muted">${ic('doc')} O condutor que está com o veículo vê o CRLV mais recente no aplicativo (Documento do veículo), para apresentar à fiscalização. IPVA e taxas não aparecem para ele.</p></div></div>`;
   const ipvaRows = d.ipva.slice().sort((a, b) => b.year - a.year).map(y => {
     const paid = y.installments.filter(i => i.paidAt); const tot = sum(y.installments, i => i.value);
     return `<div class="panel" style="box-shadow:none;background:var(--surface2)"><div class="panel-h"><h3>IPVA ${y.year}</h3><span class="small muted">${y.installments.length > 1 ? `${y.installments.length} parcelas` : 'Cota única'} · ${money(tot)}</span>${paid.length === y.installments.length ? pill('Quitado', 'ok') : pill(`${paid.length}/${y.installments.length} pagas`, 'warn')}</div>
@@ -75,20 +76,23 @@ function readDocFile(file) {
     res({ name: file.name, size: file.size, type: file.type, data: null, tooBig: true });
   });
 }
+// conteúdo da janela que mostra um arquivo (foto aparece na tela; PDF abre em outra aba)
+function docFileBody(f) {
+  if (f.data?.startsWith('sb:')) {
+    const url = CLOUD.fileUrl(f.data);
+    return !url ? `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b><br>O link do arquivo expirou. Recarregue a página.</div></div>`
+      : f.type?.startsWith('image/') ? `<img src="${url}" alt="${esc(f.name)}" style="width:100%;border-radius:8px">`
+      : `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b> · ${nf(f.size / 1024)} KB<br><a class="link" href="${esc(url)}" target="_blank" rel="noopener">Abrir o arquivo</a> <span class="small muted">(link válido por 1 hora)</span></div></div>`;
+  }
+  if (f.data && f.type?.startsWith('image/')) return `<img src="${f.data}" alt="${esc(f.name)}" style="width:100%;border-radius:8px">`;
+  if (f.data) { const blob = URL.createObjectURL(new Blob([Uint8Array.from(atob(f.data.split(',')[1]), c => c.charCodeAt(0))], { type: f.type || 'application/pdf' })); return `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b> · ${nf(f.size / 1024)} KB<br><a class="link" href="${blob}" target="_blank" rel="noopener">Abrir o arquivo</a></div></div>`; }
+  return `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b>${f.size ? ` · ${nf(f.size / 1024)} KB` : ''}<br>${f.tooBig ? 'Arquivo acima de 10 MB: não foi enviado. Reduza o tamanho (ou envie foto/PDF menor) e anexe de novo.' : 'Arquivo ainda não enviado ao servidor.'}</div></div>`;
+}
 ACTIONS['doc-file'] = a => {
   const [kind, vid, year, n] = a.dataset.k.split(':'); const d = docsOf(veh(vid));
   const f = kind === 'crlv' ? d.crlv.find(x => x.year === +year)?.file : d.ipva.find(y => y.year === +year)?.installments.find(i => i.n === +n)?.receipt;
   if (!f) return;
-  let body;
-  if (f.data?.startsWith('sb:')) {
-    const url = CLOUD.fileUrl(f.data);
-    body = !url ? `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b><br>O link do arquivo expirou. Recarregue a página.</div></div>`
-      : f.type?.startsWith('image/') ? `<img src="${url}" alt="${esc(f.name)}" style="width:100%;border-radius:8px">`
-      : `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b> · ${nf(f.size / 1024)} KB<br><a class="link" href="${esc(url)}" target="_blank" rel="noopener">Abrir o arquivo</a> <span class="small muted">(link válido por 1 hora)</span></div></div>`;
-  } else if (f.data && f.type?.startsWith('image/')) body = `<img src="${f.data}" alt="${esc(f.name)}" style="width:100%;border-radius:8px">`;
-  else if (f.data) { const blob = URL.createObjectURL(new Blob([Uint8Array.from(atob(f.data.split(',')[1]), c => c.charCodeAt(0))], { type: f.type || 'application/pdf' })); body = `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b> · ${nf(f.size / 1024)} KB<br><a class="link" href="${blob}" target="_blank" rel="noopener">Abrir o arquivo</a></div></div>`; }
-  else body = `<div class="note">${ic('fine')}<div><b>${esc(f.name)}</b>${f.size ? ` · ${nf(f.size / 1024)} KB` : ''}<br>${f.tooBig ? 'Arquivo acima de 10 MB: não foi enviado. Reduza o tamanho (ou envie foto/PDF menor) e anexe de novo.' : 'Arquivo ainda não enviado ao servidor.'}</div></div>`;
-  openModal({ title: kind === 'crlv' ? `CRLV ${year} · ${veh(vid).plate}` : `Comprovante IPVA ${year} · ${n}ª parcela`, body, wide: true });
+  openModal({ title: kind === 'crlv' ? `CRLV ${year} · ${veh(vid).plate}` : `Comprovante IPVA ${year} · ${n}ª parcela`, body: docFileBody(f), wide: true });
 };
 
 /* ---------- CRLV ---------- */
@@ -168,3 +172,74 @@ document.addEventListener('change', e => {
   const v = veh(e.target.dataset.id); docsOf(v).ipvaByRental = e.target.checked;
   log('documento', `IPVA ${e.target.checked ? 'marcado como responsabilidade da locadora' : 'passa a ser controlado pela empresa'}`, { vehicleId: v.id }); save(); render();
 });
+
+/* ---------- Documento do veículo para o condutor (apresentar à fiscalização) ---------- */
+// CRLV atual: o condutor recebe só o do veículo que está com ele (função vehicle_document no banco)
+const vehicleDoc = v => !v ? null : CUR?.role === 'condutor' ? (v._crlv || null) : crlvCurrent(v);
+function docFileUrl(f) {
+  if (!f?.data) return null;
+  if (f.data.startsWith('sb:')) return CLOUD.fileUrl(f.data);
+  return f.data.startsWith('data:') ? f.data : null;
+}
+PAGES.documento = {
+  driver: true, title: 'Documento do veículo',
+  render({ vid }) {
+    const d = myDriver(); vid = vid || (d && driverCustodies(d.id)[0]?.vehicleId); const v = vid && veh(vid);
+    const wrap = CUR.role === 'condutor' ? 'drv' : 'drv" style="margin:0;max-width:640px';
+    if (!v) return `<div class="${wrap}"><h1>Documento do veículo</h1><div class="note">Nenhum veículo com você. O documento aparece aqui quando você estiver com um veículo.</div><button class="btn" data-go="inicio">Voltar</button></div>`;
+    const c = vehicleDoc(v); const f = c?.file; const url = docFileUrl(f); const isImg = f?.type?.startsWith('image/');
+    const lic = c?.licDue ? dueLevel(c.licDue) : null;
+    const head = `<div class="veh-card"><div class="top-line">${plate(v.plate, true)}<span class="muted small">${esc(v.brand)} ${esc(v.model)}${v.year ? ' · ' + v.year : ''}</span></div>
+      ${c ? `<dl class="kv"><dt>Documento</dt><dd>CRLV-e ${esc(String(c.year || ''))}</dd>${c.renavam ? `<dt>RENAVAM</dt><dd class="num">${esc(c.renavam)}</dd>` : ''}${c.licDue ? `<dt>Licenciamento</dt><dd>${lic.days < 0 ? `<span class="pill bad">Vencido em ${fmtDate(c.licDue)}</span>` : `em dia até ${fmtDate(c.licDue)}`}</dd>` : ''}</dl>` : ''}</div>`;
+    let body;
+    if (!c || !f) body = `<div class="note warn">${ic('doc')}<div><b>O documento deste veículo ainda não está no sistema.</b><div class="small">Avise a gestão da frota para anexar o CRLV.</div></div></div>
+      <button class="btn lg block" data-act="vdoc-ask" data-vid="${v.id}">${ic('bell')}Avisar a gestão</button>`;
+    else if (!url) body = `<div class="note warn">${ic('doc')}<div><b>Não foi possível abrir o documento agora.</b><div class="small">Verifique a internet e toque em Atualizar.</div></div></div>
+      <button class="btn lg block" data-act="vdoc-reload">Atualizar</button>`;
+    else body = `${isImg ? `<button type="button" class="vdoc-img" data-act="vdoc-full" data-vid="${v.id}" aria-label="Ver o documento em tela cheia"><img src="${esc(url)}" alt="CRLV do ${esc(v.plate)}"></button>` : ''}
+      <div class="stack" style="gap:10px">
+        ${isImg ? `<button class="btn ok lg block" data-act="vdoc-full" data-vid="${v.id}">${ic('doc')}Mostrar em tela cheia</button>`
+          : `<button class="btn ok lg block" data-act="vdoc-open" data-vid="${v.id}">${ic('doc')}Abrir o documento (PDF)</button>`}
+        <button class="btn lg block" data-act="vdoc-save" data-vid="${v.id}">${ic('download')}Salvar no celular</button>
+      </div>
+      <p class="small muted">O CRLV-e digital tem QR Code para a autoridade conferir. Salve no celular para mostrar mesmo sem internet.</p>`;
+    return `<div class="${wrap}"><h1>Documento do veículo</h1>${head}${body}
+      <button class="btn" data-go="${CUR.role === 'condutor' ? 'inicio' : 'veiculo'}" data-id="${v.id}">Voltar</button></div>`;
+  }
+};
+ACTIONS['vdoc-full'] = a => {
+  const v = veh(a.dataset.vid); const f = vehicleDoc(v)?.file; const url = docFileUrl(f); if (!url) return;
+  const el = document.createElement('div'); el.className = 'vdoc-full'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', `CRLV do ${v.plate}`);
+  el.innerHTML = `<img src="${esc(url)}" alt="CRLV do ${esc(v.plate)}"><button class="btn" type="button">Fechar</button>`;
+  const close = () => el.remove(); el.querySelector('button').addEventListener('click', close); el.addEventListener('click', e => { if (e.target === el) close(); });
+  document.body.appendChild(el); vdocLog(v);
+};
+// PDF: abre no leitor do celular com um link novo (o link assinado vale 1 hora)
+ACTIONS['vdoc-open'] = a => {
+  const v = veh(a.dataset.vid); const url = docFileUrl(vehicleDoc(v)?.file);
+  if (!url) return toast('Documento indisponível. Verifique a internet.');
+  window.open(url, '_blank', 'noopener'); vdocLog(v);
+};
+function vdocLog(v) {
+  if (!v || CUR.role !== 'condutor') return;
+  log('documento', `CRLV do ${v.plate} aberto por ${myDriver()?.name || CUR.name} no aplicativo`, { vehicleId: v.id, driverId: myDriver()?.id || null }); save();
+}
+ACTIONS['vdoc-save'] = async a => {
+  const v = veh(a.dataset.vid); const c = vehicleDoc(v); const f = c?.file; const url = docFileUrl(f); if (!url) return toast('Documento indisponível. Verifique a internet.');
+  const ext = (f.name || '').match(/\.[a-z0-9]{2,4}$/i)?.[0] || (f.type === 'application/pdf' ? '.pdf' : f.type === 'image/png' ? '.png' : '.jpg');
+  const name = `CRLV-${v.plate}-${c.year || ''}${ext}`;
+  a.disabled = true;
+  try {
+    const blob = await (await fetch(url)).blob(); const href = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = href; link.download = name; document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 60000); toast('Documento salvo nos downloads do celular.'); vdocLog(v);
+  } catch (e) { toast('Não foi possível salvar agora. Verifique a internet.'); }
+  a.disabled = false;
+};
+ACTIONS['vdoc-reload'] = async a => { a.disabled = true; try { await CLOUD.reload(true); } catch (e) { } render(); };
+ACTIONS['vdoc-ask'] = a => {
+  const v = veh(a.dataset.vid); const who = myDriver()?.name || CUR.name;
+  notify('gestao', `${who} precisa do documento (CRLV) do ${v.plate}: anexe o arquivo na aba Documentos do veículo.`, { level: 'warn', link: { page: 'veiculo', id: v.id, tab: 'docs' } });
+  log('documento', `${who} avisou a gestão que o CRLV do ${v.plate} não está no sistema`, { vehicleId: v.id, driverId: myDriver()?.id || null });
+  save(); toast('Gestão avisada.');
+};

@@ -150,7 +150,9 @@ const CLOUD = {
     const sb = this.client(); const out = [];
     // condutor: lista de veículos só com identificação (sem locação, documentos e custos)
     if (sp.key === 'vehicles' && this.profile?.role === 'condutor') {
-      const [{ data, error }, em] = await Promise.all([sb.rpc('vehicle_directory'), sb.rpc('vehicle_emergency')]); if (error) throw error;
+      const [{ data, error }, em, dc] = await Promise.all([sb.rpc('vehicle_directory'), sb.rpc('vehicle_emergency'), sb.rpc('vehicle_document')]); if (error) throw error;
+      // documento (CRLV atual) do veículo que está com o condutor, para apresentar à fiscalização
+      this.vdocs = new Map((dc.error ? [] : dc.data || []).map(r => [r.id, r.crlv || null]));
       const ins = new Map((em.data || []).map(r => [r.id, r.insurance])); return (data || []).map(r => ({ ...r, insurance: ins.get(r.id) || null }));
     } const step = 1000; const cap = sp.limit || 50000;
     for (let from = 0; from < cap; from += step) {
@@ -184,6 +186,7 @@ const CLOUD = {
     S = D;
     // inicializações preguiçosas do aplicativo feitas antes da foto de referência
     S.vehicles.forEach(v => docsOf(v)); docSet();
+    if (this.profile?.role === 'condutor') S.vehicles.forEach(v => { v._crlv = this.vdocs?.get(v.id) || null; });
     this.snapshot();
     await this.signAll();
   },

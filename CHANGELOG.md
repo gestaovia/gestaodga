@@ -7,6 +7,14 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.10.0 — 16/10/2026
+- **Documento do veículo para o condutor:** novo botão **Documento do veículo** no início do condutor e na tela do veículo. Mostra o CRLV-e mais recente do veículo que está com ele (exercício, RENAVAM e situação do licenciamento) para apresentar à fiscalização: foto em tela cheia ou PDF aberto no leitor do celular, e **Salvar no celular** para mostrar mesmo sem internet. Se o veículo ainda não tem CRLV no sistema, o condutor toca em **Avisar a gestão** e a gestão recebe o aviso.
+- O condutor vê só o CRLV atual do veículo que está com ele (até 2 h depois de entregar, como no seguro). IPVA, taxa de licenciamento e exercícios anteriores continuam só com a gestão. Cada abertura do documento fica registrada na linha do tempo do veículo.
+- Aba **Documentos** do veículo (gestão) informa que o CRLV mais recente aparece para o condutor.
+- **Ícone do aplicativo com a logo oficial:** todos os ícones refeitos a partir da logo em alta resolução (`logo_gestaovia.png`): app instalado no Android (normal e adaptável, com o G dentro da área segura), iPhone (fundo verde cheio), aba do navegador (`favicon.ico`) e a logo dentro do sistema. O app instalado troca o ícone sozinho no Android em alguns dias; no iPhone, remova o atalho da tela de início e adicione de novo.
+- Novo `scripts/icones.py`: refaz todos os ícones a partir de uma logo PNG (`python3 scripts/icones.py logo_gestaovia.png` e depois `python3 build.py`).
+- Banco: migration `20261016000012_gestaovia_documento_veiculo_condutor` (função `vehicle_document` e leitura do arquivo do CRLV pelo condutor no Storage).
+
 ## v1.9.1 — 15/10/2026
 - **Correção na premiação (modalidade B, checklist diário):** o prazo passa a valer para quem estava com o veículo no horário do prazo (10h). Essa pessoa precisa de um checklist até o prazo (diário, recebimento ou entrega); entregar o veículo mais tarde **não tira mais** o desconto de atraso (−10) nem o de ausência (−15). Antes, qualquer entrega ou recebimento no mesmo dia, em qualquer horário, apagava o desconto.
 - Continua igual: quem entrega antes do prazo fica liberado do diário naquele dia; quem recebe depois do prazo tem o recebimento valendo como checklist do dia.

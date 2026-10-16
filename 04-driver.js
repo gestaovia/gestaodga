@@ -86,7 +86,8 @@ PAGES.inicio = {
         ${T('obra', 'pin', 'Trocar obra', seg ? `Agora: ${esc(prj(seg.projectId).code)}` : 'Sem obra')}
         ${T('problema', 'alert', 'Informar problema', 'Avaria ou defeito')}
         ${T('abastecer', 'fuel', 'Registrar abastecimento', 'Opcional')}
-        <button class="tile tile-wide" data-go="meus_checklists"><span class="ti">${ic('list')}</span><span><b>Meus checklists</b><small>Histórico de todas as posses</small></span></button>
+        ${T('documento', 'doc', 'Documento do veículo', 'CRLV para a fiscalização')}
+        <button class="tile" data-go="meus_checklists"><span class="ti">${ic('list')}</span><span><b>Meus checklists</b><small>Histórico de todas as posses</small></span></button>
       </div>
       <div class="drv-account" aria-label="Conta">
         <button data-act="notifs">${ic('bell')}<span>Avisos${unread ? ` (${unread})` : ''}</span></button>
@@ -772,6 +773,7 @@ PAGES.meu_veiculo = {
         <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Registrar abastecimento<small>Opcional</small></span></button>
         <button class="act" data-go="problema" data-vid="${v.id}">${ic('alert')}<span>Informar problema</span></button>
         <button class="act" data-go="seguro" data-vid="${v.id}">${ic('shield')}<span>Seguro e emergência<small>Assistência 24h e contatos</small></span></button>
+        <button class="act" data-go="documento" data-vid="${v.id}">${ic('doc')}<span>Documento do veículo<small>CRLV para apresentar à fiscalização</small></span></button>
         <button class="act" data-go="entregar" data-vid="${v.id}" ${t ? `data-tid="${t.id}"` : ''}>${ic('handoff')}<span>Entregar veículo</span></button>
       </div>
       <div class="panel"><div class="panel-h"><h3>Obras nesta posse</h3></div><div class="panel-b">${c.segments.map(s => `<div class="row small" style="padding:3px 0"><span class="mono num" style="min-width:92px">${fmtShort(s.at)}</span><b>${esc(prj(s.projectId).code)}</b><span class="muted">${esc(s.purpose || '')}</span></div>`).join('') || '<span class="muted">Sem obra</span>'}</div></div>
