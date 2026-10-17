@@ -98,11 +98,19 @@ function matchAt(plate, ts) {
   const sg = segmentAt(c, ts);
   return { v, c, driverId: c.driverId, projectId: sg?.projectId || null, ccId: sg?.ccId || null };
 }
+// pedágio: 1º pela posse no horário da passagem; sem posse no horário (ou passagem sem hora), pela posse do
+// veículo no mesmo dia (obra em que ele estava no dia); senão fica sem correspondência para ajuste manual
 function tollMatch(t) {
   if (t.manual) return { ...t.manual, how: 'manual' };
-  const m = matchAt(t.plate, t.at);
-  if (!m.c) return { how: 'sem', vehicleId: m.v?.id };
-  return { how: 'auto', vehicleId: m.v.id, driverId: m.driverId, projectId: m.projectId, ccId: m.ccId, custodyId: m.c.id };
+  const v = vehicleByPlate(t.plate); if (!v) return { how: 'sem', vehicleId: null, noVeh: true };
+  if (!t.noTime) { const m = matchAt(t.plate, t.at); if (m.c) return { how: 'auto', vehicleId: v.id, driverId: m.driverId, projectId: m.projectId, ccId: m.ccId, custodyId: m.c.id }; }
+  const d0 = startOfDay(t.at), d1 = d0 + DAY;
+  const cands = S.custody.filter(c => c.vehicleId === v.id && c.start < d1 && (c.end || nowTs()) > d0);
+  if (!cands.length) return { how: 'sem', vehicleId: v.id };
+  const ref = t.noTime ? d0 + 12 * 36e5 : t.at; const clampT = c => Math.min(Math.max(ref, c.start), (c.end || nowTs()) - 1);
+  const c = cands.slice().sort((x, y) => Math.abs(clampT(x) - ref) - Math.abs(clampT(y) - ref))[0];
+  const sg = segmentAt(c, clampT(c)) || c.segments[0] || null;
+  return { how: 'dia', vehicleId: v.id, driverId: c.driverId, projectId: sg?.projectId || null, ccId: sg?.ccId || null, custodyId: c.id };
 }
 function fineMatch(f) {
   const m = matchAt(f.plate, f.at);

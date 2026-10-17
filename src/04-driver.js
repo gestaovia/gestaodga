@@ -805,7 +805,7 @@ PAGES.transferencia = {
       <div class="panel"><div class="panel-b stack">${transferStepper(t)}
         <dl class="dl"><dt>Situação</dt><dd><b>${T_LABEL[t.status]}</b></dd><dt>Solicitada em</dt><dd>${fmtDT(t.requestedAt)} por ${esc(userName(t.requestedBy))}</dd>
         <dt>Condutor anterior</dt><dd>${drvLink(t.fromDriverId)}</dd><dt>Novo condutor</dt><dd>${drvLink(t.toDriverId)}</dd>
-        ${t.forced ? `<dt>Justificativa</dt><dd>${esc(t.justification)}</dd>` : ''}
+        ${t.forced ? `<dt>Justificativa</dt><dd>${esc(t.justification)}</dd><dt>Pontuação</dt><dd>${t.discount ? 'Descontada do condutor que estava com o veículo' : t.discount === false ? 'Sem desconto' : '—'}</dd>` : ''}
         ${t.status === 'negada' ? `<dt>Entrega negada</dt><dd><b>${esc(t.denyReason || '—')}</b><br><span class="small muted">${esc(userName(t.deniedBy))} · ${fmtDT(t.deniedAt)}</span></dd>` : ''}
         ${t.status === 'cancelada' && t.cancelReason ? `<dt>Motivo do cancelamento</dt><dd>${esc(t.cancelReason)}</dd>` : ''}
         <dt>Checklist de entrega</dt><dd>${t.deliverChecklistId ? ckLink(t.deliverChecklistId) : '—'}</dd><dt>Checklist de recebimento</dt><dd>${t.receiveChecklistId ? ckLink(t.receiveChecklistId) : '—'}</dd></dl>

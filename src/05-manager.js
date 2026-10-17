@@ -151,6 +151,8 @@ function vehicleForm(v = {}) {
       <label class="field"><span>Ocupantes (lugares)</span><input class="inp num" name="seats" type="number" min="1" max="20" value="${v.seats || 5}"></label>
       <label class="field"><span>Quilometragem atual</span><input class="inp num" name="odometer" inputmode="numeric" value="${v.odometer ?? ''}"></label>
       <label class="field"><span>Consumo de referência (km/l)</span><input class="inp num" name="avgKmL" inputmode="decimal" value="${v.avgKmL ? nf(v.avgKmL, 1) : '10'}"></label>
+      <label class="field"><span>TAG de pedágio (Sem Parar)</span><select class="inp" name="tollTag"><option value="sim" ${v.tollTag !== false ? 'selected' : ''}>Tem TAG (fatura mensal)</option><option value="nao" ${v.tollTag === false ? 'selected' : ''}>Sem TAG (lançamento manual)</option></select></label>
+      <label class="field"><span>Nº da TAG (opcional)</span><input class="inp num" name="tagNumber" value="${esc(v.tagNumber || '')}" placeholder="Ex.: 1234567890"></label>
     </div>
     <div class="field"><span>Tipo de frota</span><div class="seg"><label><input type="radio" name="ownership" value="propria" ${!loc ? 'checked' : ''}><span>Frota própria</span></label><label><input type="radio" name="ownership" value="locada" ${loc ? 'checked' : ''}><span>${ic('key')} Locada</span></label></div></div>
     <div id="rent-box" class="panel" style="box-shadow:none;background:var(--surface2)" ${loc ? '' : 'hidden'}><div class="panel-b form-grid" style="padding-top:14px">
@@ -183,7 +185,7 @@ ACTIONS['veh-save'] = a => {
     if (parseDate(d.dueDate) <= parseDate(d.pickupDate)) return err('O prazo de devolução deve ser depois da retirada.');
     rental = { ...(edit?.rental || { history: [] }), company: d.company, contract: d.contract, pickupDate: parseDate(d.pickupDate), dueDate: parseDate(d.dueDate), monthly: numv(d.monthly) || 0, status: 'ativa' };
   }
-  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: edit?.tracker ?? false, ownership: d.ownership, rental };
+  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: edit?.tracker ?? false, ownership: d.ownership, rental, tollTag: d.tollTag !== 'nao', tagNumber: (d.tagNumber || '').replace(/\s/g, '') };
   if (edit) { Object.assign(edit, fields); log('cadastro', `Cadastro do veículo atualizado por ${CUR.name}`, { vehicleId: edit.id }); save(); closeModal(); toast('Veículo atualizado.'); return render(); }
   const id = uid('veh');
   S.vehicles.push({ id, plate: p, ...fields, maintenance: false, active: true });
@@ -248,7 +250,7 @@ PAGES.veiculo = {
     const tabs = [['tl', 'Linha do tempo'], ['posses', 'Posses'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['mnt', 'Manutenção'], ['docs', 'Documentos'], ['tf', 'Pedágios e multas']];
     let body = '';
     if (tab === 'tl') { const all = S.audit.filter(a => a.vehicleId === id).sort((a, b) => b.at - a.at); const n = +(ROUTE.p.n || 25); body = `<div class="panel-b" style="padding-top:12px">${timelineHTML(all.slice(0, n))}${all.length > n ? `<button class="btn sm" data-go="veiculo" data-id="${id}" data-n="${n + 50}">Mostrar mais (${all.length - n})</button>` : ''}</div>`; }
-    if (tab === 'posses') body = tbl(['Condutor', 'Início', 'Fim', 'Duração', '>Km rodados', 'Obras'], S.custody.filter(x => x.vehicleId === id).sort((a, b) => b.start - a.start).map(x => `<tr><td>${drvLink(x.driverId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td class="nowrap">${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || v.odometer) - x.startKm)}</td><td>${[...new Set(x.segments.map(s => prj(s.projectId).code))].join(', ') || pill('Sem obra', 'urg')}</td></tr>`));
+    if (tab === 'posses') body = tbl(['Condutor', 'Início', 'Fim', 'Duração', '>Km rodados', 'Obras'], S.custody.filter(x => x.vehicleId === id).sort((a, b) => b.start - a.start).map(x => `<tr><td>${drvLink(x.driverId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td class="nowrap">${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || v.odometer) - x.startKm)}</td><td>${custObras(x)}</td></tr>`));
     if (tab === 'ck') body = checklistTable(S.checklists.filter(k => k.vehicleId === id));
     if (tab === 'fuel') body = `${isStaff() ? `<div class="panel-b" style="padding-bottom:0"><button class="btn ok sm" data-go="lancar_abastecimento" data-vid="${id}">${ic('plus')}Lançar abastecimento</button></div>` : ''}${fuelTable(S.fuel.filter(f => f.vehicleId === id))}`;
     if (tab === 'mnt') body = `${planEditor(v)}<div class="panel-h"><h3>Serviços realizados</h3></div>${maintRecordsTable(S.maintRecords.filter(r => r.vehicleId === id), { noVeh: true })}`;
@@ -257,7 +259,7 @@ PAGES.veiculo = {
     return `<div class="stack">
       <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between;gap:16px">
         <div class="row" style="gap:16px">${plate(v.plate, true)}<div><h2 style="font-size:1.15rem">${esc(v.brand)} ${esc(v.model)}</h2><div class="row" style="gap:8px;margin-top:6px">${stTag(st)}${ownTag(v)}${seatsTag(v)}${docBadge(v) ? `<button style="border:none;background:none;padding:0" data-go="veiculo" data-id="${id}" data-tab="docs">${docBadge(v)}</button>` : ''}<span class="muted small">${v.year} · ${v.fuelType}</span></div></div></div>
-        <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button>` : ''}${M && !v.maintenance && openIssues(id).some(i => !i.canRun) ? `<button class="btn ok" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : M && !v.maintenance && !c ? `<button class="btn" data-go="checklist_full" data-vid="${id}" data-type="manut_entrada">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}${isOwner() ? `<button class="btn danger" data-act="veh-del" data-id="${id}" title="Excluir veículo (somente o proprietário)">${ic('trash')}Excluir</button>` : ''}</div>
+        <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button><button class="btn" data-act="obra-fix" data-id="${c.id}" title="Corrigir a obra informada pelo condutor">${ic('pin')}Obra</button>` : ''}${M && !v.maintenance && openIssues(id).some(i => !i.canRun) ? `<button class="btn ok" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : M && !v.maintenance && !c ? `<button class="btn" data-go="checklist_full" data-vid="${id}" data-type="manut_entrada">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}${isOwner() ? `<button class="btn danger" data-act="veh-del" data-id="${id}" title="Excluir veículo (somente o proprietário)">${ic('trash')}Excluir</button>` : ''}</div>
       </div></div>
       ${iss.map(i => `<div class="note ${i.severity === 'critica' || !i.canRun ? 'bad' : 'warn'}">${ic('alert')}<div style="flex:1"><b>${esc(i.type)} · ${SEVERITY[i.severity].l}</b> — ${esc(i.desc)}<div class="small">${esc(drv(i.driverId)?.name || '')} · ${fmtShort(i.at)}</div></div>${i.severity === 'critica' || !i.canRun ? `<button class="btn sm danger" data-go="seguro" data-vid="${id}">${ic('shield')}Acionar seguro</button>` : ''}${M ? `<button class="btn sm" data-act="iss-resolve" data-id="${i.id}">Resolver</button>` : ''}</div>`).join('')}
       ${t ? `<div class="note warn">${ic('swap')}<div style="flex:1"><b>Transferência:</b> ${esc(drv(t.fromDriverId).name)} → ${esc(drv(t.toDriverId).name)} · ${T_LABEL[t.status]}</div><button class="btn sm" data-go="transferencia" data-id="${t.id}">Abrir</button></div>` : ''}
@@ -401,6 +403,11 @@ PAGES.forcar = {
           <label class="field"><span>Novo condutor</span><select class="inp" name="to"><option value="">Nenhum — devolver ao pátio</option>${driverOptions('', d => d.id !== c.driverId && driverActive(d))}</select><small>Ele fará o checklist de recebimento para assumir.</small></label>
           <label class="field"><span>Quilometragem</span><input class="inp num" name="km" inputmode="numeric" value="${suggestedKm(v)}"></label>
           <label class="field full"><span>Justificativa</span><textarea class="inp" name="just" placeholder="Por que a entrega não foi feita pelo condutor?"></textarea></label>
+          <div class="field full"><span>Descontar a pontuação de ${esc(drv(c.driverId).name)}?</span>
+            <div class="row" style="gap:10px;margin-top:4px">
+              <label class="chip" style="cursor:pointer"><input type="radio" name="disc" value="sim"> Sim, descontar ${nf(bonusP(curPeriod()).discA)} pts (modalidade A)</label>
+              <label class="chip" style="cursor:pointer"><input type="radio" name="disc" value="nao"> Não descontar</label>
+            </div><small>Descontar quando o condutor deveria ter feito a entrega e não fez. Não descontar quando a retirada foi por decisão da gestão (manutenção, sinistro, mudança de obra etc.). O desconto aparece no extrato do condutor e pode ser cancelado com motivo em Premiação.</small></div>
         </div></div>
         <div class="note bad" id="ck-err" hidden></div>
         <div class="row"><button type="button" class="btn" data-go="veiculo" data-id="${vid}">Cancelar</button><button class="btn ok">Confirmar transferência</button></div>
@@ -413,14 +420,19 @@ PAGES.forcar = {
       const k = parseInt(d.km.replace(/\D/g, ''), 10); const errs = [];
       if (d.just.length < 15) errs.push('Escreva uma justificativa com pelo menos 15 caracteres.');
       if (!k || k < c.startKm) errs.push('Quilometragem inválida.');
+      if (!['sim', 'nao'].includes(d.disc)) errs.push('Marque se a pontuação do condutor será descontada ou não.');
+      if (d.disc === 'sim' && closingOf(curPeriod())) errs.push('O período da premiação já está fechado: reabra antes de descontar ou marque "Não descontar".');
       if (d.to && S.settings.oneVehiclePerDriver && driverCustodies(d.to).length) errs.push(`${drv(d.to).name} já está com outro veículo.`);
       if (errs.length) return showErrors(errs);
       const old = activeTransfer(vid); if (old) setTransfer(old, 'cancelada', 'Substituída por transferência forçada');
       c.end = nowTs(); c.endKm = k; c.closedReason = 'forcada'; v.odometer = Math.max(v.odometer, k);
-      log('transferencia_forcada', `Transferência forçada por ${CUR.name}: posse de ${drv(c.driverId).name} encerrada${d.to ? `, liberada para ${drv(d.to).name}` : ''}. Justificativa: ${d.just}`, { vehicleId: vid, driverId: c.driverId });
-      notify(c.driverId, `Sua posse do ${v.plate} foi encerrada pela gestão (${CUR.name}).`, { level: 'warn' });
+      // desconto na premiação (escolha obrigatória do gestor): ocorrência da modalidade A no extrato do condutor
+      c.forcedDiscount = d.disc === 'sim'; c.forcedAdjId = null;
+      if (c.forcedDiscount) { const key = curPeriod(); const adj = newAdj({ driverId: c.driverId, period: key, kind: 'ocorrencia', modality: 'A', points: bonusP(key).discA, at: c.end, vehicleId: vid, reason: `Transferência forçada do ${v.plate}: entrega não feita pelo condutor. ${d.just}` }); c.forcedAdjId = adj.id; }
+      log('transferencia_forcada', `Transferência forçada por ${CUR.name}: posse de ${drv(c.driverId).name} encerrada${d.to ? `, liberada para ${drv(d.to).name}` : ''}, ${c.forcedDiscount ? `com desconto de ${nf(bonusP(curPeriod()).discA)} pts na premiação` : 'sem desconto na premiação'}. Justificativa: ${d.just}`, { vehicleId: vid, driverId: c.driverId });
+      notify(c.driverId, `Sua posse do ${v.plate} foi encerrada pela gestão (${CUR.name})${c.forcedDiscount ? `, com desconto de ${nf(bonusP(curPeriod()).discA)} pontos na premiação` : ''}.`, { level: 'warn' });
       if (d.to) {
-        const t = { id: uid('trf'), vehicleId: vid, fromDriverId: c.driverId, toDriverId: d.to, status: 'aguardando_recebimento', requestedAt: nowTs(), forced: true, justification: d.just, requestedBy: CUR.id, fromCustodyId: c.id, toCustodyId: null, deliverChecklistId: null, receiveChecklistId: null, events: [{ at: nowTs(), status: 'aguardando_recebimento', by: CUR.id, note: `Transferência forçada: ${d.just}` }] };
+        const t = { id: uid('trf'), vehicleId: vid, fromDriverId: c.driverId, toDriverId: d.to, status: 'aguardando_recebimento', requestedAt: nowTs(), forced: true, justification: d.just, discount: c.forcedDiscount, requestedBy: CUR.id, fromCustodyId: c.id, toCustodyId: null, deliverChecklistId: null, receiveChecklistId: null, events: [{ at: nowTs(), status: 'aguardando_recebimento', by: CUR.id, note: `Transferência forçada: ${d.just}` }] };
         S.transfers.push(t); c.transferId = t.id;
         notify(d.to, `A gestão liberou o ${v.plate} para você. Faça o checklist de recebimento.`, { level: 'ok', link: { page: 'inicio' } });
       }
@@ -480,7 +492,7 @@ PAGES.condutores = {
     return `<div class="page-head"><div class="filters">${[['ativos', 'Ativos'], ['inativos', 'Inativos'], ['todos', 'Todos']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="condutores" data-f="${k}">${l}<span class="n">${n(k)}</span></button>`).join('')}</div>${isManager() ? `<button class="btn pri" data-act="drv-new">${ic('plus')}Cadastrar condutor</button>` : ''}</div>
       <div class="cards">${list.map(({ d, c, sc }) => {
       const v = c && veh(c.vehicleId); const seg = currentSegment(c); const cnhDays = Math.floor((d.cnhExp - nowTs()) / DAY); const on = driverActive(d);
-      return `<div class="vcard" data-go="condutor" data-id="${d.id}" style="${on ? '' : 'opacity:.6'}"><div class="h"><div class="person"><span class="avatar lg" style="${on ? '' : 'background:var(--border2);color:var(--text3)'}">${initials(d.name)}</span><div><b>${esc(d.name)}</b><small>CNH ${d.cnhCat}${cnhDays < 0 ? ' · <span style="color:var(--red)">CNH vencida</span>' : cnhDays < 60 ? ` · <span style="color:var(--yellow)">vence em ${cnhDays} dias</span>` : ''}</small></div></div>${!on ? pill('Inativo') : sc.eligible ? ring(sc.total, true) : pill('sem posse no período')}</div>
+      return `<div class="vcard" data-go="condutor" data-id="${d.id}" style="${on ? '' : 'opacity:.6'}"><div class="h"><div class="person"><span class="avatar lg" style="${on ? '' : 'background:var(--border2);color:var(--text3)'}">${initials(d.name)}</span><div><b>${esc(d.name)}</b><small>CNH ${d.cnhCat}${cnhDays < 0 ? ' · <span style="color:var(--red)">CNH vencida</span>' : cnhDays < 60 ? ` · <span style="color:var(--yellow)">vence em ${cnhDays} dias</span>` : ''}</small></div></div>${!on ? pill('Inativo') : sc.eligible ? ring(sc.total, true) : pill(sc.noValid ? 'sem uso comprovado' : 'sem posse no período')}</div>
         <div class="foot">${v ? `${plate(v.plate)}<span class="small">${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</span>` : `<span class="muted">${on ? 'Sem veículo' : `Inativo desde ${fmtDate(d.inactiveAt)}`}</span><span></span>`}</div></div>`;
     }).join('') || empty('Nenhum condutor neste filtro.')}</div>`;
   }
@@ -551,7 +563,7 @@ PAGES.condutor = {
     const avar = S.checklists.filter(k => k.driverId === id && (k.avarias || (k.items && Object.values(k.items).includes('ruim'))));
     const tabs = [['posses', 'Posses'], ['score', 'Pontuação'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['multas', 'Multas'], ['ocor', 'Ocorrências'], ['tl', 'Histórico']];
     let body = '';
-    if (tab === 'posses') body = tbl(['Veículo', 'Início', 'Fim', 'Duração', '>Km', 'Obras'], cs.map(x => `<tr><td>${vehLink(x.vehicleId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td>${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || veh(x.vehicleId).odometer) - x.startKm)}</td><td>${[...new Set(x.segments.map(s => prj(s.projectId).code))].join(', ') || 'Sem obra'}</td></tr>`));
+    if (tab === 'posses') body = tbl(['Veículo', 'Início', 'Fim', 'Duração', '>Km', 'Obras'], cs.map(x => `<tr><td>${vehLink(x.vehicleId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td>${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || veh(x.vehicleId).odometer) - x.startKm)}</td><td>${custObras(x)}</td></tr>`));
     if (tab === 'ck') body = checklistTable(S.checklists.filter(k => k.driverId === id));
     if (tab === 'fuel') body = fuelTable(S.fuel.filter(f => f.driverId === id));
     if (tab === 'multas') body = fineTable(fines);

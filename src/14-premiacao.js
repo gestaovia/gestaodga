@@ -3,8 +3,11 @@
    Modalidades: A (checklist de entrega e recebimento), B (checklist diário), C (abastecimento com foto do hodômetro).
    Ordem do cálculo (item 6): pontos da modalidade − descontos (mínimo 0) → subtotal → −10 por modalidade zerada → mínimo 0.
    Premiação (item 7): (valor base + adicional) × dias com posse ÷ dias úteis do período.
+   Dia com posse (v1.11.0): só conta o dia útil em que o condutor realmente ficou com o veículo, pela regra configurada
+   (posse mínima de X horas no dia e/ou checklist diário feito na posse depois do recebimento). Quem só fez o recebimento
+   (e entregou logo depois, sem checklist diário) não tem dia válido: fica sem pontuação e sem premiação no período.
    Os parâmetros (item 11) têm vigência por período: uma alteração só vale a partir do período seguinte. */
-const BONUS_DEF = () => ({ startDay: 26, ptsA: 50, ptsB: 30, ptsC: 20, discA: 50, discLate: 10, discAbsent: 15, deadline: '10:00', discC: 10, zeroPenalty: 10, baseValue: 300, add100: 100, add90: 50, addMinDays: 15, releaseDays: 3 });
+const BONUS_DEF = () => ({ startDay: 26, ptsA: 50, ptsB: 30, ptsC: 20, discA: 50, discLate: 10, discAbsent: 15, deadline: '10:00', discC: 10, zeroPenalty: 10, baseValue: 300, add100: 100, add90: 50, addMinDays: 15, releaseDays: 3, dayRule: 'ambos', minHours: 5 });
 const MODS = {
   A: { l: 'Checklist de entrega e recebimento', s: 'Entrega e recebimento', pk: 'ptsA' },
   B: { l: 'Checklist diário', s: 'Checklist diário', pk: 'ptsB' },
@@ -15,8 +18,18 @@ const PARAM_LABEL = {
   discA: ['Desconto: transferência sem checklist completo', 'pts'], discLate: ['Desconto: checklist diário com atraso', 'pts'], discAbsent: ['Desconto: ausência de checklist diário', 'pts'],
   deadline: ['Horário limite do checklist diário', ''], discC: ['Desconto: abastecimento sem registro ou sem foto', 'pts'], zeroPenalty: ['Penalidade por modalidade zerada', 'pts'],
   baseValue: ['Valor base da premiação (100 pontos)', 'R$'], add100: ['Adicional com 100 pontos', 'R$'], add90: ['Adicional de 90 a 99 pontos', 'R$'],
-  addMinDays: ['Dias com posse mínimos para o adicional', 'dias'], releaseDays: ['Divulgação do extrato após o fim do período', 'dias']
+  addMinDays: ['Dias com posse mínimos para o adicional de 90 a 99 pontos', 'dias'], releaseDays: ['Divulgação do extrato após o fim do período', 'dias'],
+  dayRule: ['Regra para contar o dia com posse', ''], minHours: ['Posse mínima no dia', 'h']
 };
+const DAY_RULES = {
+  ambos: 'Posse mínima no dia e checklist diário na posse',
+  horas: 'Somente posse mínima no dia',
+  diario: 'Somente checklist diário na posse',
+  qualquer: 'Posse mínima no dia ou checklist diário na posse'
+};
+const PARAM_TEXT = new Set(['deadline', 'dayRule']);
+const dayRuleText = P => { const h = `${nf(+P.minHours || 0, 1)} h`; return { ambos: `posse de ${h} ou mais no dia e ao menos um checklist diário feito na posse (depois do recebimento)`, horas: `posse de ${h} ou mais no dia`, diario: 'ao menos um checklist diário feito na posse (depois do recebimento)', qualquer: `posse de ${h} ou mais no dia ou um checklist diário feito na posse` }[P.dayRule] || DAY_RULES.ambos; };
+const paramVal = (k, v) => k === 'dayRule' ? (DAY_RULES[v] || v) : PARAM_LABEL[k][1] === 'R$' ? money(v) : esc(v) + (PARAM_LABEL[k][1] ? ' ' + PARAM_LABEL[k][1] : '');
 const bonusCfg = () => { const s = S.settings; if (!s.bonus) s.bonus = { startPeriod: null, versions: [], closing: { auto: true }, holidays: [], odoSince: null }; const b = s.bonus; b.versions = b.versions || []; b.holidays = b.holidays || []; b.closing = b.closing || { auto: true }; return b; };
 function bonusP(key) {
   const vs = bonusCfg().versions.slice().sort((a, b) => a.from < b.from ? -1 : 1);
@@ -81,9 +94,33 @@ function driverScore(did, key = curPeriod()) {
   const occ = [];
   const add = (o) => { const ab = abono.get(o.key); occ.push({ ...o, abono: ab ? { id: ab.id, reason: ab.reason, by: ab.createdBy, at: ab.createdAt } : null }); };
 
-  // dias úteis do período e dias com posse
+  // dias úteis do período e dias com posse VÁLIDA (regra do dia: horas mínimas e/ou checklist diário na posse)
   const days = daysBetween(from, to); const biz = days.filter(isBizDay);
-  const possDays = biz.filter(d => d <= now && cs.some(c => c.start < nextDay(d) && (!c.end || c.end > d)));
+  const inDay = (c, d) => c.start < nextDay(d) && (!c.end || c.end > d);
+  const rawDays = biz.filter(d => d <= now && cs.some(c => inDay(c, d)));
+  const dailies = S.checklists.filter(k => k.type === 'diario' && k.driverId === did);
+  // checklist diário feito NA posse, depois do recebimento (o recebimento sozinho não comprova o uso)
+  const custDaily = c => dailies.some(k => k.custodyId === c.id || (k.vehicleId === c.vehicleId && k.at > c.start && (!c.end || k.at <= c.end)));
+  const heldMs = (list, d) => { // horas de posse no dia (sem contar duas vezes posses sobrepostas)
+    const a0 = d, b0 = Math.min(nextDay(d), now);
+    const iv = list.map(c => [Math.max(c.start, a0), Math.min(c.end || now, b0)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+    let tot = 0, cs0 = null, ce0 = null; iv.forEach(([a, b]) => { if (ce0 == null || a > ce0) { if (ce0 != null) tot += ce0 - cs0; cs0 = a; ce0 = b; } else ce0 = Math.max(ce0, b); }); if (ce0 != null) tot += ce0 - cs0;
+    return tot;
+  };
+  const minMs = Math.max(0, +P.minHours || 0) * 36e5; const rule = DAY_RULES[P.dayRule] ? P.dayRule : 'ambos';
+  const skipDays = [];
+  const possDays = rawDays.filter(d => {
+    const dc = cs.filter(c => inDay(c, d)); const ok = dc.filter(custDaily);
+    const hAll = heldMs(dc, d); const hOk = heldMs(ok, d);
+    const pass = rule === 'horas' ? hAll >= minMs : rule === 'diario' ? ok.length > 0 : rule === 'qualquer' ? (hAll >= minMs || ok.length > 0) : (ok.length > 0 && hOk >= minMs);
+    if (!pass) {
+      const why = []; const hh = rule === 'ambos' && ok.length ? hOk : hAll;
+      if (rule !== 'diario' && hh < minMs) why.push(`posse de ${dur(hh)} no dia (mínimo ${nf(+P.minHours || 0, 1)} h)`);
+      if (rule !== 'horas' && !ok.length) why.push('sem checklist diário na posse depois do recebimento');
+      skipDays.push({ d, why: why.join(' e ') || 'não atende a regra do dia', today: now < nextDay(d) });
+    }
+    return pass;
+  });
 
   // A · entrega e recebimento (−50 por recebimento sem checklist completo, ou entrega sem checklist válido:
   //     completo, ou confirmação rápida quando o recebimento daquela posse foi completo)
@@ -97,8 +134,8 @@ function driverScore(did, key = curPeriod()) {
   // B · checklist diário em todo dia com posse (prazo P.deadline; atraso −10; ausência −15)
   const cks = S.checklists.filter(k => k.driverId === did && ['diario', 'recebimento', 'entrega', 'devolucao'].includes(k.type));
   let onTime = 0, late = 0, absent = 0, pending = 0, exempt = 0;
-  possDays.forEach(d => {
-    const vehs = [...new Set(cs.filter(c => c.start < nextDay(d) && (!c.end || c.end > d)).map(c => c.vehicleId))];
+  rawDays.forEach(d => {
+    const vehs = [...new Set(cs.filter(c => inDay(c, d)).map(c => c.vehicleId))];
     const dl = d + hm(P.deadline) * MIN;
     if (vehs.length && vehs.every(v => blockedAt(v, dl))) { exempt++; return; } // veículo parado por problema crítico
     const dk = cks.filter(k => tsOf(k) >= d && tsOf(k) < nextDay(d));
@@ -131,14 +168,16 @@ function driverScore(did, key = curPeriod()) {
   const adjust = sum(live.filter(a => a.kind === 'ajuste'), a => +a.points || 0);
   const total = Math.max(0, Math.min(100, subtotal - penalty + adjust));
   // premiação (item 7)
-  const eligible = cs.length > 0;
+  // só tem pontuação quem teve ao menos um dia com posse válida (quem só recebeu e entregou não pontua)
+  const eligible = possDays.length > 0; const noValid = cs.length > 0 && !eligible;
   const base = (+P.baseValue || 0) * total / 100;
-  let addv = total >= 100 ? +P.add100 || 0 : total >= 90 ? +P.add90 || 0 : 0; const addBlocked = addv > 0 && possDays.length < (+P.addMinDays || 0);
+  // adicional de 100 pontos: vale para todos com 100 pontos; o de 90 a 99 continua exigindo os dias mínimos com posse
+  let addv = total >= 100 ? +P.add100 || 0 : total >= 90 ? +P.add90 || 0 : 0; const addBlocked = addv > 0 && total < 100 && possDays.length < (+P.addMinDays || 0);
   if (addBlocked) addv = 0;
   const full = base + addv; const factor = biz.length ? possDays.length / biz.length : 0;
   const bonus = eligible ? Math.round(full * factor * 100) / 100 : 0;
   const parts = Object.values(mods).map(m => ({ k: m.k, l: m.l, v: m.v, max: m.max, info: m.n ? `${m.n} desconto(s)${m.zero ? ' · zerada' : ''}` : 'Sem descontos' }));
-  return { key, from, to, partial, P, total, bonus, eligible, mods, subtotal, zeroed, penalty, adjust, base, add: addv, addBlocked, full, factor, possDays: possDays.length, bizDays: biz.length,
+  return { key, from, to, partial, P, total, bonus, eligible, noValid, skipDays, rawDays: rawDays.length, mods, subtotal, zeroed, penalty, adjust, base, add: addv, addBlocked, full, factor, possDays: possDays.length, bizDays: biz.length,
     occurrences: occ, adjustments: adjs, parts, req: onTime + late + absent, done: onTime + late, late, absent, pending, exempt, tier: null, fines: [] };
 }
 function rankList(key) {
@@ -151,7 +190,7 @@ function rankList(key) {
 
 /* ----- fechamento (guarda o extrato de cada condutor como estava) ----- */
 function statementRow(d, sc) {
-  return { driverId: d.id, name: d.name, score: sc.total, bonus: sc.bonus, base: Math.round(sc.base * 100) / 100, add: sc.add, addBlocked: sc.addBlocked, full: Math.round(sc.full * 100) / 100, factor: sc.factor, possDays: sc.possDays, bizDays: sc.bizDays,
+  return { driverId: d.id, name: d.name, score: sc.total, bonus: sc.bonus, base: Math.round(sc.base * 100) / 100, add: sc.add, addBlocked: sc.addBlocked, full: Math.round(sc.full * 100) / 100, factor: sc.factor, possDays: sc.possDays, bizDays: sc.bizDays, skipDays: (sc.skipDays || []).map(x => ({ d: x.d, why: x.why })),
     subtotal: sc.subtotal, zeroed: sc.zeroed, penalty: sc.penalty, adjust: sc.adjust, mods: sc.mods, occurrences: sc.occurrences.map(o => ({ key: o.key, mod: o.mod, at: o.at, pts: o.pts, why: o.why, manual: o.manual || null, abono: o.abono, ev: o.ev })),
     adjustments: sc.adjustments.filter(a => a.kind === 'ajuste' && !a.voidedAt).map(a => ({ points: a.points, reason: a.reason, at: a.createdAt })), counts: { late: sc.late, absent: sc.absent, exempt: sc.exempt }, P: sc.P };
 }
@@ -207,12 +246,12 @@ function statementHTML(sc, opts = {}) {
     ['5. Pontuação final (mínimo 0)', `<b>${nf(sc.score ?? sc.total)}</b>`]
   ];
   const total = sc.score ?? sc.total;
-  if (sc.eligible === false) return `<div class="stack" style="gap:10px"><div class="row"><span class="avatar lg" style="background:var(--border2);color:var(--text3)">—</span><div><b>${opts.title || 'Pontuação do período'}</b><div class="tiny muted">${periodDates(key)}${sc.partial ? ' · em andamento' : ''}</div></div></div><div class="note">Sem posse de veículo no período: não há pontuação nem premiação. A pontuação começa a contar no recebimento de um veículo.</div>${opts.manage ? adjHistory(sc.adjustments || [], opts) : ''}</div>`;
+  if (sc.eligible === false) return `<div class="stack" style="gap:10px"><div class="row"><span class="avatar lg" style="background:var(--border2);color:var(--text3)">—</span><div><b>${opts.title || 'Pontuação do período'}</b><div class="tiny muted">${periodDates(key)}${sc.partial ? ' · em andamento' : ''}</div></div></div><div class="note">${sc.noValid ? `Nenhum dia com uso comprovado do veículo no período: não há pontuação nem premiação. O dia só conta com ${esc(dayRuleText(P))}.${skipHTML(sc)}` : 'Sem posse de veículo no período: não há pontuação nem premiação. A pontuação começa a contar no recebimento de um veículo.'}</div>${opts.manage ? adjHistory(sc.adjustments || [], opts) : ''}</div>`;
   const prem = [
     ['Valor base', `${money(P.baseValue)} × ${nf(total)} ÷ 100 = <b>${money(sc.base)}</b>`],
-    ['Adicional por desempenho', sc.add ? `<b>${money(sc.add)}</b> (${total >= 100 ? '100 pontos' : '90 a 99 pontos'})` : sc.addBlocked ? `— <span class="small muted">exige ${P.addMinDays} dias com posse (teve ${sc.possDays})</span>` : '— <span class="small muted">abaixo de 90 pontos</span>'],
+    ['Adicional por desempenho', sc.add ? `<b>${money(sc.add)}</b> (${total >= 100 ? '100 pontos' : '90 a 99 pontos'})` : sc.addBlocked ? `— <span class="small muted">de 90 a 99 pontos exige ${P.addMinDays} dias com posse (teve ${sc.possDays})</span>` : '— <span class="small muted">abaixo de 90 pontos</span>'],
     ['Premiação cheia', `<b>${money(sc.full)}</b>`],
-    ['Fator de participação', `${fx} dias úteis = ${nf((sc.factor || 0) * 100, 1)}%`],
+    ['Fator de participação', `${fx} dias úteis com posse válida = ${nf((sc.factor || 0) * 100, 1)}%`],
     ['Premiação a receber', `<b style="font-size:1.1rem;color:${sc.bonus ? 'var(--green)' : 'var(--text3)'}">${money(sc.bonus)}</b>`]
   ];
   const kv = rows => `<table class="tbl calc"><tbody>${rows.map(([a, b]) => `<tr><td>${a}</td><td class="r">${b}</td></tr>`).join('')}</tbody></table>`;
@@ -222,11 +261,16 @@ function statementHTML(sc, opts = {}) {
     <div class="mods">${modsHTML}</div>
     <div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Descontos e evidências</h3>${opts.manage && !opts.closed ? `<button class="btn sm" data-act="bn-occ-new" data-did="${opts.did}" data-p="${key}">${ic('plus')}Ocorrência</button><button class="btn sm" data-act="bn-adj-new" data-did="${opts.did}" data-p="${key}">Ajuste manual</button>` : ''}</div>
       ${tbl(['Data', 'Mod.', 'Motivo e evidência', '>Pontos', ...(opts.manage ? [''] : [])], occ.map(o => occRow(o, { ...opts, key })), 'Nenhum desconto no período.')}</div>
+    ${(sc.skipDays || []).length ? `<div class="note">${ic('cal')}<div>O dia só conta com ${esc(dayRuleText(P))}.${skipHTML(sc)}</div></div>` : ''}
     ${sc.pending ? `<div class="note warn">${ic('check')}<div>Checklist diário de hoje ainda pendente: envie até ${P.deadline} para não ter desconto.</div></div>` : ''}
     <div class="grid2"><div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Cálculo da pontuação</h3></div>${kv(steps)}</div>
       <div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Cálculo da premiação</h3></div>${kv(prem)}</div></div>
     ${opts.manage ? adjHistory(sc.adjustments || [], opts) : ''}
   </div>`;
+}
+function skipHTML(sc) {
+  const l = sc.skipDays || []; if (!l.length) return '';
+  return `<div class="small" style="margin-top:6px">Dia(s) com posse que não contaram${sc.partial ? ' (até agora)' : ''}:<br>${l.slice(0, 12).map(x => `<b class="num">${fmtDate(x.d)}</b> — ${esc(x.why)}${x.today ? ' <span class="muted">(hoje, ainda pode contar)</span>' : ''}`).join('<br>')}${l.length > 12 ? `<br>… e mais ${l.length - 12}` : ''}</div>`;
 }
 function adjHistory(list, opts) {
   if (!list.length) return '';
@@ -322,7 +366,7 @@ PAGES.bonificacao = {
       <div class="kpis">${kpi('Média da equipe', el.length ? nf(sum(el, x => x.sc.total) / el.length, 0) : '—', 'gauge', 'c-blue', '', 'pontos')}${kpi('Com posse no período', `${el.length}`, 'user')}${kpi(cur ? 'Prêmios previstos' : 'Prêmios do período', money(totalPrev), 'star', 'c-green')}${kpi('Dias úteis', el[0]?.sc.bizDays ?? daysBetween(...periodRange(key)).filter(isBizDay).length, 'cal', '', '', cur ? 'no período' : '')}</div>
       ${el.length ? `<div class="grid3">${el.slice(0, 3).map(({ d, sc, pos }, i) => `<div class="vcard" data-go="condutor" data-id="${d.id}" data-tab="score" style="align-items:center;text-align:center;border-top:4px solid ${medal[Math.min(2, pos - 1)]}"><span class="pill ${pos === 1 ? 'ok' : ''}">${pos}º lugar</span>${av(d, 'lg')}<b>${esc(d.name)}</b>${ring(sc.total)}<b style="font-size:1.15rem;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b><span class="tiny muted">${sc.possDays}/${sc.bizDays} dias com posse</span></div>`).join('')}</div>` : ''}
       <div class="panel"><div class="panel-h"><h2>Condutores</h2><span class="small muted">A · B · C = entrega/recebimento · checklist diário · abastecimento</span></div>
-        <div class="vlist">${list.map(({ d, sc, pos }) => `<div class="vrow" data-go="condutor" data-id="${d.id}" data-tab="score" style="grid-template-columns:30px auto 1fr auto auto"><b class="muted num">${pos ? pos + 'º' : '—'}</b>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}<div class="who2"><b>${esc(d.name)}</b>${sc.eligible ? `<div class="row" style="gap:3px;flex-wrap:nowrap;margin-top:5px">${Object.values(sc.mods).map(m => `<div class="bar s-${pctTone(m.v, m.max)}" style="flex:${m.max || 1};min-width:14px" title="${esc(m.l)}: ${nf(m.v)}/${m.max}"><i style="width:${m.max ? m.v / m.max * 100 : 0}%"></i></div>`).join('')}</div>` : '<small>Sem posse no período</small>'}</div><span class="small muted nowrap">${sc.possDays}/${sc.bizDays} dias</span><b class="num" style="min-width:86px;text-align:right;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b></div>`).join('') || '<div class="panel-b muted">Nenhum condutor ativo.</div>'}</div></div>
+        <div class="vlist">${list.map(({ d, sc, pos }) => `<div class="vrow" data-go="condutor" data-id="${d.id}" data-tab="score" style="grid-template-columns:30px auto 1fr auto auto"><b class="muted num">${pos ? pos + 'º' : '—'}</b>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}<div class="who2"><b>${esc(d.name)}</b>${sc.eligible ? `<div class="row" style="gap:3px;flex-wrap:nowrap;margin-top:5px">${Object.values(sc.mods).map(m => `<div class="bar s-${pctTone(m.v, m.max)}" style="flex:${m.max || 1};min-width:14px" title="${esc(m.l)}: ${nf(m.v)}/${m.max}"><i style="width:${m.max ? m.v / m.max * 100 : 0}%"></i></div>`).join('')}</div>` : `<small>${sc.noValid ? 'Sem dia com uso comprovado (só recebimento, posse curta ou sem checklist diário)' : 'Sem posse no período'}</small>`}</div><span class="small muted nowrap">${sc.possDays}/${sc.bizDays} dias</span><b class="num" style="min-width:86px;text-align:right;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b></div>`).join('') || '<div class="panel-b muted">Nenhum condutor ativo.</div>'}</div></div>
     </div>`;
   },
   mount({ tab }) { if (tab === 'parametros') mountParams(); }
@@ -333,12 +377,12 @@ ACTIONS['bn-p'] = a => { BON_P = shiftMonth(BON_P || curPeriod(), +a.dataset.d);
 function paramsView(M) {
   const b = bonusCfg(); const cur = curPeriod(); const next = shiftMonth(cur, 1); const P = bonusP(cur); const Pn = bonusP(next); const dis = M ? '' : 'disabled';
   const changed = Object.keys(BONUS_DEF()).some(k => String(P[k]) !== String(Pn[k]));
-  const field = k => { const [l, u] = PARAM_LABEL[k]; return `<label class="field"><span>${l}</span><div class="row" style="flex-wrap:nowrap;gap:6px">${u === 'R$' ? '<span class="small muted">R$</span>' : ''}<input class="inp num" name="${k}" value="${esc(Pn[k])}" ${k === 'deadline' ? 'type="time"' : 'inputmode="decimal"'} style="max-width:120px" ${dis}>${u && u !== 'R$' ? `<span class="small muted">${u}</span>` : ''}</div></label>`; };
+  const field = k => { const [l, u] = PARAM_LABEL[k]; if (k === 'dayRule') return `<label class="field"><span>${l}</span><select class="inp" name="dayRule" ${dis}>${Object.entries(DAY_RULES).map(([v, t]) => `<option value="${v}" ${Pn.dayRule === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`; return `<label class="field"><span>${l}</span><div class="row" style="flex-wrap:nowrap;gap:6px">${u === 'R$' ? '<span class="small muted">R$</span>' : ''}<input class="inp num" name="${k}" value="${esc(Pn[k])}" ${k === 'deadline' ? 'type="time"' : 'inputmode="decimal"'} style="max-width:120px" ${dis}>${u && u !== 'R$' ? `<span class="small muted">${u}</span>` : ''}</div></label>`; };
   const yr = new Date().getFullYear();
   const hol = [...holidaysOf(yr), ...holidaysOf(yr + 1)].filter(h => h.date >= dayKey(nowTs() - 31 * DAY));
   return `<div class="panel"><div class="panel-h"><h2>Vigente no período atual</h2><span class="small muted">${periodName(cur)}</span></div>
-      ${tbl(['Parâmetro', '>Valor'], Object.keys(PARAM_LABEL).map(k => `<tr><td>${PARAM_LABEL[k][0]}</td><td class="r num">${PARAM_LABEL[k][1] === 'R$' ? money(P[k]) : esc(P[k]) + (PARAM_LABEL[k][1] ? ' ' + PARAM_LABEL[k][1] : '')}</td></tr>`))}
-      <div class="panel-b small muted">Premiação = (valor base × pontuação ÷ 100 + adicional) × dias com posse ÷ dias úteis. Adicional só para quem teve posse em ${P.addMinDays} dias ou mais.</div></div>
+      ${tbl(['Parâmetro', '>Valor'], Object.keys(PARAM_LABEL).map(k => `<tr><td>${PARAM_LABEL[k][0]}</td><td class="r num">${paramVal(k, P[k])}</td></tr>`))}
+      <div class="panel-b small muted">Premiação = (valor base × pontuação ÷ 100 + adicional) × dias com posse ÷ dias úteis. Dia com posse = dia útil com ${esc(dayRuleText(P))}; quem só fez o recebimento não pontua. Adicional de 100 pontos para todos com 100 pontos; o de 90 a 99 exige ${P.addMinDays} dias com posse ou mais.</div></div>
     <form class="panel" id="bp-form"><div class="panel-h"><h2>Alterar parâmetros</h2><span class="pill ${changed ? 'warn' : ''}">vale a partir de ${periodName(next)}</span></div>
       <div class="panel-b form-grid three">${Object.keys(PARAM_LABEL).map(field).join('')}</div>
       <div class="panel-b"><p class="small muted">Pelo regulamento, qualquer alteração só vale a partir do período seguinte à divulgação e fica registrada com data e responsável.</p><p class="err" id="bp-err"></p>${M ? '<button class="btn ok">Salvar para o próximo período</button>' : '<p class="muted small">Somente o gestor de frota ou o administrador altera os parâmetros.</p>'}</div></form>
@@ -352,7 +396,7 @@ function paramsView(M) {
         <div class="small muted">O período termina no dia ${P.startDay > 1 ? P.startDay - 1 : 'último'}; o extrato é fechado e liberado aos condutores ${P.releaseDays} dia(s) depois (próxima: ${fmtDate(releaseAt(cur))}). A gestão pode fechar antes em Relatórios › Fechamento da premiação; o condutor só vê o extrato na data de divulgação.</div>
         <div class="tiny muted">Programa iniciado no período ${b.startPeriod ? periodName(b.startPeriod) : '—'}. Foto do hodômetro exigida nos abastecimentos desde ${b.odoSince ? fmtDT(b.odoSince) : '—'}.</div></div></div>
     </div>
-    <div class="panel"><div class="panel-h"><h3>Histórico de versões</h3></div>${tbl(['Vale a partir de', 'Registrada em', 'Por', 'Alterações'], b.versions.slice().sort((x, y) => x.from < y.from ? 1 : -1).map((v, i, arr) => { const prev = arr[i + 1]; const diff = prev ? Object.keys(PARAM_LABEL).filter(k => String(v.p[k]) !== String(prev.p[k])).map(k => `${PARAM_LABEL[k][0]}: ${esc(prev.p[k])} → ${esc(v.p[k])}`).join('<br>') : 'Versão inicial (regulamento versão 00)'; return `<tr><td class="nowrap">${periodName(v.from)}</td><td class="nowrap small">${fmtDT(v.at)}</td><td class="small">${esc(userName(v.by))}</td><td class="small">${diff || '—'}</td></tr>`; }))}</div>`;
+    <div class="panel"><div class="panel-h"><h3>Histórico de versões</h3></div>${tbl(['Vale a partir de', 'Registrada em', 'Por', 'Alterações'], b.versions.slice().sort((x, y) => x.from < y.from ? 1 : -1).map((v, i, arr) => { const prev = arr[i + 1]; const diff = prev ? Object.keys(PARAM_LABEL).filter(k => String(v.p[k] ?? BONUS_DEF()[k]) !== String(prev.p[k] ?? BONUS_DEF()[k])).map(k => `${PARAM_LABEL[k][0]}: ${paramVal(k, prev.p[k] ?? BONUS_DEF()[k])} → ${paramVal(k, v.p[k] ?? BONUS_DEF()[k])}`).join('<br>') : 'Versão inicial (regulamento versão 00)'; return `<tr><td class="nowrap">${periodName(v.from)}</td><td class="nowrap small">${fmtDT(v.at)}</td><td class="small">${esc(userName(v.by))}</td><td class="small">${diff || '—'}</td></tr>`; }))}</div>`;
 }
 function mountParams() {
   $('#cl-auto')?.addEventListener('change', e => { if (!isManager()) return; bonusCfg().closing.auto = e.target.checked; log('config', `Fechamento automático da premiação ${e.target.checked ? 'ligado' : 'desligado'} por ${CUR.name}`, {}); save(); toast('Configuração salva.'); });
@@ -362,9 +406,11 @@ function mountParams() {
     const next = shiftMonth(curPeriod(), 1); const p = {};
     for (const k of Object.keys(PARAM_LABEL)) {
       if (k === 'deadline') { if (!/^\d{2}:\d{2}$/.test(d.deadline)) return err('Horário limite inválido.'); p.deadline = d.deadline; continue; }
+      if (k === 'dayRule') { if (!DAY_RULES[d.dayRule]) return err('Escolha a regra do dia com posse.'); p.dayRule = d.dayRule; continue; }
       const n = parseFloat(String(d[k]).replace(/\./g, '').replace(',', '.')); if (isNaN(n) || n < 0) return err(`${PARAM_LABEL[k][0]}: valor inválido.`); p[k] = n;
     }
     if (p.startDay < 1 || p.startDay > 28) return err('O dia de início do período deve ser de 1 a 28.');
+    if (p.minHours > 24) return err('A posse mínima no dia deve ser de 0 a 24 horas.');
     if (p.ptsA + p.ptsB + p.ptsC !== 100) return err(`A soma dos pontos das modalidades deve ser 100 (está ${p.ptsA + p.ptsB + p.ptsC}).`);
     const b = bonusCfg(); const old = bonusP(next);
     if (!Object.keys(p).some(k => String(p[k]) !== String(old[k]))) return err('Nenhuma alteração.');
