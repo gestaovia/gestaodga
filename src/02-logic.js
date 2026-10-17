@@ -15,6 +15,23 @@ const activeTransfer = vid => S.transfers.find(t => t.vehicleId === vid && tOpen
 const openIssues = vid => S.issues.filter(i => i.vehicleId === vid && i.status === 'aberta');
 const vehicleByPlate = p => S.vehicles.find(v => v.plate === String(p).toUpperCase().replace(/[^A-Z0-9]/g, ''));
 
+/* ----- horário do aparelho x horário do servidor (v1.12.0) -----
+   Início e fim da posse são gravados com o relógio do celular; o banco guarda também a hora em que recebeu
+   (serverStart/serverEnd). Diferença acima da tolerância = relógio do aparelho errado (ou alterado): a premiação
+   passa a usar o horário do servidor e as telas da gestão mostram o aviso. Registro enviado depois de ficar
+   sem conexão (offlineQueued) mantém o horário do aparelho, com aviso, até 24 h. */
+const CLOCK_TOL = 15 * MIN, OFFLINE_MAX = 24 * 36e5;
+const clockGap = (dev, srv) => dev && srv ? srv - dev : 0;
+const trustDevice = (r, dev, srv) => !srv || Math.abs(srv - dev) <= CLOCK_TOL || (r.offlineQueued && srv >= dev && srv - dev <= OFFLINE_MAX);
+const custStart = c => trustDevice(c, c.start, c.serverStart) ? c.start : c.serverStart;
+const custEnd = c => !c.end ? null : trustDevice(c, c.end, c.serverEnd) ? c.end : c.serverEnd;
+// diferença relevante entre aparelho e servidor numa posse (para aviso): {min, offline}
+function custClock(c) {
+  const g = [clockGap(c.start, c.serverStart), c.end ? clockGap(c.end, c.serverEnd) : 0].sort((a, b) => Math.abs(b) - Math.abs(a))[0];
+  if (Math.abs(g) <= CLOCK_TOL) return null;
+  return { min: Math.round(g / MIN), offline: !!c.offlineQueued && g > 0 && g <= OFFLINE_MAX };
+}
+
 function vStatus(v) {
   const iss = openIssues(v.id);
   if (iss.some(i => !i.canRun)) return 'bloqueado';

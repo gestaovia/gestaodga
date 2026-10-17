@@ -18,6 +18,33 @@ function stable(v) {
   return '{' + Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
 }
 
+/* ----- registros ainda não enviados guardados no aparelho (v1.12.0) -----
+   Sem sinal na obra, o checklist/abastecimento/posse fica na memória do app e era perdido se o app fosse
+   fechado. Agora cada gravação pendente também fica no IndexedDB do aparelho (por usuário) e é reenviada
+   quando o app abre de novo com internet. Fotos vão junto (ainda como imagem local). */
+const PENDING = {
+  db: null,
+  open() {
+    if (this.db) return Promise.resolve(this.db);
+    return new Promise((res, rej) => {
+      try {
+        const r = indexedDB.open('gestaovia', 1);
+        r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('pending')) r.result.createObjectStore('pending'); };
+        r.onsuccess = () => { this.db = r.result; res(this.db); }; r.onerror = () => rej(r.error);
+      } catch (e) { rej(e); }
+    });
+  },
+  async tx(mode, fn) {
+    const db = await this.open();
+    return new Promise((res, rej) => { const t = db.transaction('pending', mode); const st = t.objectStore('pending'); const r = fn(st); t.oncomplete = () => res(r?.result); t.onerror = () => rej(t.error); });
+  },
+  get(k) { return this.tx('readonly', st => st.get(k)).catch(() => null); },
+  put(k, v) { return this.tx('readwrite', st => st.put(v, k)).catch(() => null); },
+  del(k) { return this.tx('readwrite', st => st.delete(k)).catch(() => null); }
+};
+const PENDING_SKIP = new Set(['locations', 'settings']); // posição do GPS e configurações não ficam na fila do aparelho
+const OFFLINE_KEYS = new Set(['checklists', 'fuel', 'custody']); // registros que ganham o aviso "feito sem conexão"
+
 /* ----- mapa coleção do aplicativo <-> tabela do banco ----- */
 const SPEC = [
   { key: 'costCenters', table: 'cost_centers', cols: ['id', 'code', 'name', 'active'] },
@@ -26,7 +53,7 @@ const SPEC = [
   { key: 'drivers', table: 'drivers', cols: ['id', 'name', 'cnh', 'cnhCat', 'cnhExp', 'phone', 'active', 'inactiveAt', 'inactiveReason', 'telemetry', 'createdAt'], ts: ['cnhExp', 'inactiveAt', 'createdAt'] },
   { key: 'vehicles', table: 'vehicles', cols: ['id', 'plate', 'brand', 'model', 'year', 'fuelType', 'avgKmL', 'odometer', 'tracker', 'seats', 'ownership', 'rental', 'docs', 'maintenance', 'maintenanceSince', 'maintenanceNote', 'active', 'traccarId', 'traccarUniqueId', 'insurance'], ts: ['maintenanceSince'] },
   { key: 'qrcodes', table: 'qr_codes', cols: ['id', 'vehicleId', 'token', 'active', 'createdAt', 'revokedAt'], ts: ['createdAt', 'revokedAt'] },
-  { key: 'custody', table: 'custody', cols: ['id', 'vehicleId', 'driverId', 'start', 'end', 'startKm', 'endKm', 'receiveChecklistId', 'deliverChecklistId', 'segments', 'closedReason', 'transferId', 'imported'], ts: ['start', 'end'], ren: { start: 'started_at', end: 'ended_at' }, sort: 'start' },
+  { key: 'custody', table: 'custody', cols: ['id', 'vehicleId', 'driverId', 'start', 'end', 'startKm', 'endKm', 'receiveChecklistId', 'deliverChecklistId', 'segments', 'closedReason', 'transferId', 'imported', 'serverStart', 'serverEnd'], ts: ['start', 'end', 'serverStart', 'serverEnd'], ren: { start: 'started_at', end: 'ended_at', serverStart: 'server_start_at', serverEnd: 'server_end_at' }, sort: 'start' },
   { key: 'transfers', table: 'transfers', cols: ['id', 'vehicleId', 'fromDriverId', 'toDriverId', 'status', 'requestedAt', 'forced', 'justification', 'requestedBy', 'fromCustodyId', 'toCustodyId', 'deliverChecklistId', 'receiveChecklistId', 'events'], ts: ['requestedAt'], sort: 'requestedAt' },
   { key: 'checklists', table: 'checklists', cols: ['id', 'type', 'vehicleId', 'driverId', 'userId', 'custodyId', 'at', 'km', 'fuelLevel', 'items', 'ok', 'problem', 'avarias', 'notes', 'photos', 'projectId', 'location', 'late', 'serverAt'], ts: ['at', 'serverAt'], sort: 'at' },
   { key: 'issues', table: 'issues', cols: ['id', 'vehicleId', 'driverId', 'at', 'type', 'desc', 'severity', 'canRun', 'photo', 'status', 'source', 'location', 'resolvedAt', 'resolvedBy', 'resolution'], ts: ['at', 'resolvedAt'], ren: { desc: 'description' }, sort: 'at' },
@@ -41,6 +68,7 @@ const SPEC = [
   { key: 'audit', table: 'audit_logs', cols: ['id', 'at', 'type', 'text', 'vehicleId', 'driverId', 'userId', 'data'], ts: ['at'], sort: 'at', limit: 6000 },
   { key: 'closings', table: 'bonus_closings', cols: ['id', 'month', 'closedAt', 'closedBy', 'auto', 'rows', 'total'], ts: ['closedAt'] },
   { key: 'bonusAdj', table: 'bonus_adjustments', cols: ['id', 'driverId', 'period', 'kind', 'modality', 'key', 'points', 'at', 'vehicleId', 'reason', 'createdBy', 'createdAt', 'voidedAt', 'voidedBy', 'voidReason'], ts: ['at', 'createdAt', 'voidedAt'], sort: 'createdAt' },
+  { key: 'tollClosings', table: 'toll_closings', cols: ['id', 'month', 'closedAt', 'closedBy', 'rows', 'total'], ts: ['closedAt'] },
   { key: 'settings', table: 'app_settings', single: true }
 ];
 SPEC.forEach(sp => {
@@ -81,7 +109,7 @@ const WRITES = {
 
 const DEFAULT_SETTINGS = () => ({
   dailyDeadline: '10:00', transferAlertHours: 4, oneVehiclePerDriver: true, requirePhotos: true,
-  maint: { attentionKm: 1500, urgentKm: 500, attentionDays: 30, urgentDays: 7 }, fuelDeviationPct: 15,
+  maint: { attentionKm: 1500, urgentKm: 500, attentionDays: 30, urgentDays: 7 }, fuelDeviationPct: 15, kmJumpMax: 2000,
   score: { criteria: { checklist: { on: true, weight: 30 }, conservacao: { on: true, weight: 20 }, abastecimento: { on: true, weight: 15 }, infracoes: { on: true, weight: 20 }, procedimentos: { on: true, weight: 15 } }, penalties: { atraso: 50, avaria: 5, limpeza: 2, leve: 3, media: 5, grave: 8, gravissima: 12, forcada: 5, semObra: 5, telemetria: 2 }, mode: 'faixas', minScore: 70, maxBonus: 300, tiers: [{ min: 90, value: 300 }, { min: 80, value: 200 }, { min: 70, value: 100 }] },
   rental: { warnDays: 30, urgentDays: 7 }, gps: GPS_DEF(), docs: { warnDays: 30, urgentDays: 7 },
   bonus: { startPeriod: null, versions: [], closing: { auto: true }, holidays: [], odoSince: null }
@@ -126,6 +154,7 @@ const CLOUD = {
       await this.loadAll();
       CUR = S.users.find(u => u.id === prof.id);
       this.on = true; LOGIN_BUSY = false; BOOTING = false; LOGIN_MSG = '';
+      let rec = 0; try { rec = await this.replayPending(); } catch (e) { }
       this.startPolling();
       let back = null; try { back = JSON.parse(sessionStorage.getItem('gv-route') || 'null'); } catch (e) { }
       if (prof.must_change_password || RECOVERY) go('senha');
@@ -133,6 +162,7 @@ const CLOUD = {
       else go(homePage());
       try { autoCloseCheck(); } catch (e) { }
       if (CUR.role === 'condutor') GPS.refresh();
+      if (rec) toast(`${rec} registro(s) feito(s) sem conexão foram recuperados deste aparelho e estão sendo enviados.`);
     } catch (e) {
       LOGIN_BUSY = false; BOOTING = false; LOGIN_MSG = 'Não foi possível carregar os dados: ' + friendlyError(e); render();
     }
@@ -243,6 +273,7 @@ const CLOUD = {
     this.busy = (async () => {
       let ops = [];
       try {
+        await this.savePending();
         await this.externalize();
         ops = this.diff();
         // inclusões primeiro (ordem das tabelas), depois alterações, por último exclusões:
@@ -260,6 +291,7 @@ const CLOUD = {
         }
         this.rebase(ops);
         this.setStatus('ok');
+        await this.savePending(); // o que foi enviado sai da fila do aparelho
       } catch (e) {
         await this.onSyncError(e);
       } finally {
@@ -272,13 +304,49 @@ const CLOUD = {
   async onSyncError(e) {
     const offline = e instanceof TypeError || /fetch|network|Failed/i.test(e?.message || '') && !e?.code;
     if (offline) {
-      this.setStatus('offline'); toast('Sem conexão com o servidor. Suas alterações serão enviadas quando a conexão voltar.');
+      this.markOffline(); await this.savePending();
+      this.setStatus('offline'); toast('Sem conexão. O registro ficou guardado neste aparelho e será enviado quando a conexão voltar, mesmo se você fechar o app.');
       clearTimeout(this.retryT); this.retryT = setTimeout(() => this.flush(), 15000); return;
     }
+    // recusado pelo servidor: sai da fila (guardado à parte para conferência) para não tentar de novo para sempre
+    if (CUR?.id) { const p = await PENDING.get(CUR.id); if (p) { await PENDING.put('recusado:' + CUR.id, { ...p, error: friendlyError(e), at: Date.now() }); await PENDING.del(CUR.id); } }
     this.setStatus('error'); this.lastError = friendlyError(e);
     toast('Não foi possível salvar: ' + this.lastError + ' Os dados foram recarregados.');
     // recarrega depois que esta gravação terminar (dentro dela, reload esperaria por si mesma)
     setTimeout(() => this.reload(true, true).then(() => this.setStatus('ok')).catch(() => { }), 0);
+  },
+  /* ---------- fila do aparelho ---------- */
+  objOf(sp, id) { return sp.single ? S.settings : sp.asMap ? null : (S[sp.key] || []).find(x => String(x.id) === id) || null; },
+  async savePending() {
+    if (!CUR?.id || !S) return;
+    const ops = this.diff().filter(o => !PENDING_SKIP.has(o.sp.key) && this.allowed(o));
+    if (!ops.length) return PENDING.del(CUR.id);
+    const items = [], dels = [];
+    ops.forEach(o => { if (o.op === 'delete') dels.push({ key: o.sp.key, id: o.id }); else { const obj = this.objOf(o.sp, o.id); if (obj) items.push({ key: o.sp.key, id: o.id, obj: clone(obj) }); } });
+    return PENDING.put(CUR.id, { at: Date.now(), items, dels });
+  },
+  // marca os registros que ficaram presos sem conexão (a premiação usa o horário do aparelho, com aviso)
+  markOffline() {
+    this.diff().filter(o => OFFLINE_KEYS.has(o.sp.key) && o.op !== 'delete' && this.allowed(o)).forEach(o => {
+      const obj = this.objOf(o.sp, o.id); if (!obj || obj.offlineQueued) return;
+      if (o.op === 'insert' || (o.sp.key === 'custody' && (o.row.ended_at !== undefined))) obj.offlineQueued = true;
+    });
+  },
+  async replayPending() {
+    if (!CUR?.id) return 0;
+    const p = await PENDING.get(CUR.id); if (!p) return 0;
+    if (Date.now() - p.at > 7 * DAY) { await PENDING.put('recusado:' + CUR.id, { ...p, error: 'Mais de 7 dias sem envio', at: Date.now() }); await PENDING.del(CUR.id); return 0; }
+    let n = 0;
+    (p.items || []).forEach(({ key, id, obj }) => {
+      const list = S[key]; if (!Array.isArray(list)) return;
+      const i = list.findIndex(x => String(x.id) === id);
+      if (i >= 0) { if (stable(toRow(SPEC.find(sp => sp.key === key), list[i])) === stable(toRow(SPEC.find(sp => sp.key === key), obj))) return; list[i] = obj; } else list.push(obj);
+      n++;
+    });
+    (p.dels || []).forEach(({ key, id }) => { const list = S[key]; if (!Array.isArray(list)) return; const i = list.findIndex(x => String(x.id) === id); if (i >= 0) { list.splice(i, 1); n++; } });
+    if (!n) { await PENDING.del(CUR.id); return 0; }
+    this.queue();
+    return n;
   },
   setStatus(s) { this.status = s; const b = $('#sync-badge'); if (b) b.outerHTML = syncBadge(); },
 
@@ -286,7 +354,11 @@ const CLOUD = {
   startPolling() {
     clearInterval(this.poll);
     this.poll = setInterval(() => this.reload(false), 60000);
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.reload(false); });
+    if (!this.visHook) {
+      this.visHook = true;
+      document.addEventListener('visibilitychange', () => { if (!this.on) return; if (document.visibilityState === 'visible') this.reload(false); else { clearTimeout(this.timer); this.flush(); } });
+      window.addEventListener('pagehide', () => { if (this.on) this.savePending(); });
+    }
   },
   async reload(force, skipFlush) {
     if (!this.on) return;

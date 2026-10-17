@@ -29,10 +29,55 @@ function tollMonth(key) {
   const obras = [...by.values()].map(o => ({ ...o, total: o.sp + o.man })).sort((a, b) => (a.k === '_') - (b.k === '_') || b.total - a.total);
   return { key, from, to, list, rows, obras, total: sum(list, t => +t.value || 0), sp: sum(rows.filter(r => r.src !== 'manual'), r => +r.t.value || 0), man: sum(rows.filter(r => r.src === 'manual'), r => +r.t.value || 0), un: rows.filter(r => r.m.how === 'sem' || !r.m.projectId) };
 }
+/* ----- fechamento mensal (v1.12.0) -----
+   Fechar o mês guarda a foto do fechamento por obra e das passagens (como foram enviadas ao financeiro).
+   Depois de fechado: o banco recusa incluir, alterar ou excluir passagens daquele mês e correções de obra
+   nas posses não mudam mais o fechamento (a tela avisa se o cálculo atual ficou diferente).
+   Só o administrador reabre, com motivo. */
+const tollClosing = key => (S.tollClosings || []).find(c => c.month === key) || null;
+const tollLockedAt = t => t != null && !!tollClosing(monthKey(t));
+const tollLockMsg = t => `O mês de ${monthName(monthKey(t))} está fechado. Para alterar, o administrador reabre o mês em Pedágios.`;
+function tollMonthView(key) {
+  const T = tollMonth(key); const C = tollClosing(key); if (!C) return T;
+  const live = new Map(T.obras.map(o => [o.k, o.total])); const snap = C.rows?.obras || [];
+  const diff = Math.round((Math.abs(T.total - C.total) + snap.reduce((a, o) => a + Math.abs((live.get(o.k) || 0) - o.total), 0)) * 100) / 100;
+  return { ...T, closed: C, live: { total: T.total, obras: T.obras }, obras: snap, total: C.total, sp: sum(snap, o => o.sp), man: sum(snap, o => o.man), diff };
+}
+function tollSnapshot(T) {
+  return {
+    obras: T.obras.map(o => ({ k: o.k, code: o.k === '_' ? '' : prj(o.k)?.code || '', name: o.k === '_' ? '' : prj(o.k)?.name || '', n: o.n, sp: Math.round(o.sp * 100) / 100, man: Math.round(o.man * 100) / 100, total: Math.round(o.total * 100) / 100 })),
+    passagens: T.rows.slice().sort((a, b) => a.t.at - b.t.at).map(({ t, m, src }) => ({ id: t.id, at: t.at, noTime: !!t.noTime, plate: t.plate, place: t.place || '', value: +t.value || 0, src, invoice: t.invoice || '', driver: m.driverId ? drv(m.driverId)?.name || '' : '', obra: m.projectId ? prj(m.projectId)?.code || '' : '', how: m.how }))
+  };
+}
+ACTIONS['toll-close'] = () => {
+  if (!isManager()) return; const key = TOLL_M || monthKey(nowTs()); const T = tollMonth(key);
+  if (key >= monthKey(nowTs())) return toast('Feche o mês depois que ele terminar.');
+  openModal({ title: `Fechar pedágios de ${monthName(key)}`, body: `<p>Total <b>${money(T.total)}</b> em ${T.list.length} passagem(ns), ${T.obras.filter(o => o.k !== '_').length} obra(s).</p>
+      ${T.un.length ? `<div class="note warn">${ic('alert')}<div>${T.un.length} passagem(ns) sem obra identificada (${money(sum(T.un, r => +r.t.value || 0))}). Se fechar assim, elas ficam em "Sem obra" no fechamento.</div></div>` : ''}
+      <p class="small muted">Depois de fechado, o fechamento por obra e as passagens ficam congelados como estão agora: não é possível importar, lançar, ajustar ou excluir passagens deste mês, e correções de obra nas posses não mudam mais estes valores. Só o administrador reabre.</p>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="toll-close-ok">Fechar o mês</button>` });
+};
+ACTIONS['toll-close-ok'] = () => {
+  const key = TOLL_M || monthKey(nowTs()); if (tollClosing(key)) return closeModal();
+  const T = tollMonth(key); (S.tollClosings = S.tollClosings || []).push({ id: uid('tcl'), month: key, closedAt: nowTs(), closedBy: CUR.id, rows: tollSnapshot(T), total: Math.round(T.total * 100) / 100 });
+  log('pedagio', `Pedágios de ${monthName(key)} fechados por ${CUR.name}: ${money(T.total)} em ${T.list.length} passagem(ns)`, {});
+  save(); closeModal(); toast('Mês fechado.'); render();
+};
+ACTIONS['toll-reopen'] = () => {
+  const key = TOLL_M; const C = tollClosing(key); if (!C || CUR.role !== 'admin') return;
+  openModal({ title: `Reabrir pedágios de ${monthName(key)}`, body: `<p class="small muted">O fechamento de ${fmtDT(C.closedAt)} (${money(C.total)}) deixa de valer e o mês volta a ser calculado pelas passagens e posses atuais. Fica registrado na auditoria.</p><label class="field"><span>Motivo</span><input class="inp" id="tro-r" placeholder="Ex.: fatura complementar do Sem Parar"></label><p class="err" id="tro-err"></p>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn danger" data-act="toll-reopen-ok">Reabrir</button>` });
+};
+ACTIONS['toll-reopen-ok'] = () => {
+  const key = TOLL_M; const C = tollClosing(key); const r = $('#tro-r').value.trim(); if (r.length < 5) return $('#tro-err').textContent = 'Informe o motivo.';
+  S.tollClosings = S.tollClosings.filter(x => x !== C);
+  log('pedagio', `Pedágios de ${monthName(key)} reabertos por ${CUR.name} (fechamento de ${fmtDT(C.closedAt)}, ${money(C.total)}): ${r}`, {});
+  save(); closeModal(); toast('Mês reaberto.'); render();
+};
 PAGES.pedagios = {
   title: 'Pedágios',
   render({ f = '' }) {
-    TOLL_M = TOLL_M || monthKey(nowTs()); const key = TOLL_M; const T = tollMonth(key); const M = isManager();
+    TOLL_M = TOLL_M || monthKey(nowTs()); const key = TOLL_M; const T = tollMonthView(key); const M = isManager(); const C = T.closed;
     const cur = key >= monthKey(nowTs());
     const pass = r => !f || (f === 'sem' ? (r.m.how === 'sem' || !r.m.projectId) : r.src === f);
     const list = T.rows.filter(pass).map(r => r.t);
@@ -43,9 +88,11 @@ PAGES.pedagios = {
     return `<div class="stack">
       <div class="page-head" style="margin:0">${nav}${M ? `<div class="row"><button class="btn" data-act="toll-xlsx">${ic('report')}Excel do mês</button><button class="btn" data-act="toll-manual">${ic('plus')}Lançar manual (sem TAG)</button><button class="btn pri" data-act="toll-import">${ic('toll')}Importar fatura Sem Parar</button></div>` : ''}</div>
       <div class="kpis">${kpi('Total do mês', money(T.total), 'report', 'c-blue', '', `${T.list.length} passagem(ns)`)}${kpi('Sem Parar', money(T.sp), 'toll', '', '', imports.length ? `${imports.length} importação(ões)` : 'fatura não importada')}${kpi('Manual (sem TAG)', money(T.man), 'edit', '', '', `${noTag.length} veículo(s) sem TAG`)}${kpi('Sem obra', T.un.length, 'alert', T.un.length ? 'c-yellow' : '', 'data-go="pedagios" data-f="sem"', 'para ajustar')}</div>
-      ${!imports.length && M ? `<div class="note">${ic('toll')}<div>A fatura do Sem Parar de ${monthName(key)} ainda não foi importada. Baixe o extrato em Excel (ou CSV) no portal do Sem Parar e use <b>Importar fatura Sem Parar</b>.</div></div>` : ''}
+      ${C ? `<div class="note ok">${ic('check')}<div style="flex:1"><b>Mês fechado</b> em ${fmtDT(C.closedAt)} por ${esc(userName(C.closedBy))}: valores congelados como foram fechados.${T.diff >= 0.01 ? `<br><span style="color:var(--orange)">O cálculo atual ficou diferente do fechamento (total atual ${money(T.live.total)}), por correção de obra ou de posse feita depois. O fechamento não muda; se precisar refletir, o administrador reabre o mês.</span>` : ''}</div>${CUR.role === 'admin' ? `<button class="btn sm" data-act="toll-reopen">Reabrir</button>` : ''}</div>`
+        : M && !cur ? `<div class="note">${ic('cal')}<div style="flex:1">Mês encerrado e ainda aberto no sistema. Confira as passagens sem obra e feche para congelar o fechamento enviado ao financeiro.</div><button class="btn sm ok" data-act="toll-close">Fechar o mês</button></div>` : ''}
+      ${!imports.length && M && !C ? `<div class="note">${ic('toll')}<div>A fatura do Sem Parar de ${monthName(key)} ainda não foi importada. Baixe o extrato em Excel (ou CSV) no portal do Sem Parar e use <b>Importar fatura Sem Parar</b>.</div></div>` : ''}
       <div class="panel"><div class="panel-h"><h2>Fechamento por obra</h2><span class="small muted">obra da posse no horário da passagem (ou do dia)</span></div>
-        ${tbl(['Obra', '>Passagens', '>Sem Parar', '>Manual', '>Total'], T.obras.map(o => `<tr><td>${o.k === '_' ? pill('Sem obra identificada', 'warn') : `<b>${esc(prj(o.k)?.code || '—')}</b> <span class="small muted">${esc(prj(o.k)?.name || '')}</span>`}</td><td class="r num">${o.n}</td><td class="r">${money(o.sp)}</td><td class="r">${money(o.man)}</td><td class="r"><b>${money(o.total)}</b></td></tr>`).concat(T.obras.length ? [`<tr><td><b>Total</b></td><td class="r num"><b>${T.list.length}</b></td><td class="r"><b>${money(T.sp)}</b></td><td class="r"><b>${money(T.man)}</b></td><td class="r"><b>${money(T.total)}</b></td></tr>`] : []), 'Nenhuma passagem neste mês.')}</div>
+        ${tbl(['Obra', '>Passagens', '>Sem Parar', '>Manual', '>Total'], T.obras.map(o => `<tr><td>${o.k === '_' ? pill('Sem obra identificada', 'warn') : `<b>${esc(o.code || prj(o.k)?.code || '—')}</b> <span class="small muted">${esc(o.name || prj(o.k)?.name || '')}</span>`}</td><td class="r num">${o.n}</td><td class="r">${money(o.sp)}</td><td class="r">${money(o.man)}</td><td class="r"><b>${money(o.total)}</b></td></tr>`).concat(T.obras.length ? [`<tr><td><b>Total</b></td><td class="r num"><b>${T.list.length}</b></td><td class="r"><b>${money(T.sp)}</b></td><td class="r"><b>${money(T.man)}</b></td><td class="r"><b>${money(T.total)}</b></td></tr>`] : []), 'Nenhuma passagem neste mês.')}</div>
       ${imports.length ? `<div class="panel"><div class="panel-h"><h3>Faturas importadas</h3></div>${tbl(['Importada em', 'Fatura', 'Arquivo', '>Passagens', '>Valor', 'Por', ...(M ? [''] : [])], imports.map(x => { const n = S.tolls.filter(t => t.importId === x.id); return `<tr><td class="nowrap small">${fmtDT(x.at)}</td><td>${esc(x.ref || '—')}</td><td class="small">${esc(x.file || 'colado')}</td><td class="r num">${n.length}</td><td class="r">${money(sum(n, t => +t.value || 0))}</td><td class="small">${esc(userName(x.by))}</td>${M ? `<td class="r">${n.length ? `<button class="btn sm danger" data-act="toll-undo" data-id="${x.id}">Desfazer</button>` : '<span class="tiny muted">desfeita</span>'}</td>` : ''}</tr>`; }))}</div>` : ''}
       <div class="panel"><div class="panel-h"><div class="filters">${chip('', 'Todas', T.rows.length)}${chip('semparar', 'Sem Parar', T.rows.filter(r => r.src !== 'manual').length)}${chip('manual', 'Manual', T.rows.filter(r => r.src === 'manual').length)}${chip('sem', 'Sem obra', T.un.length)}</div></div>${tollTable(list, { empty: 'Nenhuma passagem neste filtro.' })}</div>
     </div>`;
@@ -137,6 +184,7 @@ function tollBuild(rows, hi, map, onlyToll) {
     else if (!/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(pl)) { o.status = 'err'; o.why = 'placa inválida'; }
     else if (o.at == null) { o.status = 'err'; o.why = 'data inválida'; }
     else if (val == null || val === 0) { o.status = 'err'; o.why = 'valor inválido'; }
+    else if (tollLockedAt(o.at)) { o.status = 'skip'; o.why = 'mês já fechado'; }
     else if (S.tolls.some(t => t.plate === pl && Math.abs(t.at - o.at) < 60e3 && Math.abs((+t.value || 0) - val) < 0.005)) { o.status = 'dup'; o.why = 'já importada'; }
     else if (out.some(x => x.status === 'ok' && x.plate === pl && x.at === o.at && x.value === val && x.place === o.place)) { o.status = 'dup'; o.why = 'repetida no arquivo'; }
     if (o.status === 'ok') { o.m = tollMatch({ plate: pl, at: o.at, noTime: o.noTime }); if (o.m.noVeh) o.warn = 'placa não cadastrada'; }
@@ -212,6 +260,7 @@ ACTIONS['toll-undo'] = a => {
 };
 ACTIONS['toll-undo-ok'] = a => {
   const x = (S.settings.tollImports || []).find(i => i.id === a.dataset.id); const n = S.tolls.filter(t => t.importId === x.id).length;
+  const lk = S.tolls.find(t => t.importId === x.id && tollLockedAt(t.at)); if (lk) { closeModal(); return toast(tollLockMsg(lk.at)); }
   S.tolls = S.tolls.filter(t => t.importId !== x.id); x.undoneAt = nowTs(); x.undoneBy = CUR.id;
   log('pedagio', `Importação ${x.ref} desfeita por ${CUR.name}: ${n} passagem(ns) excluída(s)`, {});
   save(); closeModal(); toast('Importação desfeita.'); render();
@@ -248,6 +297,7 @@ ACTIONS['toll-manual-ok'] = () => {
   if (!d.date) return err('Informe a data.');
   if ((d.place || '').length < 3) return err('Informe a praça ou o local.');
   const at = new Date(d.date + 'T' + (d.time || '12:00')).getTime(); if (at > nowTs() + 10 * MIN) return err('A data não pode ser no futuro.');
+  if (tollLockedAt(at)) return err(tollLockMsg(at));
   const auto = tollMatch({ plate: v.plate, at, noTime: !d.time });
   if (!d.projectId && !auto.projectId) return err('Não há posse do veículo neste dia: escolha a obra.');
   const manual = d.projectId && d.projectId !== auto.projectId ? { driverId: auto.driverId || null, projectId: d.projectId, ccId: null, reason: 'Obra escolhida no lançamento manual', by: CUR.id, at: nowTs(), vehicleId: v.id } : null;
@@ -257,7 +307,7 @@ ACTIONS['toll-manual-ok'] = () => {
   TOLL_M = monthKey(at); save(); closeModal(); toast(`${qty} passagem(ns) lançada(s).`); go('pedagios', { f: 'manual' });
 };
 ACTIONS['toll-del'] = a => {
-  const t = byId(S.tolls, a.dataset.id); if (!t) return;
+  const t = byId(S.tolls, a.dataset.id); if (t && tollLockedAt(t.at)) return toast(tollLockMsg(t.at)); if (!t) return;
   openModal({ title: 'Excluir lançamento de pedágio', body: `<p>${plate(t.plate)} · ${fmtShort(t.at)} · ${esc(t.place)} · <b>${money(t.value)}</b></p>`, foot: `<button class="btn" data-act="modal-close">Voltar</button><button class="btn danger" data-act="toll-del-ok" data-id="${t.id}">Excluir</button>` });
 };
 ACTIONS['toll-del-ok'] = a => {
@@ -268,7 +318,7 @@ ACTIONS['toll-del-ok'] = a => {
 
 /* ----- ajuste manual (obra/condutor) de qualquer passagem ----- */
 ACTIONS['toll-adj'] = a => {
-  const t = byId(S.tolls, a.dataset.id); const v = vehicleByPlate(t.plate); const m = tollMatch({ ...t, manual: null });
+  const t = byId(S.tolls, a.dataset.id); if (t && tollLockedAt(t.at)) return toast(tollLockMsg(t.at)); const v = vehicleByPlate(t.plate); const m = tollMatch({ ...t, manual: null });
   const near = v ? S.custody.filter(c => c.vehicleId === v.id).sort((x, y) => Math.abs(x.start - t.at) - Math.abs(y.start - t.at)).slice(0, 2) : [];
   openModal({
     title: 'Ajustar pedágio', body: `<p>${plate(t.plate)} · ${t.noTime ? fmtDate(t.at) : fmtDT(t.at)} · ${esc(t.place)} · <b>${money(t.value)}</b></p>
@@ -288,7 +338,7 @@ ACTIONS['toll-adj-ok'] = a => {
   save(); closeModal(); toast('Ajuste registrado na auditoria.'); render();
 };
 ACTIONS['toll-adj-clear'] = a => {
-  const t = byId(S.tolls, a.dataset.id); t.manual = null;
+  const t = byId(S.tolls, a.dataset.id); if (tollLockedAt(t.at)) { closeModal(); return toast(tollLockMsg(t.at)); } t.manual = null;
   log('pedagio', `Ajuste manual do pedágio de ${fmtShort(t.at)} (${money(t.value)}) removido por ${CUR.name}`, { vehicleId: vehicleByPlate(t.plate)?.id || null });
   save(); closeModal(); toast('Pedágio volta a seguir a posse.'); render();
 };
@@ -296,9 +346,12 @@ ACTIONS['toll-adj-clear'] = a => {
 /* ----- Excel do mês ----- */
 ACTIONS['toll-xlsx'] = async () => {
   try {
-    await needXlsx(); const T = tollMonth(TOLL_M || monthKey(nowTs()));
-    const ob = [['Obra', 'Descrição', 'Passagens', 'Sem Parar (R$)', 'Manual (R$)', 'Total (R$)'], ...T.obras.map(o => [o.k === '_' ? 'Sem obra' : prj(o.k)?.code || '—', o.k === '_' ? '' : prj(o.k)?.name || '', o.n, o.sp, o.man, o.total]), ['Total', '', T.list.length, T.sp, T.man, T.total]];
-    const ps = [['Data', 'Hora', 'Placa', 'Local', 'Valor (R$)', 'Origem', 'Fatura', 'Condutor', 'Obra', 'Correspondência'], ...T.rows.sort((a, b) => a.t.at - b.t.at).map(({ t, m, src }) => [fmtDate(t.at), t.noTime ? '' : fmtTime(t.at), t.plate, t.place || '', +t.value || 0, TOLL_SRC[src], t.invoice || '', m.driverId ? drv(m.driverId)?.name || '' : '', m.projectId ? prj(m.projectId)?.code || '' : '', { auto: 'Posse no horário', dia: 'Posse do dia', manual: 'Ajuste manual', sem: 'Sem correspondência' }[m.how]])];
+    await needXlsx(); const T = tollMonthView(TOLL_M || monthKey(nowTs()));
+    const ob = [['Obra', 'Descrição', 'Passagens', 'Sem Parar (R$)', 'Manual (R$)', 'Total (R$)'], ...T.obras.map(o => [o.k === '_' ? 'Sem obra' : o.code || prj(o.k)?.code || '—', o.k === '_' ? '' : o.name || prj(o.k)?.name || '', o.n, o.sp, o.man, o.total]), ['Total', '', sum(T.obras, o => o.n), T.sp, T.man, T.total]];
+    const HOW = { auto: 'Posse no horário', dia: 'Posse do dia', manual: 'Ajuste manual', sem: 'Sem correspondência' };
+    if (T.closed) ob.push([], [`Fechado em ${fmtDT(T.closed.closedAt)} por ${userName(T.closed.closedBy)}`]);
+    const ps = T.closed ? [['Data', 'Hora', 'Placa', 'Local', 'Valor (R$)', 'Origem', 'Fatura', 'Condutor', 'Obra', 'Correspondência'], ...(T.closed.rows?.passagens || []).map(r => [fmtDate(r.at), r.noTime ? '' : fmtTime(r.at), r.plate, r.place, r.value, TOLL_SRC[r.src], r.invoice, r.driver, r.obra, HOW[r.how]])]
+      : [['Data', 'Hora', 'Placa', 'Local', 'Valor (R$)', 'Origem', 'Fatura', 'Condutor', 'Obra', 'Correspondência'], ...T.rows.sort((a, b) => a.t.at - b.t.at).map(({ t, m, src }) => [fmtDate(t.at), t.noTime ? '' : fmtTime(t.at), t.plate, t.place || '', +t.value || 0, TOLL_SRC[src], t.invoice || '', m.driverId ? drv(m.driverId)?.name || '' : '', m.projectId ? prj(m.projectId)?.code || '' : '', { auto: 'Posse no horário', dia: 'Posse do dia', manual: 'Ajuste manual', sem: 'Sem correspondência' }[m.how]])];
     const wb = XLSX.utils.book_new(); const s1 = XLSX.utils.aoa_to_sheet(ob); const s2 = XLSX.utils.aoa_to_sheet(ps);
     s1['!cols'] = [{ wch: 14 }, { wch: 36 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }]; s2['!cols'] = [{ wch: 11 }, { wch: 7 }, { wch: 9 }, { wch: 38 }, { wch: 11 }, { wch: 10 }, { wch: 26 }, { wch: 24 }, { wch: 12 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, s1, 'Por obra'); XLSX.utils.book_append_sheet(wb, s2, 'Passagens');

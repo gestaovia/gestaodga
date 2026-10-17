@@ -6,6 +6,23 @@ const lastRecordedKm = vid => {
   return ks.length ? Math.max(...ks) : 0;
 };
 const suggestedKm = v => v.odometer;
+// v1.12.0 · conferência da quilometragem: menor que o último registro = erro; salto acima do limite
+// (Configurações › Regras) pede para conferir o painel e tocar de novo. Confirmado, a gestão recebe aviso.
+function kmGuard(v, k, errs) {
+  const last = lastRecordedKm(v.id);
+  if (k < last) { errs.push(`A quilometragem não pode ser menor que o último registro (${km(last)}). Se o último registro estiver errado, avise a gestão.`); return; }
+  const max = +S.settings.kmJumpMax || 2000;
+  if (last && k - last > max) {
+    if (DRAFT._kmConf === k) { DRAFT._kmJump = { from: last, to: k }; return; }
+    DRAFT._kmConf = k; DRAFT._kmJump = null;
+    errs.push(`Confira a quilometragem: ${nf(k)} km são ${nf(k - last)} km a mais que o último registro (${km(last)}). Olhe o painel. Se estiver certa, toque no botão de novo para confirmar.`);
+  } else DRAFT._kmJump = null;
+}
+function kmJumpNote(v, driverId) {
+  const j = DRAFT?._kmJump; if (!j) return; DRAFT._kmJump = null;
+  log('km', `Quilometragem conferida e confirmada com salto de ${nf(j.to - j.from)} km (de ${nf(j.from)} para ${nf(j.to)} km)`, { vehicleId: v.id, driverId });
+  notify('gestao', `${v.plate}: quilometragem subiu ${nf(j.to - j.from)} km de uma vez (de ${nf(j.from)} para ${nf(j.to)} km), confirmada por ${CUR.name}. Se estiver errada, use Corrigir km no veículo.`, { level: 'warn', link: { page: 'veiculo', id: v.id } });
+}
 
 function captureLocation(v) {
   const tl = currentLocation(v.id);
@@ -271,7 +288,7 @@ function photoTile(k, l) {
 }
 function bindDraft(form) {
   const upd = e => {
-    const el = e.target; if (!el.name) return;
+    const el = e.target; if (!el.name || !DRAFT) return; // a tela pode ter sido trocada logo depois de salvar (DRAFT já limpo)
     if (el.name.startsWith('it_')) DRAFT.items[el.name.slice(3)] = el.value;
     else if (el.type === 'file') return;
     else if (el.type === 'checkbox') DRAFT[el.name] = el.checked;
@@ -280,7 +297,7 @@ function bindDraft(form) {
   };
   form.addEventListener('input', upd); form.addEventListener('change', upd);
   form.addEventListener('change', async e => {
-    const slot = e.target.dataset.photo; if (!slot || !e.target.files[0]) return;
+    const slot = e.target.dataset.photo; if (!slot || !e.target.files[0] || !DRAFT) return;
     DRAFT.photos[slot] = await readPhoto(e.target.files[0]);
     const tile = form.querySelector(`[data-slot="${slot}"]`);
     const lab = tile?.dataset.label || { cupom: 'Foto do cupom ou nota fiscal', hodometro: 'Foto do hodômetro (obrigatória)', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
@@ -297,7 +314,7 @@ function validateFull(v) {
   const e = [];
   const k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10);
   if (!k) e.push('Informe a quilometragem.');
-  else if (k < lastRecordedKm(v.id)) e.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
+  else kmGuard(v, k, e);
   if (!DRAFT.fuel) e.push('Informe o nível de combustível.');
   const miss = CK_ITEMS.filter(([x]) => !DRAFT.items[x]).map(([, l]) => l);
   if (miss.length) e.push(`Avalie todos os itens (faltam ${miss.length}).`);
@@ -307,7 +324,7 @@ function validateFull(v) {
 function saveFullChecklist(type, v, driverId, custodyId, kmv) {
   const ck = { id: uid('ck'), type, vehicleId: v.id, driverId, userId: CUR.id, custodyId, at: nowTs(), km: kmv, fuelLevel: DRAFT.fuel, items: { ...DRAFT.items }, ok: !DRAFT.avarias && !Object.values(DRAFT.items).includes('ruim'), problem: null, avarias: DRAFT.avarias, notes: DRAFT.notes, photos: { ...DRAFT.photos }, location: DRAFT.geo, late: false };
   S.checklists.push(ck);
-  v.odometer = Math.max(v.odometer, kmv); if (S.locations[v.id]) S.locations[v.id].km = v.odometer;
+  v.odometer = Math.max(v.odometer, kmv); if (S.locations[v.id]) S.locations[v.id].km = v.odometer; kmJumpNote(v, driverId);
   const bad = CK_ITEMS.filter(([x]) => DRAFT.items[x] === 'ruim').map(([, l]) => l);
   log('checklist', `Checklist de ${CK_TYPES[type].toLowerCase()} concluído (${nf(kmv)} km)${bad.length || DRAFT.avarias ? ` com apontamentos: ${[...bad, DRAFT.avarias].filter(Boolean).join('; ')}` : ''}`, { vehicleId: v.id, driverId, data: { checklistId: ck.id } });
   return ck;
@@ -463,10 +480,10 @@ PAGES.entregar = {
       let ck, k;
       if (quick) {
         k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10); const errs = [];
-        if (!k) errs.push('Informe a quilometragem.'); else if (k < lastRecordedKm(v.id)) errs.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
+        if (!k) errs.push('Informe a quilometragem.'); else kmGuard(v, k, errs);
         if (errs.length) return showErrors(errs);
         ck = { id: uid('ck'), type: t ? 'entrega' : 'devolucao', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: k, ok: true, problem: null, photos: { painel: DRAFT.photos.painel_d || null }, location: DRAFT.geo, late: false, quick: true, noChanges: true, refChecklistId: c.receiveChecklistId };
-        S.checklists.push(ck); v.odometer = Math.max(v.odometer, k); if (S.locations[v.id]) S.locations[v.id].km = v.odometer;
+        S.checklists.push(ck); v.odometer = Math.max(v.odometer, k); if (S.locations[v.id]) S.locations[v.id].km = v.odometer; kmJumpNote(v, c.driverId);
         log('checklist', `Entrega com confirmação rápida: sem alterações desde o recebimento (${nf(k)} km)`, { vehicleId: v.id, driverId: c.driverId, data: { checklistId: ck.id } });
       } else {
         const r = validateFull(v); if (r.e.length) return showErrors(r.e); k = r.km;
@@ -523,14 +540,14 @@ PAGES.diario = {
       const v = veh(DRAFT.vid); const c = activeCustody(v.id); const D = DRAFT; const errs = [];
       const k = parseInt(String(D.km).replace(/\D/g, ''), 10);
       if (!k && !D.photos.painel_d) errs.push('Informe a quilometragem ou envie a foto do painel.');
-      if (k && k < lastRecordedKm(v.id)) errs.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
+      if (k) kmGuard(v, k, errs);
       if (D.answer === 'sim' && (D.projOk === '0' || !currentSegment(c)) && !D.projectId) errs.push('Selecione a obra.');
       if (D.answer === 'nao') errs.push(...problemErrors());
       if (errs.length) return showErrors(errs);
       const kmv = k || suggestedKm(v);
       const [h, m] = deadlineNow().split(':').map(Number); const n = new Date();
       const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: n.getHours() * 60 + n.getMinutes() > h * 60 + m };
-      S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv);
+      S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv); kmJumpNote(v, c.driverId);
       if (D.answer === 'sim') {
         log('checklist', `Checklist diário: condições normais (${nf(kmv)} km)${ck.late ? ' · fora do prazo' : ''}`, { vehicleId: v.id, driverId: c.driverId });
         const seg = currentSegment(c);
@@ -734,14 +751,14 @@ PAGES.abastecer = {
       e.preventDefault();
       const v = veh(DRAFT.vid); const c = activeCustody(v.id); const errs = [];
       const k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10); const l = num(DRAFT.liters); const t = num(DRAFT.total);
-      if (!k) errs.push('Informe a quilometragem.'); else if (k < lastRecordedKm(v.id)) errs.push(`A quilometragem não pode ser menor que o último registro (${km(lastRecordedKm(v.id))}).`);
+      if (!k) errs.push('Informe a quilometragem.'); else kmGuard(v, k, errs);
       if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.');
       if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.hodometro) errs.push('Envie a foto do hodômetro (vale pontos na premiação).'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
       if (!errs.length && k && l) { const dup = fuelDuplicates(v.id, nowTs(), k, l); if (dup.same.length) errs.push(fuelByStaff(dup.same[0]) ? 'A gestão já lançou este abastecimento. Não é preciso registrar de novo.' : 'Este abastecimento já foi registrado.'); }
       if (errs.length) return showErrors(errs);
       const seg = currentSegment(c);
       const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: seg?.projectId || null, at: nowTs(), km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, odoPhoto: DRAFT.photos.hodometro, location: DRAFT.geo };
-      S.fuel.push(rec); v.odometer = Math.max(v.odometer, k);
+      S.fuel.push(rec); v.odometer = Math.max(v.odometer, k); kmJumpNote(v, c.driverId);
       log('abastecimento', `Abastecimento: ${nf(l, 1)} L, ${money(t)} em ${rec.station}`, { vehicleId: v.id, driverId: c.driverId });
       const m = fuelOutlier(rec);
       if (m) notify('gestao', `Consumo fora do padrão no ${v.plate}: ${nf(m.kmL, 1)} km/l (${m.delta > 0 ? '+' : ''}${nf(m.delta, 0)}% da média).`, { level: 'warn', link: { page: 'abastecimento' } });
@@ -865,7 +882,7 @@ function showChecklist(id) {
   const k = byId(S.checklists, id); const v = veh(k.vehicleId); const iss = k.problem?.issueId ? byId(S.issues, k.problem.issueId) : null;
   openModal({
     title: `Checklist ${CK_TYPES[k.type].toLowerCase()} · ${v.plate}`, wide: true,
-    body: `<dl class="dl"><dt>Data e hora</dt><dd>${fmtDT(k.at)}${k.late ? ' ' + pill('fora do prazo', 'warn') : ''}</dd><dt>Condutor</dt><dd>${k.driverId ? esc(drv(k.driverId).name) : esc(userName(k.userId || 'u_gestor'))}</dd>
+    body: `<dl class="dl"><dt>Data e hora</dt><dd>${fmtDT(k.at)}${k.late ? ' ' + pill('fora do prazo', 'warn') : ''}${k.serverAt && Math.abs(k.serverAt - k.at) > CLOCK_TOL ? `<br><span class="small ${k.offlineQueued ? 'muted' : ''}" style="${k.offlineQueued ? '' : 'color:var(--orange)'}">${k.offlineQueued ? 'Feito sem conexão' : 'Relógio do celular diferente'}: recebido pelo servidor ${fmtDT(k.serverAt)}</span>` : ''}${k.kmFix?.length ? `<br><span class="small muted">Km corrigido pela gestão (registrado ${nf(k.kmFix[0].from)} km)</span>` : ''}</dd><dt>Condutor</dt><dd>${k.driverId ? esc(drv(k.driverId).name) : esc(userName(k.userId || 'u_gestor'))}</dd>
       <dt>Quilometragem</dt><dd class="num">${km(k.km)}</dd>${k.fuelLevel ? `<dt>Combustível</dt><dd>${k.fuelLevel}</dd>` : ''}
       <dt>Resultado</dt><dd>${k.ok ? pill('Sem apontamentos', 'ok') : pill('Com apontamentos', 'warn')}${k.quick ? ' ' + pill('Confirmação rápida') : ''}</dd>
       ${k.quick ? `<dt>Entrega</dt><dd>Sem alterações desde o recebimento${byId(S.checklists, k.refChecklistId) ? ` (${ckLink(k.refChecklistId)})` : ''}</dd>` : ''}

@@ -22,13 +22,14 @@ const PARAM_LABEL = {
   dayRule: ['Regra para contar o dia com posse', ''], minHours: ['Posse mínima no dia', 'h']
 };
 const DAY_RULES = {
-  ambos: 'Posse mínima no dia e checklist diário na posse',
+  ambos: 'Posse mínima no dia e checklist diário no dia',
   horas: 'Somente posse mínima no dia',
-  diario: 'Somente checklist diário na posse',
-  qualquer: 'Posse mínima no dia ou checklist diário na posse'
+  diario: 'Somente checklist diário no dia',
+  qualquer: 'Posse mínima no dia ou checklist diário no dia'
 };
 const PARAM_TEXT = new Set(['deadline', 'dayRule']);
-const dayRuleText = P => { const h = `${nf(+P.minHours || 0, 1)} h`; return { ambos: `posse de ${h} ou mais no dia e ao menos um checklist diário feito na posse (depois do recebimento)`, horas: `posse de ${h} ou mais no dia`, diario: 'ao menos um checklist diário feito na posse (depois do recebimento)', qualquer: `posse de ${h} ou mais no dia ou um checklist diário feito na posse` }[P.dayRule] || DAY_RULES.ambos; };
+const DAY_CK = 'checklist diário feito naquele dia, na posse (no dia do recebimento vale o checklist de recebimento, desde que a posse tenha um diário depois)';
+const dayRuleText = P => { const h = `${nf(+P.minHours || 0, 1)} h`; return { ambos: `posse de ${h} ou mais no dia e ${DAY_CK}`, horas: `posse de ${h} ou mais no dia`, diario: DAY_CK, qualquer: `posse de ${h} ou mais no dia ou ${DAY_CK}` }[P.dayRule] || `posse de ${h} ou mais no dia e ${DAY_CK}`; };
 const paramVal = (k, v) => k === 'dayRule' ? (DAY_RULES[v] || v) : PARAM_LABEL[k][1] === 'R$' ? money(v) : esc(v) + (PARAM_LABEL[k][1] ? ' ' + PARAM_LABEL[k][1] : '');
 const bonusCfg = () => { const s = S.settings; if (!s.bonus) s.bonus = { startPeriod: null, versions: [], closing: { auto: true }, holidays: [], odoSince: null }; const b = s.bonus; b.versions = b.versions || []; b.holidays = b.holidays || []; b.closing = b.closing || { auto: true }; return b; };
 function bonusP(key) {
@@ -79,7 +80,9 @@ function daysBetween(from, to) { const out = []; const d = new Date(from); d.set
 const nextDay = t => { const d = new Date(t); d.setDate(d.getDate() + 1); return d.getTime(); };
 
 /* ----- evidências ----- */
-const tsOf = r => r?.serverAt || r?.at;           // horário gravado pelo servidor (registros antigos: horário do aparelho)
+// horário gravado pelo servidor (registros antigos: horário do aparelho). Registro feito sem conexão e enviado
+// depois (até 24 h) usa o horário do aparelho, com aviso no checklist.
+const tsOf = r => !r ? undefined : r.serverAt && !(r.offlineQueued && r.at && r.serverAt >= r.at && r.serverAt - r.at <= OFFLINE_MAX) ? r.serverAt : r.at;
 const fuelHasOdo = f => f.at >= (bonusCfg().odoSince || 0) ? !!f.odoPhoto : !!(f.odoPhoto || f.receipt);
 const blockedAt = (vid, ts) => S.issues.some(i => i.vehicleId === vid && !i.canRun && i.at <= ts && (i.status === 'aberta' || (i.resolvedAt && i.resolvedAt > ts)));
 const adjOf = (did, key) => (S.bonusAdj || []).filter(a => a.driverId === did && a.period === key);
@@ -88,7 +91,8 @@ const adjOf = (did, key) => (S.bonusAdj || []).filter(a => a.driverId === did &&
 function driverScore(did, key = curPeriod()) {
   if (typeof key === 'number') key = periodOf(key);
   const P = bonusP(key); const [from, to] = periodRange(key); const now = nowTs(); const partial = now < to;
-  const cs = S.custody.filter(c => c.driverId === did && !c.imported && c.start < to && (!c.end || c.end > from));
+  // posses com o horário confiável (servidor quando o relógio do aparelho divergiu)
+  const cs = S.custody.filter(c => c.driverId === did && !c.imported).map(c => ({ ...c, start: custStart(c), end: custEnd(c) })).filter(c => c.start < to && (!c.end || c.end > from));
   const adjs = adjOf(did, key); const live = adjs.filter(a => !a.voidedAt);
   const abono = new Map(live.filter(a => a.kind === 'abono').map(a => [a.key, a]));
   const occ = [];
@@ -99,8 +103,12 @@ function driverScore(did, key = curPeriod()) {
   const inDay = (c, d) => c.start < nextDay(d) && (!c.end || c.end > d);
   const rawDays = biz.filter(d => d <= now && cs.some(c => inDay(c, d)));
   const dailies = S.checklists.filter(k => k.type === 'diario' && k.driverId === did);
-  // checklist diário feito NA posse, depois do recebimento (o recebimento sozinho não comprova o uso)
-  const custDaily = c => dailies.some(k => k.custodyId === c.id || (k.vehicleId === c.vehicleId && k.at > c.start && (!c.end || k.at <= c.end)));
+  // v1.12.0: cada dia útil precisa do SEU checklist diário (antes, um diário validava a posse inteira).
+  // No dia do recebimento vale o checklist de recebimento, desde que a posse tenha ao menos um diário depois
+  // (o recebimento sozinho continua não comprovando o uso).
+  const inCust = (k, c) => k.custodyId === c.id || (k.vehicleId === c.vehicleId && k.at > c.start && (!c.end || k.at <= c.end));
+  const custDaily = (c, d) => dailies.some(k => inCust(k, c) && tsOf(k) >= d && tsOf(k) < nextDay(d))
+    || (c.start >= d && c.start < nextDay(d) && !!c.receiveChecklistId && dailies.some(k => inCust(k, c) && tsOf(k) >= nextDay(d)));
   const heldMs = (list, d) => { // horas de posse no dia (sem contar duas vezes posses sobrepostas)
     const a0 = d, b0 = Math.min(nextDay(d), now);
     const iv = list.map(c => [Math.max(c.start, a0), Math.min(c.end || now, b0)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
@@ -110,13 +118,13 @@ function driverScore(did, key = curPeriod()) {
   const minMs = Math.max(0, +P.minHours || 0) * 36e5; const rule = DAY_RULES[P.dayRule] ? P.dayRule : 'ambos';
   const skipDays = [];
   const possDays = rawDays.filter(d => {
-    const dc = cs.filter(c => inDay(c, d)); const ok = dc.filter(custDaily);
+    const dc = cs.filter(c => inDay(c, d)); const ok = dc.filter(c => custDaily(c, d));
     const hAll = heldMs(dc, d); const hOk = heldMs(ok, d);
     const pass = rule === 'horas' ? hAll >= minMs : rule === 'diario' ? ok.length > 0 : rule === 'qualquer' ? (hAll >= minMs || ok.length > 0) : (ok.length > 0 && hOk >= minMs);
     if (!pass) {
       const why = []; const hh = rule === 'ambos' && ok.length ? hOk : hAll;
       if (rule !== 'diario' && hh < minMs) why.push(`posse de ${dur(hh)} no dia (mínimo ${nf(+P.minHours || 0, 1)} h)`);
-      if (rule !== 'horas' && !ok.length) why.push('sem checklist diário na posse depois do recebimento');
+      if (rule !== 'horas' && !ok.length) why.push('sem checklist diário neste dia');
       skipDays.push({ d, why: why.join(' e ') || 'não atende a regra do dia', today: now < nextDay(d) });
     }
     return pass;

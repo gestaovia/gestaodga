@@ -10,7 +10,8 @@ const obraOpts = sel => S.projects.filter(p => p.active || p.id === sel).map(p =
 function custObras(x) {
   const fixed = x.segments.some(s => s.fix?.length);
   const list = [...new Set(x.segments.map(s => prj(s.projectId)?.code || '—'))].join(', ');
-  return `<div class="row" style="gap:6px;flex-wrap:nowrap">${list ? esc(list) : pill('Sem obra', 'urg')}${fixed ? ` <span class="pill" title="Obra corrigida pela gestão">corrigida</span>` : ''}${isManager() ? `<button class="btn sm" data-act="obra-fix" data-id="${x.id}" title="Corrigir a obra informada pelo condutor">${ic('edit')}Corrigir</button>` : ''}</div>`;
+  const ck = custClock(x);
+  return `<div class="row" style="gap:6px;flex-wrap:nowrap">${list ? esc(list) : pill('Sem obra', 'urg')}${fixed ? ` <span class="pill" title="Obra corrigida pela gestão">corrigida</span>` : ''}${ck ? ` <span class="pill ${ck.offline ? '' : 'warn'}" title="${ck.offline ? `Registrada sem conexão e enviada ${dur(Math.abs(ck.min) * MIN)} depois (vale o horário do aparelho)` : `Relógio do celular diferente do servidor em ${dur(Math.abs(ck.min) * MIN)}: a premiação usa o horário do servidor`}">${ck.offline ? 'sem conexão' : 'relógio'}</span>` : ''}${isManager() ? `<button class="btn sm" data-act="obra-fix" data-id="${x.id}" title="Corrigir a obra informada pelo condutor">${ic('edit')}Corrigir</button>` : ''}</div>`;
 }
 const segRange = (c, i) => { const s = c.segments; return [i === 0 ? -Infinity : s[i].at, s[i + 1] ? s[i + 1].at : (c.end ? c.end + 6 * 36e5 : Infinity)]; };
 ACTIONS['obra-fix'] = a => {
