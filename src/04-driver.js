@@ -548,6 +548,8 @@ PAGES.diario = {
       const [h, m] = deadlineNow().split(':').map(Number); const n = new Date();
       const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: n.getHours() * 60 + n.getMinutes() > h * 60 + m };
       S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv); kmJumpNote(v, c.driverId);
+      // v1.13.0: diário em sábado, domingo ou feriado vai para a fila da gestão (Premiação › Dias não úteis)
+      if (!isBizDay(ck.at)) notify('gestao', `${drv(c.driverId)?.name || 'Condutor'} fez checklist diário do ${v.plate} em dia não útil (${nbShort(ck.at)}). Avalie se conta na premiação.`, { level: 'warn', link: { page: 'bonificacao', id: '' } });
       if (D.answer === 'sim') {
         log('checklist', `Checklist diário: condições normais (${nf(kmv)} km)${ck.late ? ' · fora do prazo' : ''}`, { vehicleId: v.id, driverId: c.driverId });
         const seg = currentSegment(c);

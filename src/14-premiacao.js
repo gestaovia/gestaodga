@@ -86,13 +86,56 @@ const tsOf = r => !r ? undefined : r.serverAt && !(r.offlineQueued && r.at && r.
 const fuelHasOdo = f => f.at >= (bonusCfg().odoSince || 0) ? !!f.odoPhoto : !!(f.odoPhoto || f.receipt);
 const blockedAt = (vid, ts) => S.issues.some(i => i.vehicleId === vid && !i.canRun && i.at <= ts && (i.status === 'aberta' || (i.resolvedAt && i.resolvedAt > ts)));
 const adjOf = (did, key) => (S.bonusAdj || []).filter(a => a.driverId === did && a.period === key);
+// posses do condutor no intervalo, com o horário confiável (servidor quando o relógio do aparelho divergiu)
+const driverCust = (did, from, to) => S.custody.filter(c => c.driverId === did && !c.imported).map(c => ({ ...c, start: custStart(c), end: custEnd(c) })).filter(c => c.start < to && (!c.end || c.end > from));
+const inCustody = (k, c) => k.custodyId === c.id || (k.vehicleId === c.vehicleId && k.at > c.start && (!c.end || k.at <= c.end));
+const custInDay = (c, d) => c.start < nextDay(d) && (!c.end || c.end > d);
+function heldInDay(list, d, now) { // horas de posse no dia (sem contar duas vezes posses sobrepostas)
+  const a0 = d, b0 = Math.min(nextDay(d), now);
+  const iv = list.map(c => [Math.max(c.start, a0), Math.min(c.end || now, b0)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  let tot = 0, cs0 = null, ce0 = null; iv.forEach(([a, b]) => { if (ce0 == null || a > ce0) { if (ce0 != null) tot += ce0 - cs0; cs0 = a; ce0 = b; } else ce0 = Math.max(ce0, b); }); if (ce0 != null) tot += ce0 - cs0;
+  return tot;
+}
+
+/* ----- dias não úteis (v1.13.0) -----
+   Todo checklist diário feito em sábado, domingo ou feriado por quem estava com o veículo entra na fila da gestão
+   (Premiação › Dias não úteis). Considerado: o dia entra como um dia útil a mais para aquele condutor, somando nos
+   dias com posse E nos dias úteis (ex.: 18/20 + 2 = 20/22). Não considerado: o dia não muda a premiação.
+   A decisão fica em bonus_adjustments (kind 'diaextra' ou 'diarecusa', key 'N:AAAA-MM-DD'); desfazer = cancelar o registro. */
+const NB_KINDS = { diaextra: 'Dia não útil considerado', diarecusa: 'Dia não útil não considerado' };
+const nbKey = d => `N:${dayKey(d)}`;
+const nbDay = k => { const m = /^N:(\d{4})-(\d{2})-(\d{2})$/.exec(k || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : null; };
+const WDAY = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+function nbLabel(d) {
+  const h = holidaysOf(new Date(d).getFullYear()).find(x => x.date === dayKey(d));
+  return h ? `Feriado · ${h.name}` : cap(WDAY[new Date(d).getDay()]);
+}
+const nbShort = d => `${WDAY[new Date(d).getDay()].slice(0, 3)} ${fmtDate(d).slice(0, 5)}`;
+function nbDecision(did, key, d) { const k = nbKey(d); return adjOf(did, key).filter(a => !a.voidedAt && NB_KINDS[a.kind] && a.key === k).at(-1) || null; }
+// dias não úteis do período em que o condutor estava com o veículo e fez checklist diário na posse
+function nonBizDays(did, key, cs) {
+  const [from, to] = periodRange(key); const now = nowTs(); cs = cs || driverCust(did, from, to);
+  if (!cs.length) return [];
+  const dailies = S.checklists.filter(k => k.type === 'diario' && k.driverId === did);
+  return daysBetween(from, to).filter(d => d <= now && !isBizDay(d)).map(d => {
+    const dc = cs.filter(c => custInDay(c, d)); if (!dc.length) return null;
+    const ks = dailies.filter(k => tsOf(k) >= d && tsOf(k) < nextDay(d) && dc.some(c => inCustody(k, c))).sort((a, b) => tsOf(a) - tsOf(b));
+    if (!ks.length) return null;
+    const c0 = dc.find(c => inCustody(ks[0], c)) || dc[0];
+    const seg = (c0.segments || []).filter(s => s.at < nextDay(d)).at(-1);
+    return { d, did, key, checklists: ks, vehicleId: ks[0].vehicleId, projectId: seg?.projectId || null, held: heldInDay(dc, d, now), today: now < nextDay(d), decision: nbDecision(did, key, d) };
+  }).filter(Boolean);
+}
+// fila da gestão: todos os condutores no período
+const nbQueue = key => S.drivers.flatMap(dr => nonBizDays(dr.id, key)).sort((a, b) => a.d - b.d || (drv(a.did)?.name || '').localeCompare(drv(b.did)?.name || '', 'pt-BR'));
+const nbPendingCount = key => nbQueue(key).filter(x => !x.decision).length;
 
 /* ----- pontuação e premiação de um condutor no período ----- */
 function driverScore(did, key = curPeriod()) {
   if (typeof key === 'number') key = periodOf(key);
   const P = bonusP(key); const [from, to] = periodRange(key); const now = nowTs(); const partial = now < to;
   // posses com o horário confiável (servidor quando o relógio do aparelho divergiu)
-  const cs = S.custody.filter(c => c.driverId === did && !c.imported).map(c => ({ ...c, start: custStart(c), end: custEnd(c) })).filter(c => c.start < to && (!c.end || c.end > from));
+  const cs = driverCust(did, from, to);
   const adjs = adjOf(did, key); const live = adjs.filter(a => !a.voidedAt);
   const abono = new Map(live.filter(a => a.kind === 'abono').map(a => [a.key, a]));
   const occ = [];
@@ -100,21 +143,16 @@ function driverScore(did, key = curPeriod()) {
 
   // dias úteis do período e dias com posse VÁLIDA (regra do dia: horas mínimas e/ou checklist diário na posse)
   const days = daysBetween(from, to); const biz = days.filter(isBizDay);
-  const inDay = (c, d) => c.start < nextDay(d) && (!c.end || c.end > d);
+  const inDay = custInDay;
   const rawDays = biz.filter(d => d <= now && cs.some(c => inDay(c, d)));
   const dailies = S.checklists.filter(k => k.type === 'diario' && k.driverId === did);
   // v1.12.0: cada dia útil precisa do SEU checklist diário (antes, um diário validava a posse inteira).
   // No dia do recebimento vale o checklist de recebimento, desde que a posse tenha ao menos um diário depois
   // (o recebimento sozinho continua não comprovando o uso).
-  const inCust = (k, c) => k.custodyId === c.id || (k.vehicleId === c.vehicleId && k.at > c.start && (!c.end || k.at <= c.end));
+  const inCust = inCustody;
   const custDaily = (c, d) => dailies.some(k => inCust(k, c) && tsOf(k) >= d && tsOf(k) < nextDay(d))
     || (c.start >= d && c.start < nextDay(d) && !!c.receiveChecklistId && dailies.some(k => inCust(k, c) && tsOf(k) >= nextDay(d)));
-  const heldMs = (list, d) => { // horas de posse no dia (sem contar duas vezes posses sobrepostas)
-    const a0 = d, b0 = Math.min(nextDay(d), now);
-    const iv = list.map(c => [Math.max(c.start, a0), Math.min(c.end || now, b0)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
-    let tot = 0, cs0 = null, ce0 = null; iv.forEach(([a, b]) => { if (ce0 == null || a > ce0) { if (ce0 != null) tot += ce0 - cs0; cs0 = a; ce0 = b; } else ce0 = Math.max(ce0, b); }); if (ce0 != null) tot += ce0 - cs0;
-    return tot;
-  };
+  const heldMs = (list, d) => heldInDay(list, d, now);
   const minMs = Math.max(0, +P.minHours || 0) * 36e5; const rule = DAY_RULES[P.dayRule] ? P.dayRule : 'ambos';
   const skipDays = [];
   const possDays = rawDays.filter(d => {
@@ -177,15 +215,20 @@ function driverScore(did, key = curPeriod()) {
   const total = Math.max(0, Math.min(100, subtotal - penalty + adjust));
   // premiação (item 7)
   // só tem pontuação quem teve ao menos um dia com posse válida (quem só recebeu e entregou não pontua)
-  const eligible = possDays.length > 0; const noValid = cs.length > 0 && !eligible;
+  // dias não úteis considerados pela gestão: somam nos dias com posse e nos dias úteis do condutor
+  const nb = nonBizDays(did, key, cs);
+  const extraDays = [...new Set(live.filter(a => a.kind === 'diaextra').map(a => nbDay(a.key)))].filter(d => d != null && d >= from && d < to && !isBizDay(d)).sort((a, b) => a - b);
+  const nbPending = nb.filter(x => !x.decision).length;
+  const possN = possDays.length + extraDays.length; const bizN = biz.length + extraDays.length;
+  const eligible = possN > 0; const noValid = cs.length > 0 && !eligible;
   const base = (+P.baseValue || 0) * total / 100;
   // adicional de 100 pontos: vale para todos com 100 pontos; o de 90 a 99 continua exigindo os dias mínimos com posse
-  let addv = total >= 100 ? +P.add100 || 0 : total >= 90 ? +P.add90 || 0 : 0; const addBlocked = addv > 0 && total < 100 && possDays.length < (+P.addMinDays || 0);
+  let addv = total >= 100 ? +P.add100 || 0 : total >= 90 ? +P.add90 || 0 : 0; const addBlocked = addv > 0 && total < 100 && possN < (+P.addMinDays || 0);
   if (addBlocked) addv = 0;
-  const full = base + addv; const factor = biz.length ? possDays.length / biz.length : 0;
+  const full = base + addv; const factor = bizN ? possN / bizN : 0;
   const bonus = eligible ? Math.round(full * factor * 100) / 100 : 0;
   const parts = Object.values(mods).map(m => ({ k: m.k, l: m.l, v: m.v, max: m.max, info: m.n ? `${m.n} desconto(s)${m.zero ? ' · zerada' : ''}` : 'Sem descontos' }));
-  return { key, from, to, partial, P, total, bonus, eligible, noValid, skipDays, rawDays: rawDays.length, mods, subtotal, zeroed, penalty, adjust, base, add: addv, addBlocked, full, factor, possDays: possDays.length, bizDays: biz.length,
+  return { key, from, to, partial, P, total, bonus, eligible, noValid, skipDays, rawDays: rawDays.length, mods, subtotal, zeroed, penalty, adjust, base, add: addv, addBlocked, full, factor, possDays: possN, bizDays: bizN, baseBizDays: biz.length, extraDays: extraDays.length, extraList: extraDays, nbPending,
     occurrences: occ, adjustments: adjs, parts, req: onTime + late + absent, done: onTime + late, late, absent, pending, exempt, tier: null, fines: [] };
 }
 function rankList(key) {
@@ -198,7 +241,7 @@ function rankList(key) {
 
 /* ----- fechamento (guarda o extrato de cada condutor como estava) ----- */
 function statementRow(d, sc) {
-  return { driverId: d.id, name: d.name, score: sc.total, bonus: sc.bonus, base: Math.round(sc.base * 100) / 100, add: sc.add, addBlocked: sc.addBlocked, full: Math.round(sc.full * 100) / 100, factor: sc.factor, possDays: sc.possDays, bizDays: sc.bizDays, skipDays: (sc.skipDays || []).map(x => ({ d: x.d, why: x.why })),
+  return { driverId: d.id, name: d.name, score: sc.total, bonus: sc.bonus, base: Math.round(sc.base * 100) / 100, add: sc.add, addBlocked: sc.addBlocked, full: Math.round(sc.full * 100) / 100, factor: sc.factor, possDays: sc.possDays, bizDays: sc.bizDays, extraDays: sc.extraDays || 0, extraList: sc.extraList || [], skipDays: (sc.skipDays || []).map(x => ({ d: x.d, why: x.why })),
     subtotal: sc.subtotal, zeroed: sc.zeroed, penalty: sc.penalty, adjust: sc.adjust, mods: sc.mods, occurrences: sc.occurrences.map(o => ({ key: o.key, mod: o.mod, at: o.at, pts: o.pts, why: o.why, manual: o.manual || null, abono: o.abono, ev: o.ev })),
     adjustments: sc.adjustments.filter(a => a.kind === 'ajuste' && !a.voidedAt).map(a => ({ points: a.points, reason: a.reason, at: a.createdAt })), counts: { late: sc.late, absent: sc.absent, exempt: sc.exempt }, P: sc.P };
 }
@@ -259,33 +302,36 @@ function statementHTML(sc, opts = {}) {
     ['Valor base', `${money(P.baseValue)} × ${nf(total)} ÷ 100 = <b>${money(sc.base)}</b>`],
     ['Adicional por desempenho', sc.add ? `<b>${money(sc.add)}</b> (${total >= 100 ? '100 pontos' : '90 a 99 pontos'})` : sc.addBlocked ? `— <span class="small muted">de 90 a 99 pontos exige ${P.addMinDays} dias com posse (teve ${sc.possDays})</span>` : '— <span class="small muted">abaixo de 90 pontos</span>'],
     ['Premiação cheia', `<b>${money(sc.full)}</b>`],
-    ['Fator de participação', `${fx} dias úteis com posse válida = ${nf((sc.factor || 0) * 100, 1)}%`],
+    ['Fator de participação', `${fx} dias úteis com posse válida = ${nf((sc.factor || 0) * 100, 1)}%${sc.extraDays ? `<div class="tiny muted">inclui ${nbExtraTxt(sc)}</div>` : ''}`],
     ['Premiação a receber', `<b style="font-size:1.1rem;color:${sc.bonus ? 'var(--green)' : 'var(--text3)'}">${money(sc.bonus)}</b>`]
   ];
   const kv = rows => `<table class="tbl calc"><tbody>${rows.map(([a, b]) => `<tr><td>${a}</td><td class="r">${b}</td></tr>`).join('')}</tbody></table>`;
   return `<div class="stack" style="gap:14px">
-    <div class="row" style="justify-content:space-between"><div class="row">${ring(total)}<div><b>${opts.title || 'Pontuação do período'}</b><div class="tiny muted">${periodDates(key)}${sc.partial ? ' · parcial, até hoje' : ''}</div><div class="tiny muted">${sc.possDays} dia(s) com posse de ${sc.bizDays} dias úteis</div></div></div>
+    <div class="row" style="justify-content:space-between"><div class="row">${ring(total)}<div><b>${opts.title || 'Pontuação do período'}</b><div class="tiny muted">${periodDates(key)}${sc.partial ? ' · parcial, até hoje' : ''}</div><div class="tiny muted">${sc.possDays} dia(s) com posse de ${sc.bizDays} dias úteis${sc.extraDays ? ` · inclui ${nbN(sc.extraDays)}` : ''}</div></div></div>
       <div style="text-align:right"><div class="tiny muted">${sc.partial ? 'Prêmio previsto' : 'Premiação'}</div><b style="font-size:1.25rem;color:${sc.bonus ? 'var(--green)' : 'var(--text3)'}">${money(sc.bonus)}</b></div></div>
     <div class="mods">${modsHTML}</div>
     <div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Descontos e evidências</h3>${opts.manage && !opts.closed ? `<button class="btn sm" data-act="bn-occ-new" data-did="${opts.did}" data-p="${key}">${ic('plus')}Ocorrência</button><button class="btn sm" data-act="bn-adj-new" data-did="${opts.did}" data-p="${key}">Ajuste manual</button>` : ''}</div>
       ${tbl(['Data', 'Mod.', 'Motivo e evidência', '>Pontos', ...(opts.manage ? [''] : [])], occ.map(o => occRow(o, { ...opts, key })), 'Nenhum desconto no período.')}</div>
     ${(sc.skipDays || []).length ? `<div class="note">${ic('cal')}<div>O dia só conta com ${esc(dayRuleText(P))}.${skipHTML(sc)}</div></div>` : ''}
+    ${sc.extraDays || sc.nbPending ? `<div class="note">${ic('cal')}<div>${sc.extraDays ? `Dia(s) não útil(eis) considerado(s) pela gestão: ${(sc.extraList || []).map(d => `<b class="num">${esc(nbShort(d))}</b>`).join(', ') || sc.extraDays}. Cada um conta como um dia útil a mais, nos dias com posse e nos dias úteis.` : ''}${sc.nbPending ? `${sc.extraDays ? '<br>' : ''}${sc.nbPending} checklist(s) diário(s) em fim de semana ou feriado aguardando avaliação da gestão.` : ''}</div></div>` : ''}
     ${sc.pending ? `<div class="note warn">${ic('check')}<div>Checklist diário de hoje ainda pendente: envie até ${P.deadline} para não ter desconto.</div></div>` : ''}
     <div class="grid2"><div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Cálculo da pontuação</h3></div>${kv(steps)}</div>
       <div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Cálculo da premiação</h3></div>${kv(prem)}</div></div>
     ${opts.manage ? adjHistory(sc.adjustments || [], opts) : ''}
   </div>`;
 }
+const nbN = n => n > 1 ? `${n} dias não úteis` : `${n} dia não útil`;
+const nbExtraTxt = sc => `${nbN(sc.extraDays)} considerado${sc.extraDays > 1 ? 's' : ''} pela gestão (${(sc.extraList || []).map(nbShort).join(', ')}), somado${sc.extraDays > 1 ? 's' : ''} nos dois lados`;
 function skipHTML(sc) {
   const l = sc.skipDays || []; if (!l.length) return '';
   return `<div class="small" style="margin-top:6px">Dia(s) com posse que não contaram${sc.partial ? ' (até agora)' : ''}:<br>${l.slice(0, 12).map(x => `<b class="num">${fmtDate(x.d)}</b> — ${esc(x.why)}${x.today ? ' <span class="muted">(hoje, ainda pode contar)</span>' : ''}`).join('<br>')}${l.length > 12 ? `<br>… e mais ${l.length - 12}` : ''}</div>`;
 }
 function adjHistory(list, opts) {
   if (!list.length) return '';
-  const kind = { abono: 'Abono', ocorrencia: 'Ocorrência', ajuste: 'Ajuste' };
+  const kind = { abono: 'Abono', ocorrencia: 'Ocorrência', ajuste: 'Ajuste', ...NB_KINDS };
   return `<div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Registros da gestão</h3><span class="small muted">não podem ser apagados; correções cancelam o registro</span></div>
-    ${tbl(['Data', 'Tipo', 'Justificativa', '>Pontos', 'Por', ''], list.slice().sort((a, b) => b.createdAt - a.createdAt).map(a => `<tr class="${a.voidedAt ? 'abonado' : ''}"><td class="nowrap small">${fmtDT(a.createdAt)}</td><td>${kind[a.kind]}${a.modality ? ' ' + modPill(a.modality) : ''}</td>
-      <td>${esc(a.reason)}${a.voidedAt ? `<div class="small" style="color:var(--red)">Cancelado em ${fmtDT(a.voidedAt)} por ${esc(userName(a.voidedBy))}: ${esc(a.voidReason || '')}</div>` : ''}</td><td class="r num">${a.kind === 'abono' ? '—' : (a.kind === 'ocorrencia' ? '−' + nf(Math.abs(a.points)) : (a.points > 0 ? '+' : '') + nf(a.points))}</td><td class="small">${esc(userName(a.createdBy))}</td>
+    ${tbl(['Data', 'Tipo', 'Justificativa', '>Pontos', 'Por', ''], list.slice().sort((a, b) => b.createdAt - a.createdAt).map(a => `<tr class="${a.voidedAt ? 'abonado' : ''}"><td class="nowrap small">${fmtDT(a.createdAt)}</td><td>${kind[a.kind]}${NB_KINDS[a.kind] && nbDay(a.key) ? ` <span class="small muted nowrap">${esc(nbShort(nbDay(a.key)))}</span>` : ''}${a.modality ? ' ' + modPill(a.modality) : ''}</td>
+      <td>${esc(a.reason)}${a.voidedAt ? `<div class="small" style="color:var(--red)">Cancelado em ${fmtDT(a.voidedAt)} por ${esc(userName(a.voidedBy))}: ${esc(a.voidReason || '')}</div>` : ''}</td><td class="r num">${a.kind === 'abono' || NB_KINDS[a.kind] ? '—' : (a.kind === 'ocorrencia' ? '−' + nf(Math.abs(a.points)) : (a.points > 0 ? '+' : '') + nf(a.points))}</td><td class="small">${esc(userName(a.createdBy))}</td>
       <td class="r">${!a.voidedAt && !opts.closed ? `<button class="btn sm danger" data-act="bn-void" data-id="${a.id}">Cancelar</button>` : ''}</td></tr>`))}</div>`;
 }
 
@@ -293,7 +339,8 @@ function adjHistory(list, opts) {
 function newAdj(o) {
   const a = { id: uid(), driverId: o.driverId, period: o.period, kind: o.kind, modality: o.modality || null, key: o.key || null, points: o.points || 0, at: o.at || null, vehicleId: o.vehicleId || null, reason: o.reason, createdBy: CUR.id, createdAt: nowTs(), voidedAt: null, voidedBy: null, voidReason: null };
   (S.bonusAdj = S.bonusAdj || []).push(a);
-  const lab = { abono: 'Abono', ocorrencia: `Ocorrência na modalidade ${o.modality} (−${nf(Math.abs(o.points))})`, ajuste: `Ajuste manual de ${o.points > 0 ? '+' : ''}${nf(o.points)} ponto(s)` }[o.kind];
+  const lab = { abono: 'Abono', ocorrencia: `Ocorrência na modalidade ${o.modality} (−${nf(Math.abs(o.points))})`, ajuste: `Ajuste manual de ${o.points > 0 ? '+' : ''}${nf(o.points)} ponto(s)`,
+    diaextra: `Dia não útil (${nbDay(o.key) ? nbShort(nbDay(o.key)) : ''}) considerado na premiação`, diarecusa: `Dia não útil (${nbDay(o.key) ? nbShort(nbDay(o.key)) : ''}) não considerado na premiação` }[o.kind];
   log('premiacao', `${lab} registrado por ${CUR.name} para ${drv(o.driverId)?.name || ''} (período ${periodDates(o.period)}): ${o.reason}`, { driverId: o.driverId });
   return a;
 }
@@ -342,14 +389,16 @@ ACTIONS['bn-adj-ok'] = a => {
 };
 ACTIONS['bn-void'] = a => {
   const x = byId(S.bonusAdj, a.dataset.id); if (closedGuard(x.period)) return;
-  openModal({ title: 'Cancelar registro', body: `<p>${esc(x.reason)}</p><p class="small muted">O registro continua visível como cancelado.</p><label class="field"><span>Motivo do cancelamento</span><textarea class="inp" id="bn-why"></textarea></label><p class="err" id="bn-err"></p>`,
+  const nbx = NB_KINDS[x.kind];
+  openModal({ title: nbx ? 'Desfazer decisão' : 'Cancelar registro', body: `${nbx ? `<p><b>${esc(nbx)}</b> · ${esc(drv(x.driverId)?.name || '')} · ${esc(nbShort(nbDay(x.key)))}</p>` : ''}<p>${esc(x.reason)}</p><p class="small muted">O registro continua visível como cancelado.${nbx ? ' O dia volta para a fila de avaliação em Premiação › Dias não úteis.' : ''}</p><label class="field"><span>Motivo do cancelamento</span><textarea class="inp" id="bn-why"></textarea></label><p class="err" id="bn-err"></p>`,
     foot: `<button class="btn" data-act="modal-close">Voltar</button><button class="btn danger" data-act="bn-void-ok" data-id="${x.id}">Cancelar registro</button>` });
 };
 ACTIONS['bn-void-ok'] = a => {
   const x = byId(S.bonusAdj, a.dataset.id); const r = $('#bn-why').value.trim(); if (r.length < 5) return $('#bn-err').textContent = 'Informe o motivo.';
   x.voidedAt = nowTs(); x.voidedBy = CUR.id; x.voidReason = r;
   log('premiacao', `Registro da premiação cancelado por ${CUR.name} (${drv(x.driverId)?.name || ''}): ${x.reason} — motivo: ${r}`, { driverId: x.driverId });
-  save(); closeModal(); toast('Registro cancelado.'); render();
+  if (NB_KINDS[x.kind]) notify(x.driverId, `A gestão reabriu a avaliação do seu checklist de ${nbShort(nbDay(x.key))} (dia não útil) na premiação.`, { link: { page: 'inicio' } });
+  save(); closeModal(); toast(NB_KINDS[x.kind] ? 'Decisão desfeita. O dia voltou para a fila.' : 'Registro cancelado.'); render();
 };
 
 /* ----- página Premiação ----- */
@@ -358,9 +407,11 @@ PAGES.bonificacao = {
   title: 'Premiação',
   render({ tab = 'ranking' }) {
     const M = isManager(); BON_P = BON_P || curPeriod(); const key = BON_P; const cur = key === curPeriod(); const c = closingOf(key);
-    const tabs = `<div class="tabs">${[['ranking', 'Ranking do período'], ['ocorrencias', 'Descontos e abonos'], ['parametros', 'Parâmetros']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="bonificacao" data-tab="${k}">${l}</button>`).join('')}</div>`;
+    const nbn = nbPendingCount(key);
+    const tabs = `<div class="tabs">${[['ranking', 'Ranking do período'], ['ocorrencias', 'Descontos e abonos'], ['naouteis', `Dias não úteis${nbn ? ` <span class="pill warn" data-nb-count>${nbn}</span>` : ''}`], ['parametros', 'Parâmetros']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="bonificacao" data-tab="${k}">${l}</button>`).join('')}</div>`;
     const nav = `<div class="row" style="gap:8px"><button class="icon-btn" data-act="bn-p" data-d="-1" aria-label="Período anterior">${ic('back')}</button><div style="text-align:center;min-width:190px"><b style="text-transform:capitalize">${monthName(key)}</b><div class="tiny muted">${periodDates(key)}</div></div><button class="icon-btn" data-act="bn-p" data-d="1" aria-label="Próximo período" ${cur ? 'disabled' : ''}>${ic('chev')}</button>${cur ? pill('em andamento') : c ? pill('fechado', 'ok') : pill('aguardando fechamento', 'warn')}</div>`;
     if (tab === 'parametros') return `<div class="stack">${tabs}${paramsView(M)}</div>`;
+    if (tab === 'naouteis') return `<div class="stack">${tabs}<div class="page-head" style="margin:0">${nav}</div>${nbView(key, M, !!c)}</div>`;
     const list = rankList(key); const el = list.filter(x => x.sc.eligible);
     if (tab === 'ocorrencias') {
       const all = el.flatMap(({ d, sc }) => sc.occurrences.map(o => ({ d, o })));
@@ -371,7 +422,8 @@ PAGES.bonificacao = {
     const medal = ['var(--u-green)', 'var(--text3)', 'var(--border)'];
     const totalPrev = sum(el, x => x.sc.bonus);
     return `<div class="stack">${tabs}<div class="page-head" style="margin:0">${nav}<button class="btn" data-go="relatorios" data-tab="premiacao">${ic('report')}Fechamento para o RH</button></div>
-      <div class="kpis">${kpi('Média da equipe', el.length ? nf(sum(el, x => x.sc.total) / el.length, 0) : '—', 'gauge', 'c-blue', '', 'pontos')}${kpi('Com posse no período', `${el.length}`, 'user')}${kpi(cur ? 'Prêmios previstos' : 'Prêmios do período', money(totalPrev), 'star', 'c-green')}${kpi('Dias úteis', el[0]?.sc.bizDays ?? daysBetween(...periodRange(key)).filter(isBizDay).length, 'cal', '', '', cur ? 'no período' : '')}</div>
+      ${nbn ? `<div class="note warn">${ic('cal')}<div><b>${nbn} checklist(s) diário(s) em fim de semana ou feriado</b> aguardando avaliação. <button class="link" data-go="bonificacao" data-tab="naouteis">Avaliar agora</button></div></div>` : ''}
+      <div class="kpis">${kpi('Média da equipe', el.length ? nf(sum(el, x => x.sc.total) / el.length, 0) : '—', 'gauge', 'c-blue', '', 'pontos')}${kpi('Com posse no período', `${el.length}`, 'user')}${kpi(cur ? 'Prêmios previstos' : 'Prêmios do período', money(totalPrev), 'star', 'c-green')}${kpi('Dias úteis', daysBetween(...periodRange(key)).filter(isBizDay).length, 'cal', '', '', cur ? 'no período' : '')}</div>
       ${el.length ? `<div class="grid3">${el.slice(0, 3).map(({ d, sc, pos }, i) => `<div class="vcard" data-go="condutor" data-id="${d.id}" data-tab="score" style="align-items:center;text-align:center;border-top:4px solid ${medal[Math.min(2, pos - 1)]}"><span class="pill ${pos === 1 ? 'ok' : ''}">${pos}º lugar</span>${av(d, 'lg')}<b>${esc(d.name)}</b>${ring(sc.total)}<b style="font-size:1.15rem;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b><span class="tiny muted">${sc.possDays}/${sc.bizDays} dias com posse</span></div>`).join('')}</div>` : ''}
       <div class="panel"><div class="panel-h"><h2>Condutores</h2><span class="small muted">A · B · C = entrega/recebimento · checklist diário · abastecimento</span></div>
         <div class="vlist">${list.map(({ d, sc, pos }) => `<div class="vrow" data-go="condutor" data-id="${d.id}" data-tab="score" style="grid-template-columns:30px auto 1fr auto auto"><b class="muted num">${pos ? pos + 'º' : '—'}</b>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}<div class="who2"><b>${esc(d.name)}</b>${sc.eligible ? `<div class="row" style="gap:3px;flex-wrap:nowrap;margin-top:5px">${Object.values(sc.mods).map(m => `<div class="bar s-${pctTone(m.v, m.max)}" style="flex:${m.max || 1};min-width:14px" title="${esc(m.l)}: ${nf(m.v)}/${m.max}"><i style="width:${m.max ? m.v / m.max * 100 : 0}%"></i></div>`).join('')}</div>` : `<small>${sc.noValid ? 'Sem dia com uso comprovado (só recebimento, posse curta ou sem checklist diário)' : 'Sem posse no período'}</small>`}</div><span class="small muted nowrap">${sc.possDays}/${sc.bizDays} dias</span><b class="num" style="min-width:86px;text-align:right;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b></div>`).join('') || '<div class="panel-b muted">Nenhum condutor ativo.</div>'}</div></div>
@@ -380,6 +432,64 @@ PAGES.bonificacao = {
   mount({ tab }) { if (tab === 'parametros') mountParams(); }
 };
 ACTIONS['bn-p'] = a => { BON_P = shiftMonth(BON_P || curPeriod(), +a.dataset.d); if (BON_P > curPeriod()) BON_P = curPeriod(); render(); };
+
+/* ----- dias não úteis: fila de avaliação da gestão ----- */
+function nbCells(x) {
+  const v = veh(x.vehicleId);
+  const cks = x.checklists.map(k => `<button class="link small" data-act="ck-view" data-id="${k.id}">${fmtTime(tsOf(k))}</button>${k.ok === false ? ' ' + pill('com problema', 'warn') : ''}`).join(' · ');
+  return `<td><button class="link" data-go="condutor" data-id="${x.did}" data-tab="score">${esc(drv(x.did)?.name || '')}</button></td>
+    <td class="nowrap"><b class="num">${fmtDate(x.d)}</b><div class="small muted">${esc(nbLabel(x.d))}${x.today ? ' · hoje' : ''}</div></td>
+    <td class="nowrap">${v ? plate(v.plate) : '—'}<div class="small muted">${x.projectId ? projLabel(x.projectId) : 'Sem obra'}</div></td>
+    <td>${cks}</td><td class="r nowrap num">${dur(x.held)}</td>`;
+}
+function nbView(key, M, closed) {
+  const q = nbQueue(key); const pend = q.filter(x => !x.decision); const done = q.filter(x => x.decision);
+  const btns = x => M && !closed ? `<div class="row" style="gap:6px;flex-wrap:nowrap;justify-content:flex-end"><button class="btn sm ok" data-act="nb-yes" data-did="${x.did}" data-day="${dayKey(x.d)}" data-p="${key}">Considerar</button><button class="btn sm danger" data-act="nb-no" data-did="${x.did}" data-day="${dayKey(x.d)}" data-p="${key}">Não considerar</button></div>` : '';
+  const dec = x => { const a = x.decision; const yes = a.kind === 'diaextra';
+    return `<td>${pill(yes ? 'Considerado' : 'Não considerado', yes ? 'ok' : 'bad')}<div class="small">${esc(a.reason)}</div><div class="tiny muted">${esc(userName(a.createdBy))} · ${fmtDT(a.createdAt)}</div></td>
+      <td class="r">${M && !closed ? `<button class="btn sm" data-act="bn-void" data-id="${a.id}">Desfazer</button>` : ''}</td>`; };
+  const head = ['Condutor', 'Dia', 'Veículo e obra', 'Checklist diário', '>Posse no dia'];
+  return `<div class="note">${ic('cal')}<div>Checklists diários feitos em <b>sábado, domingo ou feriado</b> por quem estava com o veículo entram aqui automaticamente.
+      <b>Considerar</b>: o dia entra como um dia útil a mais para o condutor, somando nos dias com posse e nos dias úteis dele (ex.: 18/20 + 1 = 19/21). <b>Não considerar</b>: o dia não muda a premiação (motivo obrigatório). O condutor recebe um aviso da decisão.${closed ? '<br><b>Período fechado:</b> as decisões não podem mais ser alteradas.' : ''}</div></div>
+    <div class="panel"><div class="panel-h"><h2>Aguardando avaliação</h2>${pend.length ? pill(String(pend.length), 'warn') : ''}</div>
+      ${tbl([...head, ''], pend.map(x => `<tr>${nbCells(x)}<td class="r">${btns(x)}</td></tr>`), 'Nenhum checklist em dia não útil aguardando avaliação neste período.')}</div>
+    ${done.length ? `<div class="panel"><div class="panel-h"><h3>Avaliados</h3><span class="small muted">${done.filter(x => x.decision.kind === 'diaextra').length} considerado(s) · ${done.filter(x => x.decision.kind !== 'diaextra').length} não considerado(s)</span></div>
+      ${tbl([...head, 'Decisão', ''], done.map(x => `<tr>${nbCells(x)}${dec(x)}</tr>`))}</div>` : ''}`;
+}
+const nbItem = a => nonBizDays(a.dataset.did, a.dataset.p).find(x => dayKey(x.d) === a.dataset.day);
+function nbGuard(a) {
+  if (!isManager()) return null; if (closedGuard(a.dataset.p)) return null;
+  const x = nbItem(a); if (!x) { toast('Checklist não encontrado neste período.'); return null; }
+  if (x.decision) { toast('Este dia já foi avaliado. Use Desfazer para avaliar de novo.'); render(); return null; }
+  return x;
+}
+const nbHead = x => { const v = veh(x.vehicleId); return `<dl class="dl"><dt>Condutor</dt><dd>${esc(drv(x.did)?.name || '')}</dd><dt>Dia</dt><dd>${fmtDate(x.d)} · ${esc(nbLabel(x.d))}</dd><dt>Veículo</dt><dd>${v ? esc(v.plate) : '—'}${x.projectId ? ' · ' + projFull(x.projectId) : ''}</dd><dt>Checklist diário</dt><dd>${x.checklists.map(k => fmtTime(tsOf(k))).join(', ')}</dd><dt>Posse no dia</dt><dd>${dur(x.held)}</dd></dl>`; };
+ACTIONS['nb-yes'] = a => {
+  const x = nbGuard(a); if (!x) return;
+  // simulação: como fica o fator e o prêmio do condutor com o dia considerado
+  const before = driverScore(x.did, x.key); const tmp = { id: '_sim', driverId: x.did, period: x.key, kind: 'diaextra', key: nbKey(x.d) };
+  (S.bonusAdj = S.bonusAdj || []).push(tmp); let after; try { after = driverScore(x.did, x.key); } finally { S.bonusAdj = S.bonusAdj.filter(y => y !== tmp); }
+  openModal({ title: 'Considerar na premiação', body: `${nbHead(x)}
+      <div class="note ok"><div>O dia entra como um dia útil a mais para ${esc((drv(x.did)?.name || '').split(' ')[0])}: <b class="num">${before.possDays}/${before.bizDays}</b> → <b class="num">${after.possDays}/${after.bizDays}</b> dias (${nf((before.factor || 0) * 100, 1)}% → ${nf((after.factor || 0) * 100, 1)}%).<br>${before.partial ? 'Prêmio previsto até agora' : 'Premiação'}: ${money(before.bonus)} → <b>${money(after.bonus)}</b></div></div>
+      <label class="field"><span>Observação (opcional)</span><textarea class="inp" id="nb-why" maxlength="300" placeholder="Ex.: plantão na obra autorizado pelo encarregado"></textarea></label><p class="err" id="nb-err"></p>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="nb-ok" data-v="1" data-did="${x.did}" data-day="${dayKey(x.d)}" data-p="${x.key}">Considerar</button>` });
+};
+ACTIONS['nb-no'] = a => {
+  const x = nbGuard(a); if (!x) return;
+  openModal({ title: 'Não considerar na premiação', body: `${nbHead(x)}<p class="small muted">O dia não muda a premiação. O condutor recebe o motivo.</p>
+      <label class="field"><span>Motivo</span><textarea class="inp" id="nb-why" maxlength="300" placeholder="Ex.: uso particular, sem serviço na obra"></textarea></label><p class="err" id="nb-err"></p>`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn danger" data-act="nb-ok" data-v="0" data-did="${x.did}" data-day="${dayKey(x.d)}" data-p="${x.key}">Não considerar</button>` });
+};
+ACTIONS['nb-ok'] = a => {
+  const x = nbGuard(a); if (!x) return closeModal();
+  const yes = a.dataset.v === '1'; let r = ($('#nb-why')?.value || '').trim();
+  if (!yes && r.length < 5) return $('#nb-err').textContent = 'Informe o motivo (mínimo 5 letras).';
+  if (yes && r.length < 5) r = 'Considerado pela gestão';
+  newAdj({ driverId: x.did, period: x.key, kind: yes ? 'diaextra' : 'diarecusa', key: nbKey(x.d), at: x.d + 12 * 36e5, vehicleId: x.vehicleId, reason: r });
+  notify(x.did, yes ? `Seu checklist de ${nbShort(x.d)} (dia não útil) foi considerado na premiação: o dia conta como um dia útil a mais.`
+    : `Seu checklist de ${nbShort(x.d)} (dia não útil) não foi considerado na premiação: ${r}`, { level: yes ? 'ok' : 'info', link: { page: 'inicio' } });
+  save(); closeModal(); toast(yes ? 'Dia considerado na premiação.' : 'Dia não considerado.'); render();
+};
 
 /* ----- parâmetros (item 11), com vigência e histórico ----- */
 function paramsView(M) {

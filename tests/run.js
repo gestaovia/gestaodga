@@ -21,7 +21,7 @@ const NOW = new Date('2026-10-20T12:00:00-03:00').getTime();
     try { const r = await p.evaluate(t.fn); ok(t.name, r === true || r?.ok === true, r === true ? undefined : r); }
     catch (e) { ok(t.name, false, e.message.split('\n')[0]); }
   }
-  if (process.env.UI) { await require('./ui.js')(p, ok); await require('./ui.js').diario(p, ok); }
+  if (process.env.UI) { await require('./ui.js')(p, ok); await require('./ui.js').diario(p, ok); await require('./ui.js').v113(p, ok, process.env.SHOTS); }
   console.log(res.join('\n'));
   console.log('Erros de página:', errs.length ? errs.slice(0, 5) : 'nenhum');
   console.log(`${res.filter(x => x.startsWith('OK')).length}/${res.length} OK`);

@@ -126,4 +126,46 @@ t('condutor: posse encerrada sem conexão ganha o aviso', () => {
   S.custody.push({ id: crypto.randomUUID(), vehicleId: 'v1', driverId: 'd1', start: T('2026-10-20T07:00'), end: null, startKm: 15000, segments: [] }); CLOUD.snapshot();
   S.custody[0].end = T('2026-10-20T11:00'); CLOUD.markOffline(); return S.custody[0].offlineQueued === true;
 });
+// ---------- v1.13.0: dias não úteis (fila da gestão) ----------
+t('dia não útil: diário de sábado entra na fila e não muda nada antes da decisão', () => {
+  NBSET(); const q = nbQueue('2026-10'); const sc = driverScore('d1', '2026-10');
+  return { ok: q.length === 1 && dayKey(q[0].d) === '2026-10-17' && !q[0].decision && /Sábado/.test(nbLabel(q[0].d)) && sc.possDays === 4 && sc.bizDays === 19 && sc.nbPending === 1 && nbPendingCount('2026-10') === 1, q: q.length, poss: sc.possDays, biz: sc.bizDays };
+});
+t('dia não útil considerado: soma nos dois lados (4/19 → 5/20)', () => {
+  NBSET(); const b0 = driverScore('d1', '2026-10');
+  newAdj({ driverId: 'd1', period: '2026-10', kind: 'diaextra', key: 'N:2026-10-17', reason: 'Considerado pela gestão' });
+  const sc = driverScore('d1', '2026-10'); const exp = Math.round(sc.full * 5 / 20 * 100) / 100;
+  return { ok: sc.possDays === 5 && sc.bizDays === 20 && sc.baseBizDays === 19 && sc.extraDays === 1 && sc.bonus === exp && sc.bonus > b0.bonus && nbPendingCount('2026-10') === 0, poss: sc.possDays, biz: sc.bizDays, bonus: sc.bonus, antes: b0.bonus };
+});
+t('dia não útil não considerado: premiação igual', () => {
+  NBSET(); const b0 = driverScore('d1', '2026-10');
+  newAdj({ driverId: 'd1', period: '2026-10', kind: 'diarecusa', key: 'N:2026-10-17', reason: 'uso particular' });
+  const sc = driverScore('d1', '2026-10');
+  return { ok: sc.possDays === 4 && sc.bizDays === 19 && sc.bonus === b0.bonus && sc.nbPending === 0 && nbQueue('2026-10')[0].decision.kind === 'diarecusa' };
+});
+t('desfazer a decisão devolve o dia para a fila', () => {
+  NBSET(); const a = newAdj({ driverId: 'd1', period: '2026-10', kind: 'diaextra', key: 'N:2026-10-17', reason: 'Considerado pela gestão' });
+  a.voidedAt = nowTs(); const sc = driverScore('d1', '2026-10');
+  return { ok: sc.possDays === 4 && sc.bizDays === 19 && sc.nbPending === 1 };
+});
+t('fim de semana sem diário (só posse) não entra na fila', () => {
+  NBSET(); S.checklists = S.checklists.filter(k => k.id !== 'ks'); return { ok: nbQueue('2026-10').length === 0 };
+});
+t('feriado (12/10) com diário entra na fila como feriado', () => {
+  const T = FIX(); CUR = S.users[0];
+  S.custody.push({ id: 'c1', vehicleId: 'v1', driverId: 'd2', start: T('2026-10-09T08:00'), end: T('2026-10-13T18:00'), startKm: 1, segments: [] });
+  S.checklists.push({ id: 'kh', type: 'diario', vehicleId: 'v1', driverId: 'd2', custodyId: 'c1', at: T('2026-10-12T07:40'), serverAt: T('2026-10-12T07:40'), km: 2 });
+  const q = nbQueue('2026-10'); return { ok: q.length === 1 && q[0].did === 'd2' && /Feriado · Nossa Senhora Aparecida/.test(nbLabel(q[0].d)), label: q[0] && nbLabel(q[0].d) };
+});
+t('dia aprovado que deixou de ser não útil é ignorado (sem contar duas vezes)', () => {
+  NBSET(); bonusCfg().holidays.push({ date: '2026-10-16', name: 'Aniversário da cidade' });
+  newAdj({ driverId: 'd1', period: '2026-10', kind: 'diaextra', key: 'N:2026-10-16', reason: 'Considerado pela gestão' });
+  bonusCfg().holidays = []; const sc = driverScore('d1', '2026-10');
+  return { ok: sc.extraDays === 0 && sc.possDays === 4 && sc.bizDays === 19, poss: sc.possDays, biz: sc.bizDays };
+});
+t('fechamento guarda os dias não úteis considerados', () => {
+  NBSET(); newAdj({ driverId: 'd1', period: '2026-10', kind: 'diaextra', key: 'N:2026-10-17', reason: 'Considerado pela gestão' });
+  const r = statementRow(S.drivers[0], driverScore('d1', '2026-10'));
+  return { ok: r.extraDays === 1 && r.extraList.length === 1 && r.possDays === 5 && r.bizDays === 20 };
+});
 module.exports = C;

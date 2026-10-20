@@ -17,3 +17,12 @@ window.FIX = () => {
   S.vehicles.forEach(v => docsOf(v)); docSet(); CLOUD.signed = {};
   return T;
 };
+// v1.13.0: posse de 13/10 a 19/10 com diário nos dias úteis 13–16 e no sábado 17/10
+window.NBSET = () => {
+  const T = FIX(); CUR = S.users[0];
+  S.checklists.push({ id: 'r1', type: 'recebimento', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T('2026-10-13T08:00'), serverAt: T('2026-10-13T08:00'), km: 15000, items: {}, photos: {} });
+  S.custody.push({ id: 'c1', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-13T08:00'), end: T('2026-10-19T18:00'), startKm: 15000, endKm: 15500, receiveChecklistId: 'r1', segments: [{ at: T('2026-10-13T08:00'), projectId: 'p1' }] });
+  ['13', '14', '15', '16'].forEach((d, i) => S.checklists.push({ id: 'k' + i, type: 'diario', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T(`2026-10-${d}T08:30`), serverAt: T(`2026-10-${d}T08:30`), km: 15010 + i, ok: true }));
+  S.checklists.push({ id: 'ks', type: 'diario', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T('2026-10-17T09:00'), serverAt: T('2026-10-17T09:00'), km: 15100, ok: true });
+  return T;
+};

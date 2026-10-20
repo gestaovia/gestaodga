@@ -95,7 +95,7 @@ window.addEventListener('popstate', e => {
   if (!e.state || !CUR) return;
   // voltar do navegador/celular com formulário preenchido: fica na tela e pergunta antes
   if (FORM_DIRTY) { const back = e.state; try { history.pushState({ page: ROUTE.page, p: ROUTE.p }, ''); } catch (x) { } return confirmLeave(() => { FORM_DIRTY = false; ROUTE = back; DRAFT = null; render(); window.scrollTo(0, 0); }); }
-  ROUTE = e.state; DRAFT = null; render();
+  closePhotoViewer(); ROUTE = e.state; DRAFT = null; render();
 });
 
 /* ----- formulário em andamento: só sai por Cancelar ou concluindo -----
@@ -234,7 +234,7 @@ function openModal({ title, body, foot = '', wide = false, onMount }) {
   onMount?.(el);
   return el;
 }
-function closeModal() { $('#modal')?.remove(); }
+function closeModal() { $('#modal')?.remove(); closePhotoViewer(); }
 let toastT = null;
 function toast(msg) {
   $('.toast')?.remove(); clearTimeout(toastT);
@@ -261,10 +261,53 @@ document.addEventListener('click', e => {
   else if (act === 'leave-ok') { const fn = LEAVE_FN; LEAVE_FN = null; FORM_DIRTY = false; closeModal(); fn?.(); }
   else if (act === 'notifs') showNotifications();
   else if (act === 'theme') { const t = themeNow() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, t); } catch (x) { } applyTheme(t); if (FORM_DIRTY) $$('[data-act="theme"]').forEach(b => b.outerHTML = themeBtn(b.classList.contains('theme-fab') ? 'theme-fab' : '')); else render(); }
-  else if (act === 'photo') { openModal({ title: 'Foto', body: `<img src="${esc(e.target.src)}" alt="" style="width:100%">`, wide: true }); }
+  else if (act === 'photo') openPhotoViewer(a);
   else if (ACTIONS[act]) ACTIONS[act](a, e);
 });
 const ACTIONS = {};
+
+/* ----- visualizador de fotos (v1.13.0): setas para passar entre as fotos do mesmo registro -----
+   Abre por cima da janela atual (ex.: o checklist continua aberto ao fechar a foto).
+   Grupo = fotos do mesmo bloco (.thumbs) ou da mesma linha da tabela. Setas na tela, ← → no teclado,
+   deslizar o dedo no celular, Esc ou × para fechar. */
+function openPhotoViewer(img) {
+  const group = img.closest('.thumbs, tr, [data-photo-group]') || img.parentElement;
+  const els = [...group.querySelectorAll('img[data-act="photo"]')];
+  const list = els.map(x => ({ src: x.currentSrc || x.src, label: x.alt || x.title || 'Foto' }));
+  let i = Math.max(0, els.indexOf(img));
+  closePhotoViewer();
+  const el = document.createElement('div'); el.className = 'pv'; el.id = 'pv'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Fotos');
+  const multi = list.length > 1;
+  el.innerHTML = `<div class="pv-top"><div><b id="pv-label"></b>${multi ? ` <span class="pv-count" id="pv-count"></span>` : ''}</div><button class="pv-x" data-pv="close" aria-label="Fechar">×</button></div>
+    <div class="pv-stage">${multi ? `<button class="pv-nav prev" data-pv="prev" aria-label="Foto anterior">${ic('back')}</button>` : ''}<img id="pv-img" alt="">${multi ? `<button class="pv-nav next" data-pv="next" aria-label="Próxima foto">${ic('chev')}</button>` : ''}</div>
+    ${multi ? `<div class="pv-strip">${list.map((p, j) => `<button data-pv="go" data-i="${j}" aria-label="${esc(p.label)}"><img src="${esc(p.src)}" alt=""></button>`).join('')}</div>` : ''}`;
+  const show = j => {
+    i = Math.max(0, Math.min(list.length - 1, j)); const p = list[i];
+    el.querySelector('#pv-img').src = p.src; el.querySelector('#pv-img').alt = p.label; el.querySelector('#pv-label').textContent = p.label;
+    if (multi) {
+      el.querySelector('#pv-count').textContent = `${i + 1} de ${list.length}`;
+      el.querySelector('.prev').disabled = i === 0; el.querySelector('.next').disabled = i === list.length - 1;
+      el.querySelectorAll('.pv-strip button').forEach((b, k) => b.classList.toggle('on', k === i));
+      el.querySelector('.pv-strip button.on')?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+    }
+  };
+  el.addEventListener('click', e => {
+    e.stopPropagation(); const b = e.target.closest('[data-pv]');
+    if (!b) { if (e.target === el || e.target.classList.contains('pv-stage')) closePhotoViewer(); return; }
+    const k = b.dataset.pv; if (k === 'close') closePhotoViewer(); else if (k === 'prev') show(i - 1); else if (k === 'next') show(i + 1); else if (k === 'go') show(+b.dataset.i);
+  });
+  let x0 = null, y0 = null;
+  el.addEventListener('touchstart', e => { if (e.touches.length === 1) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; } else x0 = null; }, { passive: true });
+  el.addEventListener('touchend', e => {
+    if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) show(i + (dx < 0 ? 1 : -1));
+  });
+  PV_KEY = e => { if (e.key === 'ArrowRight') { e.preventDefault(); show(i + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); show(i - 1); } else if (e.key === 'Escape') { e.preventDefault(); closePhotoViewer(); } };
+  document.addEventListener('keydown', PV_KEY);
+  document.body.appendChild(el); show(i); el.querySelector('.pv-x').focus();
+}
+let PV_KEY = null;
+function closePhotoViewer() { $('#pv')?.remove(); if (PV_KEY) document.removeEventListener('keydown', PV_KEY); PV_KEY = null; }
 
 function showNotifications() {
   const ns = myNotifications();
