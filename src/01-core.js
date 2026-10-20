@@ -50,7 +50,10 @@ const CK_ITEMS = [
 ];
 const PHOTO_SLOTS = [['frontal', 'Frontal'], ['traseira', 'Traseira'], ['lat_dir', 'Lateral direita'], ['lat_esq', 'Lateral esquerda'], ['painel', 'Painel com hodômetro']];
 const FUEL_LEVELS = ['Reserva', '1/4', '1/2', '3/4', 'Cheio'];
-const PURPOSES = ['Deslocamento para obra', 'Transporte de equipe', 'Transporte de materiais', 'Visita técnica', 'Serviço administrativo', 'Retorno à matriz'];
+const PURPOSES = ['Deslocamento para obra', 'Transporte de equipe', 'Transporte de materiais', 'Visita técnica', 'Serviço administrativo', 'Retorno à matriz', 'Atividade comercial', 'Visita a cliente'];
+// v1.14.0: tipo de motorista e uso do veículo (frota comercial)
+const DRV_KINDS = { obra: 'Motorista de obra', administrativo: 'Motorista administrativo (comercial)' };
+const FLEETS = { obra: 'Frota de obra', comercial: 'Frota comercial' };
 const PROBLEM_TYPES = ['Freios', 'Pneus', 'Motor', 'Elétrica / painel', 'Iluminação', 'Lataria / avaria', 'Vazamento', 'Suspensão / direção', 'Documentação', 'Outro'];
 const SEVERITY = { baixa: { l: 'Baixa', c: 'gray' }, media: { l: 'Média', c: 'warn' }, alta: { l: 'Alta', c: 'urg' }, critica: { l: 'Crítica', c: 'bad' } };
 const MAINT_ITEMS = ['Troca de óleo', 'Filtros', 'Alinhamento', 'Balanceamento', 'Pneus', 'Revisão', 'Correia dentada', 'Freios', 'Bateria', 'Outros'];

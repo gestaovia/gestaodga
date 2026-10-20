@@ -131,3 +131,53 @@ module.exports.v113 = async (p, ok, shots) => {
   if (fimg) { await fimg.click(); ok('UI fotos: abastecimento navega entre hodômetro e cupom', (await p.textContent('#pv-count')) === '2 de 2'); await p.keyboard.press('Escape'); }
   else ok('UI fotos: abastecimento navega entre hodômetro e cupom', false, 'foto do cupom não encontrada');
 };
+// v1.14.0: frota comercial e motorista administrativo
+module.exports.v114 = async (p, ok, shots) => {
+  const shot = async n => { if (shots) await p.screenshot({ path: `${shots}/${n}.png` }); };
+  const W = () => p.waitForTimeout(90);
+  // cadastro: tipo de motorista
+  await p.evaluate(() => { ADMSET(); CUR = S.users[0]; CLOUD.on = false; go('condutor', { id: 'd1' }); }); await W();
+  await p.click('[data-act="drv-edit"]'); await W(); await shot('adm-form');
+  ok('UI cadastro: campo Tipo de motorista', await p.isVisible('#dform-cad input[name="kind"][value="administrativo"]'));
+  await p.click('#dform-cad input[name="kind"][value="administrativo"] + span');
+  await p.evaluate(() => { const f = document.querySelector('#dform-cad'); f.cnh.value = '12345678901'; f.cnhExp.value = '2030-01-01'; f.email.value = 'u_d1@x.com'; });
+  await p.click('[data-act="drv-save"]'); await W();
+  const k = await p.evaluate(() => ({ kind: drv('d1').kind, nt: S.notifications.some(n => n.to === 'd1' && /administrativo/.test(n.text)), log: S.audit.some(a => /tipo: motorista administrativo/.test(a.text)) }));
+  ok('UI cadastro: salva administrativo, registra e avisa o condutor', k.kind === 'administrativo' && k.nt && k.log, k);
+  ok('UI condutor (gestão): sem aba Pontuação e com aviso de sem premiação', !/>Pontuação</.test(await p.innerHTML('.tabs')) && /não participa da premiação/.test(await p.textContent('#app'))); await shot('adm-condutor');
+  await p.evaluate(() => go('condutores', { f: 'adm' })); await W();
+  ok('UI condutores: filtro Administrativos', /Carla Dias/.test(await p.textContent('#app')) && /Ana Souza/.test(await p.textContent('#app')) && !/Bruno Lima/.test(await p.textContent('.cards')));
+  // premiação: fora do ranking, com aviso
+  await p.evaluate(() => { BON_P = null; go('bonificacao'); }); await W(); await shot('adm-premiacao');
+  const rk = await p.textContent('.vlist');
+  ok('UI premiação: administrativos fora do ranking, com aviso', !/Carla Dias|Ana Souza/.test(rk) && /motorista\(s\) administrativo\(s\)/.test(await p.textContent('#app')));
+  // veículo: uso frota comercial
+  await p.evaluate(() => go('veiculos')); await W();
+  await p.click('[data-act="veh-new"]'); await W();
+  ok('UI veículo: campo Uso do veículo', await p.isVisible('#vform input[name="fleet"][value="comercial"]'));
+  await p.evaluate(() => { const f = document.querySelector('#vform'); f.plate.value = 'NEW1C23'; f.brand.value = 'VW'; f.model.value = 'Polo'; f.year.value = '2025'; f.odometer.value = '100'; });
+  await p.click('#vform input[name="fleet"][value="comercial"] + span'); await p.click('[data-act="veh-save"]'); await W();
+  ok('UI veículo: salva frota comercial', await p.evaluate(() => vehicleByPlate('NEW1C23')?.fleet === 'comercial'));
+  await p.evaluate(() => go('veiculos', { f: 'comercial' })); await W(); await shot('adm-veiculos');
+  const vc = await p.textContent('#v-cards');
+  ok('UI veículos: filtro Frota comercial', /COM1A23/.test(vc.replace(/\W/g, '')) || /COM1A23|NEW1C23/.test(vc.replace(/[^A-Z0-9]/g, '')), vc.slice(0, 80));
+  // app do condutor administrativo
+  await p.evaluate(() => { const T = ADMSET(); CUR = S.users[3]; CLOUD.on = false; DRAFT = null;
+    S.custody.push({ id: 'cx', vehicleId: 'v3', driverId: 'd3', start: T('2026-10-20T07:00'), end: null, startKm: 5000, segments: [{ at: T('2026-10-20T07:00'), projectId: COM_ID }] }); go('inicio'); });
+  await p.setViewportSize({ width: 390, height: 860 }); await W(); await shot('adm-inicio');
+  const home = await p.textContent('#app');
+  ok('UI condutor administrativo: diário opcional, sem Pendente e sem pontuação', /Opcional/.test(home) && !/Pendente/.test(home) && !(await p.$('[data-act="my-score"]')) && /COMERCIAL/.test(home));
+  ok('UI condutor administrativo: ação principal é Entregar veículo', await p.evaluate(() => document.querySelector('.main-act')?.dataset.go === 'entregar'));
+  // recebimento: Comercial já selecionado
+  await p.evaluate(() => { const T = ADMSET(); CUR = S.users[3]; CLOUD.on = false; DRAFT = null; S.qrcodes.push({ id: 'q3', vehicleId: 'v3', token: 'VLK1-AAAAAAAAAAAAAAAA', active: true }); go('receber', { vid: 'v3' }); }); await W(); await shot('adm-receber');
+  const sel = await p.evaluate(() => ({ v: document.querySelector('#f-proj')?.value, opts: [...document.querySelectorAll('#f-proj option')].map(o => o.textContent.split(' – ')[0]) }));
+  ok('UI recebimento administrativo: Comercial já escolhido, obras disponíveis', sel.v === '00000000-0000-4000-a000-00000000c0e1' && sel.opts[0] === 'COMERCIAL' && sel.opts.includes('OB-01'), sel);
+  // motorista de obra não vê COMERCIAL
+  await p.evaluate(() => { ADMSET(); CUR = S.users[1]; CLOUD.on = false; DRAFT = null; go('receber', { vid: 'v1' }); }); await W();
+  const o2 = await p.evaluate(() => [...document.querySelectorAll('#f-proj option')].map(o => o.textContent));
+  ok('UI recebimento de obra: sem COMERCIAL na lista', !o2.some(x => /COMERCIAL/.test(x)) && o2.some(x => /OB-01/.test(x)), o2);
+  await p.setViewportSize({ width: 1280, height: 900 });
+  // indicadores: filtro de uso
+  await p.evaluate(() => { ADMSET(); CUR = S.users[0]; CLOUD.on = false; go('indicadores'); }); await W();
+  ok('UI indicadores: filtro Obra e comercial', await p.isVisible('#kf-u'));
+};

@@ -321,7 +321,16 @@ ACTIONS['notifs-read'] = () => { myNotifications().forEach(n => n.read = true); 
 
 /* ----- utilidades de formulário ----- */
 function formData(form) { const o = {}; new FormData(form).forEach((v, k) => { o[k] = typeof v === 'string' ? v.trim() : v; }); return o; }
-function projectOptions(sel) { return S.projects.filter(p => p.active).map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.code)} – ${esc(p.name)}</option>`).join(''); }
+// com = true: lista a obra "Comercial" em primeiro (motorista administrativo); false: esconde (motorista de obra)
+function projectOptions(sel, com = false) {
+  const o = p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.code)} – ${esc(p.name)}</option>`;
+  const cp = comProj(); const rest = S.projects.filter(p => p.active && !isComProj(p.id));
+  return (com && cp ? o(cp) : '') + rest.map(o).join('');
+}
+// situação do checklist diário de hoje (motorista administrativo: opcional, sem pendência)
+const dailyTag = (dly, did) => dly ? `<span class="st"><span class="dot ok"></span>${fmtTime(dly.at)}</span>` : isAdmDrv(did) ? '<span class="muted">Opcional</span>' : '<span class="st"><span class="dot warn"></span>Pendente</span>';
+const kindTag = d => isAdmDrv(d) ? pill('Administrativo') : '';
+const fleetTag = v => vFleet(v) === 'comercial' ? pill('Comercial', 'blue') : '';
 function ccOptions(sel) { return S.costCenters.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${c.code} – ${esc(c.name)}</option>`).join(''); }
 function purposeOptions(sel) { return PURPOSES.map(p => `<option ${p === sel ? 'selected' : ''}>${p}</option>`).join(''); }
 function driverOptions(sel, filter = () => true) { return S.drivers.filter(filter).map(d => `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${esc(d.name)}</option>`).join(''); }

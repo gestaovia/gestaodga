@@ -127,7 +127,7 @@ function nonBizDays(did, key, cs) {
   }).filter(Boolean);
 }
 // fila da gestão: todos os condutores no período
-const nbQueue = key => S.drivers.flatMap(dr => nonBizDays(dr.id, key)).sort((a, b) => a.d - b.d || (drv(a.did)?.name || '').localeCompare(drv(b.did)?.name || '', 'pt-BR'));
+const nbQueue = key => S.drivers.filter(dr => !isAdmDrv(dr)).flatMap(dr => nonBizDays(dr.id, key)).sort((a, b) => a.d - b.d || (drv(a.did)?.name || '').localeCompare(drv(b.did)?.name || '', 'pt-BR'));
 const nbPendingCount = key => nbQueue(key).filter(x => !x.decision).length;
 
 /* ----- pontuação e premiação de um condutor no período ----- */
@@ -228,12 +228,15 @@ function driverScore(did, key = curPeriod()) {
   const full = base + addv; const factor = bizN ? possN / bizN : 0;
   const bonus = eligible ? Math.round(full * factor * 100) / 100 : 0;
   const parts = Object.values(mods).map(m => ({ k: m.k, l: m.l, v: m.v, max: m.max, info: m.n ? `${m.n} desconto(s)${m.zero ? ' · zerada' : ''}` : 'Sem descontos' }));
+  // v1.14.0: motorista administrativo (frota comercial) não participa da premiação
+  if (isAdmDrv(did)) return { key, from, to, partial, P, total: 0, bonus: 0, eligible: false, noValid: false, adm: true, skipDays: [], rawDays: rawDays.length, mods, subtotal: 0, zeroed: 0, penalty: 0, adjust: 0, base: 0, add: 0, addBlocked: false, full: 0, factor: 0, possDays: 0, bizDays: biz.length, baseBizDays: biz.length, extraDays: 0, extraList: [], nbPending: 0,
+    occurrences: [], adjustments: adjs, parts: [], req: 0, done: 0, late: 0, absent: 0, pending: 0, exempt: 0, tier: null, fines: [] };
   return { key, from, to, partial, P, total, bonus, eligible, noValid, skipDays, rawDays: rawDays.length, mods, subtotal, zeroed, penalty, adjust, base, add: addv, addBlocked, full, factor, possDays: possN, bizDays: bizN, baseBizDays: biz.length, extraDays: extraDays.length, extraList: extraDays, nbPending,
     occurrences: occ, adjustments: adjs, parts, req: onTime + late + absent, done: onTime + late, late, absent, pending, exempt, tier: null, fines: [] };
 }
 function rankList(key) {
   const [from, to] = periodRange(key);
-  const list = S.drivers.filter(d => !d._ro || d.id === CUR?.driverId).filter(d => d.active !== false || S.custody.some(c => c.driverId === d.id && c.start < to && (!c.end || c.end > from)))
+  const list = S.drivers.filter(d => !d._ro || d.id === CUR?.driverId).filter(d => !isAdmDrv(d)).filter(d => d.active !== false || S.custody.some(c => c.driverId === d.id && c.start < to && (!c.end || c.end > from)))
     .map(d => ({ d, sc: driverScore(d.id, key) })).sort((a, b) => (b.sc.eligible - a.sc.eligible) || b.sc.total - a.sc.total || b.sc.bonus - a.sc.bonus || a.d.name.localeCompare(b.d.name, 'pt-BR'));
   let pos = 0; list.forEach((x, i) => { if (!i || x.sc.total !== list[i - 1].sc.total || x.sc.eligible !== list[i - 1].sc.eligible) pos = i + 1; x.pos = x.sc.eligible ? pos : null; }); // empate: mesma posição
   return list;
@@ -297,6 +300,7 @@ function statementHTML(sc, opts = {}) {
     ['5. Pontuação final (mínimo 0)', `<b>${nf(sc.score ?? sc.total)}</b>`]
   ];
   const total = sc.score ?? sc.total;
+  if (sc.adm) return `<div class="note">${ic('user')}<div><b>Motorista administrativo (frota comercial).</b> Não participa do programa de pontuação e premiação. Posses, checklists de recebimento e entrega, abastecimentos, pedágios e multas continuam controlados normalmente; o checklist diário é opcional.</div></div>`;
   if (sc.eligible === false) return `<div class="stack" style="gap:10px"><div class="row"><span class="avatar lg" style="background:var(--border2);color:var(--text3)">—</span><div><b>${opts.title || 'Pontuação do período'}</b><div class="tiny muted">${periodDates(key)}${sc.partial ? ' · em andamento' : ''}</div></div></div><div class="note">${sc.noValid ? `Nenhum dia com uso comprovado do veículo no período: não há pontuação nem premiação. O dia só conta com ${esc(dayRuleText(P))}.${skipHTML(sc)}` : 'Sem posse de veículo no período: não há pontuação nem premiação. A pontuação começa a contar no recebimento de um veículo.'}</div>${opts.manage ? adjHistory(sc.adjustments || [], opts) : ''}</div>`;
   const prem = [
     ['Valor base', `${money(P.baseValue)} × ${nf(total)} ÷ 100 = <b>${money(sc.base)}</b>`],
@@ -357,7 +361,7 @@ ACTIONS['bn-abonar-ok'] = a => {
 ACTIONS['bn-occ-new'] = a => {
   const key = a.dataset.p; if (closedGuard(key)) return; const P = bonusP(key); const [from, to] = periodRange(key);
   openModal({ title: 'Registrar ocorrência', body: `<form id="bn-form" class="form-grid">
-      ${a.dataset.did ? `<input type="hidden" name="driverId" value="${a.dataset.did}">` : `<label class="field full"><span>Condutor</span><select class="inp" name="driverId">${driverOptions('', d => !d._ro)}</select></label>`}
+      ${a.dataset.did ? `<input type="hidden" name="driverId" value="${a.dataset.did}">` : `<label class="field full"><span>Condutor</span><select class="inp" name="driverId">${driverOptions('', d => !d._ro && !isAdmDrv(d))}</select></label>`}
       <label class="field full"><span>Modalidade</span><select class="inp" name="modality" id="bn-mod"><option value="C">C · Abastecimento sem registro no aplicativo (extrato do cartão) ou foto ilegível (−${P.discC})</option><option value="A">A · Uso do veículo sem checklist de recebimento ou entrega (−${P.discA})</option><option value="B">B · Checklist diário (−${P.discAbsent})</option></select></label>
       <label class="field"><span>Data</span><input class="inp" type="date" name="date" value="${dateInput(Math.min(nowTs(), to - 1))}" min="${dateInput(from)}" max="${dateInput(to - 1)}"></label>
       <label class="field"><span>Veículo</span><select class="inp" name="vehicleId"><option value="">—</option>${S.vehicles.map(v => `<option value="${v.id}">${v.plate}</option>`).join('')}</select></label>
@@ -422,6 +426,7 @@ PAGES.bonificacao = {
     const medal = ['var(--u-green)', 'var(--text3)', 'var(--border)'];
     const totalPrev = sum(el, x => x.sc.bonus);
     return `<div class="stack">${tabs}<div class="page-head" style="margin:0">${nav}<button class="btn" data-go="relatorios" data-tab="premiacao">${ic('report')}Fechamento para o RH</button></div>
+      ${(() => { const na = S.drivers.filter(d => !d._ro && driverActive(d) && isAdmDrv(d)).length; return na ? `<p class="small muted">${na} motorista(s) administrativo(s) da frota comercial não participa(m) da premiação e não aparece(m) no ranking. <button class="link small" data-go="condutores" data-f="adm">Ver</button></p>` : ''; })()}
       ${nbn ? `<div class="note warn">${ic('cal')}<div><b>${nbn} checklist(s) diário(s) em fim de semana ou feriado</b> aguardando avaliação. <button class="link" data-go="bonificacao" data-tab="naouteis">Avaliar agora</button></div></div>` : ''}
       <div class="kpis">${kpi('Média da equipe', el.length ? nf(sum(el, x => x.sc.total) / el.length, 0) : '—', 'gauge', 'c-blue', '', 'pontos')}${kpi('Com posse no período', `${el.length}`, 'user')}${kpi(cur ? 'Prêmios previstos' : 'Prêmios do período', money(totalPrev), 'star', 'c-green')}${kpi('Dias úteis', daysBetween(...periodRange(key)).filter(isBizDay).length, 'cal', '', '', cur ? 'no período' : '')}</div>
       ${el.length ? `<div class="grid3">${el.slice(0, 3).map(({ d, sc, pos }, i) => `<div class="vcard" data-go="condutor" data-id="${d.id}" data-tab="score" style="align-items:center;text-align:center;border-top:4px solid ${medal[Math.min(2, pos - 1)]}"><span class="pill ${pos === 1 ? 'ok' : ''}">${pos}º lugar</span>${av(d, 'lg')}<b>${esc(d.name)}</b>${ring(sc.total)}<b style="font-size:1.15rem;color:${sc.bonus ? 'var(--text)' : 'var(--text3)'}">${money(sc.bonus)}</b><span class="tiny muted">${sc.possDays}/${sc.bizDays} dias com posse</span></div>`).join('')}</div>` : ''}

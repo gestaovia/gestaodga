@@ -168,4 +168,41 @@ t('fechamento guarda os dias não úteis considerados', () => {
   const r = statementRow(S.drivers[0], driverScore('d1', '2026-10'));
   return { ok: r.extraDays === 1 && r.extraList.length === 1 && r.possDays === 5 && r.bizDays === 20 };
 });
+
+// ---------- v1.14.0: frota comercial / motorista administrativo ----------
+t('administrativo: sem pontuação, sem prêmio e fora do ranking e do fechamento', () => {
+  const T = ADMSET(); CUR = S.users[0]; ADMCUST(T);
+  const sc = driverScore('d3', '2026-10'); const rk = rankList('2026-10').map(x => x.d.id); const cl = buildClosing('2026-10', false).rows.map(r => r.driverId);
+  return { ok: sc.adm === true && sc.eligible === false && sc.bonus === 0 && sc.occurrences.length === 0 && !rk.includes('d3') && !cl.includes('d3'), sc: { adm: sc.adm, el: sc.eligible, b: sc.bonus }, rk, cl };
+});
+t('administrativo: sábado com diário não entra na fila de dias não úteis', () => {
+  const T = ADMSET(); CUR = S.users[0]; ADMCUST(T);
+  return { ok: nbQueue('2026-10').every(x => x.did !== 'd3') && nonBizDays('d3', '2026-10').length === 1, q: nbQueue('2026-10').length };
+});
+t('administrativo: diário opcional (sem "sem checklist hoje"); motorista de obra continua pendente', () => {
+  const T = ADMSET(); CUR = S.users[0];
+  S.custody.push({ id: 'cx', vehicleId: 'v3', driverId: 'd3', start: T('2026-10-20T07:00'), end: null, startKm: 5000, segments: [{ at: T('2026-10-20T07:00'), projectId: COM_ID }] });
+  S.custody.push({ id: 'cy', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-20T07:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-20T07:00'), projectId: 'p1' }] });
+  const att = attentionItems().map(a => a.title);
+  return { ok: needsDaily(veh('v3')) === false && needsDaily(veh('v1')) === true && !att.some(x => /COM1A23 sem checklist/.test(x)), att };
+});
+t('obra COMERCIAL: aparece em 1º para o administrativo e some para o motorista de obra', () => {
+  ADMSET(); CUR = S.users[0];
+  const a = projectOptions('', true), o = projectOptions('', false);
+  return { ok: a.indexOf('COMERCIAL') > 0 && a.indexOf('COMERCIAL') < a.indexOf('OB-01') && !o.includes('COMERCIAL') && o.includes('OB-01') };
+});
+t('obra COMERCIAL é criada pela gestão quando falta e não duplica', () => {
+  FIX(); CUR = S.users[0]; ensureComProj(); ensureComProj();
+  const n = S.projects.filter(p => isComProj(p.id)).length; return { ok: n === 1 && comProj().id === COM_ID && comProj().active === true, n };
+});
+t('relatórios: coluna Tipo do condutor e Uso do veículo', () => {
+  const T = ADMSET(); CUR = S.users[0]; ADMCUST(T);
+  const R = monthReport('2026-10'); const c = R.drivers.find(x => x.condutor === 'Carla Dias'); const v = R.vehicles.find(x => x.placa === 'COM1A23');
+  const pc = R.projects.find(x => x.obra === 'COMERCIAL');
+  return { ok: c?.tipo === 'Administrativo' && c.diarios === '—' && c.pontuacao === null && c.premio === 0 && v?.uso === 'Comercial' && pc?.km === 600, c, uso: v?.uso, pc };
+});
+t('indicadores: filtro Frota comercial separa os veículos', () => {
+  ADMSET(); CUR = S.users[0]; KPI_F.u = 'comercial'; const a = S.vehicles.filter(kpiVehPass).map(v => v.plate); KPI_F.u = 'obra'; const b = S.vehicles.filter(kpiVehPass).map(v => v.plate); KPI_F.u = '';
+  return { ok: a.join() === 'COM1A23' && b.length === 2 && !b.includes('COM1A23'), a, b };
+});
 module.exports = C;

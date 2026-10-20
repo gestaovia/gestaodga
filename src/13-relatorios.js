@@ -42,7 +42,7 @@ function monthReport(key) {
   const vehicles = S.vehicles.map(v => {
     const f = r => r.vehicleId === v.id; const fuels = S.fuel.filter(x => x.vehicleId === v.id && inP(x.at));
     const kmv = kmInPeriod(from, to, c => c.vehicleId === v.id); const lit = sum(fuels, x => x.liters);
-    const o = { placa: v.plate, veiculo: `${v.brand} ${v.model}`, frota: v.ownership === 'locada' ? 'Locada' : 'Própria', km: Math.round(kmv), litros: lit, consumo: lit ? kmv / lit : null,
+    const o = { placa: v.plate, veiculo: `${v.brand} ${v.model}`, frota: v.ownership === 'locada' ? 'Locada' : 'Própria', uso: vFleet(v) === 'comercial' ? 'Comercial' : 'Obra', km: Math.round(kmv), litros: lit, consumo: lit ? kmv / lit : null,
       combustivel: sumK(f, 'Combustível'), pedagios: sumK(f, 'Pedágios'), multas: sumK(f, 'Multas'), manutencao: sumK(f, 'Manutenção'), documentacao: sumK(f, 'Documentação'), locacao: rentalInMonth(v, from, to),
       checklists: S.checklists.filter(k => k.vehicleId === v.id && inP(k.at)).length, ocorrencias: S.issues.filter(i => i.vehicleId === v.id && inP(i.at)).length };
     o.total = o.combustivel + o.pedagios + o.multas + o.manutencao + o.documentacao + o.locacao; o.custoKm = o.km > 0 ? o.total / o.km : null;
@@ -51,8 +51,9 @@ function monthReport(key) {
   const drivers = S.drivers.filter(d => !d._ro).map(d => {
     const f = r => r.driverId === d.id; const sc = driverScore(d.id, key);
     const fines = liveFines().filter(x => inP(x.at) && fineMatch(x).driverId === d.id);
-    const o = { condutor: d.name, km: Math.round(kmInPeriod(from, to, c => c.driverId === d.id)), posses: S.custody.filter(c => c.driverId === d.id && c.start < to && (!c.end || c.end > from)).length,
-      diarios: sc.req ? `${sc.done}/${sc.req}` : '—', atrasos: sc.late, possDias: sc.eligible ? `${sc.possDays}/${sc.bizDays}` : '—', abastecimentos: S.fuel.filter(x => x.driverId === d.id && inP(x.at)).length,
+    const adm = isAdmDrv(d);
+    const o = { condutor: d.name, tipo: adm ? 'Administrativo' : 'Obra', km: Math.round(kmInPeriod(from, to, c => c.driverId === d.id)), posses: S.custody.filter(c => c.driverId === d.id && c.start < to && (!c.end || c.end > from)).length,
+      diarios: !adm && sc.req ? `${sc.done}/${sc.req}` : '—', atrasos: adm ? null : sc.late, possDias: sc.eligible ? `${sc.possDays}/${sc.bizDays}` : '—', abastecimentos: S.fuel.filter(x => x.driverId === d.id && inP(x.at)).length,
       combustivel: sumK(f, 'Combustível'), pedagios: sumK(f, 'Pedágios'), multasQtd: fines.length, multas: sumK(f, 'Multas'), pontuacao: Math.round(sc.total), premio: 0 };
     sc.eligible ? (o.premio = sc.bonus) : (o.pontuacao = null);
     o.total = o.combustivel + o.pedagios + o.multas; return o;
@@ -70,8 +71,8 @@ function monthReport(key) {
   return { key, from, to, vehicles, drivers, projects };
 }
 const COLS = {
-  vehicles: [['placa', 'Placa'], ['veiculo', 'Veículo'], ['frota', 'Frota'], ['km', 'Km rodados', 'int'], ['litros', 'Litros', 'n1'], ['consumo', 'Km/l', 'n1'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multas', 'Multas', 'R$'], ['manutencao', 'Manutenção', 'R$'], ['documentacao', 'Documentação', 'R$'], ['locacao', 'Locação', 'R$'], ['total', 'Total', 'R$'], ['custoKm', 'Custo/km', 'R$'], ['checklists', 'Checklists', 'int'], ['ocorrencias', 'Ocorrências', 'int']],
-  drivers: [['condutor', 'Condutor'], ['km', 'Km rodados', 'int'], ['posses', 'Posses', 'int'], ['possDias', 'Dias c/ posse*'], ['diarios', 'Diários feitos*'], ['atrasos', 'Atrasos*', 'int'], ['abastecimentos', 'Abastec.', 'int'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multasQtd', 'Multas (qtd)', 'int'], ['multas', 'Multas', 'R$'], ['total', 'Total', 'R$'], ['pontuacao', 'Pontuação*', 'int'], ['premio', 'Prêmio*', 'R$']],
+  vehicles: [['placa', 'Placa'], ['veiculo', 'Veículo'], ['frota', 'Frota'], ['uso', 'Uso'], ['km', 'Km rodados', 'int'], ['litros', 'Litros', 'n1'], ['consumo', 'Km/l', 'n1'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multas', 'Multas', 'R$'], ['manutencao', 'Manutenção', 'R$'], ['documentacao', 'Documentação', 'R$'], ['locacao', 'Locação', 'R$'], ['total', 'Total', 'R$'], ['custoKm', 'Custo/km', 'R$'], ['checklists', 'Checklists', 'int'], ['ocorrencias', 'Ocorrências', 'int']],
+  drivers: [['condutor', 'Condutor'], ['tipo', 'Tipo'], ['km', 'Km rodados', 'int'], ['posses', 'Posses', 'int'], ['possDias', 'Dias c/ posse*'], ['diarios', 'Diários feitos*'], ['atrasos', 'Atrasos*', 'int'], ['abastecimentos', 'Abastec.', 'int'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multasQtd', 'Multas (qtd)', 'int'], ['multas', 'Multas', 'R$'], ['total', 'Total', 'R$'], ['pontuacao', 'Pontuação*', 'int'], ['premio', 'Prêmio*', 'R$']],
   projects: [['obra', 'Obra (CC)'], ['descricao', 'Descrição'], ['km', 'Km rodados', 'int'], ['veiculos', 'Veículos', 'int'], ['condutores', 'Condutores', 'int'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multas', 'Multas', 'R$'], ['manutencao', 'Manutenção', 'R$'], ['documentacao', 'Documentação', 'R$'], ['total', 'Total', 'R$']]
 };
 const REP_TITLES = { vehicles: 'Por veículo', drivers: 'Por condutor', projects: 'Por obra', premiacao: 'Fechamento da premiação' };

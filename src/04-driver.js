@@ -75,32 +75,35 @@ PAGES.inicio = {
     }).join('') + S.transfers.filter(t => t.status === 'negada' && t.toDriverId === d.id && nowTs() - (t.deniedAt || 0) < DAY).map(t => `<div class="note bad"><div>${esc(drv(t.fromDriverId)?.name || 'O condutor')} negou a entrega do ${plate(veh(t.vehicleId).plate)}: <b>${esc(t.denyReason || '')}</b></div></div>`).join('');
     const daily = v ? dailyDoneToday(v.id) : null;
     const seg = currentSegment(c);
-    const sc = driverScore(d.id);
+    const sc = driverScore(d.id); const adm = isAdmDrv(d); // v1.14.0: administrativo = sem premiação, diário opcional
     const unread = myNotifications().filter(n => !n.read).length;
     // a placa abre os dados do veículo (substitui o antigo botão "Meu veículo")
     const card = v ? `<div class="veh-card">
         <div class="top-line"><button type="button" class="plate-btn" data-go="meu_veiculo" aria-label="Ver dados do veículo ${esc(v.plate)}" title="Ver dados do veículo">${plate(v.plate, true)}<span class="plate-hint">${ic('chev')}</span></button>${stTag(vStatus(v))}</div>
         <dl class="pairs"><div><dt>Obra</dt><dd>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</dd></div><div><dt>Com você há</dt><dd>${dur(nowTs() - c.start)}</dd></div>
-        ${daily ? `<div class="ck-done"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot ok"></span>Feito às ${fmtTime(daily.at)}</span></dd></div>` : `<div class="ck-pend" role="status"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot bad"></span>Pendente</span></dd></div>`}<div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
+        ${daily ? `<div class="ck-done"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot ok"></span>Feito às ${fmtTime(daily.at)}</span></dd></div>` : adm ? `<div><dt>Checklist hoje</dt><dd><span class="muted">Opcional</span></dd></div>` : `<div class="ck-pend" role="status"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot bad"></span>Pendente</span></dd></div>`}<div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
       </div>` : `<div class="veh-card" style="align-items:center;text-align:center;padding:22px"><span class="avatar lg" style="background:var(--border2);color:var(--text3)">${ic('car')}</span><b>Nenhum veículo com você</b><span class="muted small">Escaneie o QR Code do carro para receber.</span></div>`;
     const dl = deadlineNow(); const [dh, dm] = dl.split(':');
     const dlTxt = `${+dh}h${dm && dm !== '00' ? dm : ''}`;
     // ação principal: com veículo, o checklist diário; sem veículo, escanear o QR Code para receber
-    const main = v
+    // motorista administrativo: diário opcional, então a ação principal com veículo é a entrega
+    const main = v && adm
+      ? `<button class="tile primary scan main-act" data-go="entregar" data-vid="${v.id}"><span class="ti">${ic('handoff')}</span><span><b>Entregar veículo</b><small>Checklist de entrega ao devolver</small></span></button>`
+      : v
       ? `<button class="tile primary scan main-act ${daily ? 'is-done' : ''}" data-go="diario" data-vid="${v.id}"><span class="ti">${ic('check')}</span><span><b>Checklist diário</b><small>${daily ? `Feito hoje às ${fmtTime(daily.at)}` : `Prazo até ${dlTxt}`}</small></span></button>`
       : `<button class="tile primary scan main-act" data-go="scanner"><span class="ti">${ic('qr')}</span><span><b>Escanear veículo</b><small>Ler o QR Code do carro</small></span></button>`;
     const dis = v ? '' : 'disabled';
     const T = (go, icon, t, s, cls = '') => `<button class="tile ${cls}" data-go="${go}" ${v ? `data-vid="${v.id}"` : ''} ${dis}><span class="ti">${ic(icon)}</span><span><b>${t}</b><small>${s}</small></span></button>`;
     return `<div class="drv drv-home">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div class="drv-who"><button type="button" data-go="perfil" aria-label="Meu perfil" style="border:0;background:none;padding:0;cursor:pointer">${av(CUR)}</button><div style="min-width:0"><p class="muted small">${cap(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}</p><h1>Olá, ${esc(d.name.split(' ')[0])}</h1></div></div>
-        <button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}</button></div>
+        ${adm ? '<span class="pill" title="Motorista administrativo: sem premiação">Frota comercial</span>' : `<button class="row" data-act="my-score" style="border:none;background:none;gap:8px;flex-wrap:nowrap" aria-label="Minha pontuação"><span class="small muted" style="text-align:right">Minha<br>pontuação</span>${sc.eligible ? ring(sc.total, true) : '<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span>'}</button>`}</div>
       ${v && openIssues(v.id).some(i => i.severity === 'critica' || !i.canRun) ? `<div class="note bad stack" style="gap:8px"><div><b>Problema crítico no ${esc(v.plate)}.</b> Se precisar de guincho, socorro ou houve acidente, acione o seguro.</div><button class="btn danger lg block" data-go="seguro" data-vid="${v.id}">${ic('shield')}Acionar seguro</button></div>` : ''}
       ${unread ? `<button class="note neu notif-line" data-act="notifs">${ic('bell')}<span style="flex:1;text-align:left">${unread === 1 ? 'Você tem 1 aviso novo' : `Você tem ${unread} avisos novos`}</span>${ic('chev')}</button>` : ''}
       ${banners}${card}${v ? `<div>${gpsChip()}</div>` : ''}
       ${main}
       <div class="tiles">
-        ${T('entregar', 'handoff', 'Entregar veículo', 'Devolver ou trocar')}
-        ${T('obra', 'pin', 'Trocar obra', seg ? `Agora: ${esc(prj(seg.projectId).code)}` : 'Sem obra')}
+        ${adm ? T('diario', 'check', 'Checklist diário', daily ? `Feito hoje às ${fmtTime(daily.at)}` : 'Opcional') : T('entregar', 'handoff', 'Entregar veículo', 'Devolver ou trocar')}
+        ${T('obra', 'pin', adm ? 'Obra ou comercial' : 'Trocar obra', seg ? `Agora: ${esc(prj(seg.projectId).code)}` : 'Sem obra')}
         ${T('problema', 'alert', 'Informar problema', 'Avaria ou defeito')}
         ${T('abastecer', 'fuel', 'Registrar abastecimento', 'Opcional')}
         ${T('documento', 'doc', 'Documento do veículo', 'CRLV para a fiscalização')}
@@ -217,7 +220,7 @@ PAGES.scan_result = {
             <button class="act" data-go="entregar" data-vid="${vid}" ${t ? `data-tid="${t.id}"` : ''}>${ic('handoff')}<span>Entregar veículo</span></button>
           </div>`;
       } else if (rc.ok) {
-        action = `<button class="btn pri lg block" data-go="receber" data-vid="${vid}">Receber este veículo</button><p class="muted small">Você fará o checklist de recebimento e escolherá a obra. A posse começa quando o checklist for concluído.</p>`;
+        action = `<button class="btn pri lg block" data-go="receber" data-vid="${vid}">Receber este veículo</button><p class="muted small">Você fará o checklist de recebimento e escolherá ${isAdmDrv(CUR.driverId) ? 'o uso (comercial ou obra)' : 'a obra'}. A posse começa quando o checklist for concluído.</p>`;
       } else if (rc.other) {
         const mineT = t && t.toDriverId === me;
         action = `<div class="note warn"><div><b>Veículo atualmente sob responsabilidade de ${esc(drv(rc.other.driverId).name)}.</b><br>Para receber este veículo, o atual responsável deve realizar a entrega.</div></div>
@@ -373,7 +376,9 @@ PAGES.receber = {
     const v = veh(vid); const rc = receiveCheck(v, CUR.driverId);
     if (!rc.ok) return `<div class="drv"><h1>Recebimento</h1><div class="note bad">${esc(rc.msg)}</div><button class="btn" data-go="scan_result" data-vid="${vid}">Voltar</button></div>`;
     if (!DRAFT || DRAFT.kind !== 'receber') {
-      newDraft('receber', vid, { projectId: '', ccId: '', purpose: PURPOSES[0] });
+      // motorista administrativo: já vem "Comercial" (pode trocar por uma obra)
+      const adm0 = isAdmDrv(CUR.driverId);
+      newDraft('receber', vid, { projectId: adm0 ? comProj()?.id || '' : '', ccId: '', purpose: adm0 ? 'Atividade comercial' : PURPOSES[0] });
       const t = rc.t;
       if (t && t.status === 'aguardando_recebimento') { setTransfer(t, 'recebimento_andamento', 'Novo condutor iniciou o checklist de recebimento'); log('transferencia', `${drv(t.toDriverId).name} iniciou o checklist de recebimento`, { vehicleId: vid, driverId: t.toDriverId }); save(); }
       captureLocation(v);
@@ -384,8 +389,9 @@ PAGES.receber = {
     return `<form class="drv" id="ckform" novalidate>
       <div><p class="label">Checklist completo · ${rc.t ? 'Troca de condutor' : first ? 'Primeiro recebimento' : 'Recebimento'}</p><h1>Recebimento do veículo</h1></div>
       ${tInfo}${ckHeader(v)}
-      <div class="panel"><div class="panel-h"><h3>Obra e finalidade</h3><span class="muted small">Obrigatório para iniciar a posse</span></div><div class="panel-b form-grid">
-        <label class="field full"><span>Obra</span><select class="inp" name="projectId" id="f-proj"><option value="">Selecione a obra</option>${projectOptions(DRAFT.projectId)}</select></label>
+      ${isAdmDrv(CUR.driverId) ? `<div class="panel"><div class="panel-h"><h3>Uso e finalidade</h3><span class="muted small">Frota comercial</span></div><div class="panel-b form-grid">
+        <label class="field full"><span>Uso</span><select class="inp" name="projectId" id="f-proj">${comProj() ? '' : '<option value="">Selecione</option>'}${projectOptions(DRAFT.projectId, true)}</select><small>Comercial, ou escolha a obra se for até uma.</small></label>` : `<div class="panel"><div class="panel-h"><h3>Obra e finalidade</h3><span class="muted small">Obrigatório para iniciar a posse</span></div><div class="panel-b form-grid">
+        <label class="field full"><span>Obra</span><select class="inp" name="projectId" id="f-proj"><option value="">Selecione a obra</option>${projectOptions(DRAFT.projectId)}</select></label>`}
         <label class="field"><span>Atividade ou finalidade</span><select class="inp" name="purpose">${purposeOptions(DRAFT.purpose)}</select></label>
       </div></div>
       ${refPanel()}
@@ -399,6 +405,7 @@ PAGES.receber = {
     f.addEventListener('submit', e => {
       e.preventDefault();
       const v = veh(vid); const { e: errs, km: k } = validateFull(v);
+      if (!DRAFT.projectId && isAdmDrv(CUR.driverId) && comProj()) DRAFT.projectId = comProj().id;
       if (!DRAFT.projectId) errs.unshift('Selecione a obra.');
       if (errs.length) return showErrors(errs);
       const rc = receiveCheck(v, CUR.driverId); if (!rc.ok) return showErrors([rc.msg]);
@@ -514,6 +521,7 @@ PAGES.diario = {
     return `<form class="drv" id="dform" novalidate>
       <div class="veh-card"><div class="top-line">${plate(v.plate, true)}<span class="pill ok">Veículo identificado</span></div>
         <dl class="kv"><dt>Condutor</dt><dd>${esc(drv(c.driverId).name)}</dd><dt>Obra atual</dt><dd>${seg ? projFull(seg.projectId) : projLabel(null)}</dd><dt>Data</dt><dd>${fmtDT(nowTs())}</dd></dl></div>
+      ${isAdmDrv(c.driverId) && !done ? '<div class="note">Para motorista administrativo o checklist diário é opcional: registre quando quiser informar a quilometragem ou um problema.</div>' : ''}
       ${done ? `<div class="note ok">Checklist de hoje já registrado às ${fmtTime(done.at)}. Você pode registrar outro se a situação mudou.</div>` : ''}
       <p class="big-q">O veículo está em condições normais de utilização?</p>
       <div class="yn"><button type="button" class="${sim ? 'on-ok' : ''}" data-act="d-ans" data-v="sim">Sim</button><button type="button" class="${nao ? 'on-bad' : ''}" data-act="d-ans" data-v="nao">Não</button></div>
@@ -525,7 +533,7 @@ PAGES.diario = {
       ${sim ? `<div class="panel"><div class="panel-b stack" style="gap:10px">
         <span class="field"><span>Confirmar obra</span></span>
         <div class="seg"><label><input type="radio" name="projOk" value="1" ${D.projOk === '1' ? 'checked' : ''}><span>Continuo em ${seg ? esc(prj(seg.projectId).code) : '—'}</span></label><label><input type="radio" name="projOk" value="0" ${D.projOk === '0' ? 'checked' : ''}><span>Mudar obra</span></label></div>
-        <div id="proj-change" ${D.projOk === '0' || !seg ? '' : 'hidden'}><select class="inp" name="projectId"><option value="">Selecione a obra</option>${projectOptions(D.projectId)}</select></div>
+        <div id="proj-change" ${D.projOk === '0' || !seg ? '' : 'hidden'}><select class="inp" name="projectId"><option value="">Selecione a obra</option>${projectOptions(D.projectId, isAdmDrv(c.driverId))}</select></div>
       </div></div>` : ''}
       ${nao ? `<div class="panel"><div class="panel-h"><h3>Descreva o problema</h3></div><div class="panel-b stack" style="gap:14px">${problemFields()}</div></div>` : ''}
       <div class="note bad" id="ck-err" hidden role="alert"></div>
@@ -549,7 +557,7 @@ PAGES.diario = {
       const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: n.getHours() * 60 + n.getMinutes() > h * 60 + m };
       S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv); kmJumpNote(v, c.driverId);
       // v1.13.0: diário em sábado, domingo ou feriado vai para a fila da gestão (Premiação › Dias não úteis)
-      if (!isBizDay(ck.at)) notify('gestao', `${drv(c.driverId)?.name || 'Condutor'} fez checklist diário do ${v.plate} em dia não útil (${nbShort(ck.at)}). Avalie se conta na premiação.`, { level: 'warn', link: { page: 'bonificacao', id: '' } });
+      if (!isBizDay(ck.at) && !isAdmDrv(c.driverId)) notify('gestao', `${drv(c.driverId)?.name || 'Condutor'} fez checklist diário do ${v.plate} em dia não útil (${nbShort(ck.at)}). Avalie se conta na premiação.`, { level: 'warn', link: { page: 'bonificacao', id: '' } });
       if (D.answer === 'sim') {
         log('checklist', `Checklist diário: condições normais (${nf(kmv)} km)${ck.late ? ' · fora do prazo' : ''}`, { vehicleId: v.id, driverId: c.driverId });
         const seg = currentSegment(c);
@@ -685,7 +693,7 @@ PAGES.obra = {
       <div class="veh-card"><div class="top-line">${plate(veh(vid).plate, true)}<span>Agora: <b>${seg ? esc(prj(seg.projectId).code) : 'sem obra'}</b></span></div>
         <div><p class="label" style="margin-bottom:4px">Histórico da posse</p>${c.segments.slice(-6).map(s => `<div class="row small"><span class="mono num">${fmtShort(s.at)}</span><span>${esc(prj(s.projectId).code)}</span><span class="muted">${esc(s.purpose || '')}</span></div>`).join('') || '<span class="muted small">Sem obra registrada</span>'}</div></div>
       <div class="panel"><div class="panel-b stack" style="gap:12px">
-        <label class="field"><span>Nova obra</span><select class="inp" name="projectId" id="o-proj" required><option value="">Selecione</option>${projectOptions('')}</select></label>
+        <label class="field"><span>${isAdmDrv(c.driverId) ? 'Nova obra ou comercial' : 'Nova obra'}</span><select class="inp" name="projectId" id="o-proj" required><option value="">Selecione</option>${projectOptions('', isAdmDrv(c.driverId))}</select></label>
         <label class="field"><span>Finalidade</span><select class="inp" name="purpose">${purposeOptions(seg?.purpose)}</select></label>
       </div></div>
       <div class="note bad" id="ck-err" hidden></div>
@@ -783,11 +791,11 @@ PAGES.meu_veiculo = {
         <dl class="kv"><dt>Veículo</dt><dd>${esc(v.brand)} ${esc(v.model)} · ${v.year}</dd>
         <dt>Posse iniciada</dt><dd>${fmtDT(c.start)}</dd><dt>Km inicial</dt><dd class="num">${km(c.startKm)}</dd><dt>Km atual</dt><dd class="num">${km(v.odometer)}</dd>
         <dt>Obra</dt><dd>${seg ? projFull(seg.projectId) : projLabel(null)}</dd>
-        <dt>Checklist hoje</dt><dd>${daily ? `Feito às ${fmtTime(daily.at)}` : '<span class="st"><span class="dot warn"></span>Pendente</span>'}</dd>
+        <dt>Checklist hoje</dt><dd>${daily ? `Feito às ${fmtTime(daily.at)}` : dailyTag(null, c.driverId)}</dd>
         <dt>Próxima manutenção</dt><dd>${mt.next ? `${esc(mt.next.p.item)} em ${nf(mt.next.s.remKm)} km ${mLvl(mt.next.s.lvl)}` : '—'}</dd></dl></div>
       ${t ? `<div class="note warn">Transferência em andamento para ${esc(drv(t.toDriverId).name)}: ${T_LABEL[t.status]}.</div>` : ''}
       <div class="actions">
-        ${!daily ? `<button class="act primary" data-go="diario" data-vid="${v.id}">${ic('check')}<span>Fazer checklist diário</span></button>` : ''}
+        ${!daily ? `<button class="act ${dailyRequired(c) ? 'primary' : ''}" data-go="diario" data-vid="${v.id}">${ic('check')}<span>Fazer checklist diário${dailyRequired(c) ? '' : '<small>Opcional</small>'}</span></button>` : ''}
         <button class="act" data-go="obra" data-vid="${v.id}">${ic('pin')}<span>Alterar obra<small>Sem encerrar a posse</small></span></button>
         <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Registrar abastecimento<small>Opcional</small></span></button>
         <button class="act" data-go="problema" data-vid="${v.id}">${ic('alert')}<span>Informar problema</span></button>

@@ -50,7 +50,26 @@ function dailyDoneToday(vid) {
   const c = activeCustody(vid); if (!c) return null;
   return S.checklists.find(k => k.vehicleId === vid && k.custodyId === c.id && ['diario', 'recebimento'].includes(k.type) && isToday(k.at)) || null;
 }
-function needsDaily(v) { const c = activeCustody(v.id); return !!c && !v.maintenance && !dailyDoneToday(v.id); }
+/* ----- frota comercial (v1.14.0) -----
+   Motorista administrativo (kind 'administrativo'): função comercial, não participa da premiação e o checklist diário
+   é opcional (recebimento e entrega continuam obrigatórios). O uso vai para a obra reservada "Comercial" (COM_ID),
+   que aparece como uma linha própria nos custos, pedágios, multas e indicadores; ele pode escolher uma obra se precisar.
+   Veículo com fleet 'comercial' = frota comercial (só classificação: qualquer condutor pode receber qualquer veículo). */
+const COM_ID = '00000000-0000-4000-a000-00000000c0e1';
+const isAdmDrv = d => (typeof d === 'string' ? drv(d) : d)?.kind === 'administrativo';
+const drvKind = d => isAdmDrv(d) ? 'administrativo' : 'obra';
+const vFleet = v => v?.fleet === 'comercial' ? 'comercial' : 'obra';
+const comProj = () => S.projects.find(p => p.id === COM_ID) || S.projects.find(p => p.system === 'comercial') || null;
+const isComProj = id => !!id && (id === COM_ID || prj(id)?.system === 'comercial');
+// a obra "Comercial" é criada pela migration; se faltar (banco antigo), a gestão cria ao entrar
+function ensureComProj() {
+  if (!isManager() || comProj()) return;
+  S.projects.push({ id: COM_ID, code: 'COMERCIAL', name: 'Frota comercial', ccId: null, lat: null, lng: null, active: true, system: 'comercial' });
+  log('config', 'Obra reservada COMERCIAL criada para a frota comercial', {}); save();
+}
+// diário obrigatório só para motorista de obra
+const dailyRequired = c => !!c && !isAdmDrv(c.driverId);
+function needsDaily(v) { const c = activeCustody(v.id); return !!c && !v.maintenance && dailyRequired(c) && !dailyDoneToday(v.id); }
 /* checklist completo = todos os itens avaliados e as 5 fotos */
 const ckComplete = k => !!k && CK_ITEMS.every(([x]) => k.items && k.items[x]) && PHOTO_SLOTS.every(([x]) => k.photos && k.photos[x] && !String(k.photos[x]).startsWith('removida'));
 /* a entrega pode ser só a confirmação rápida quando o recebimento daquela posse teve o checklist completo */

@@ -20,7 +20,7 @@
      no dia em que a leitura de km alcançou esse valor). Tarefas que ainda não venceram não contam. */
 
 let KPI_TREND = null;
-const KPI_F = { m: null, p: '', v: '', o: '' }; // mês AAAA-MM, obra ('_' = sem obra), veículo, tipo de frota ('propria' | 'locada')
+const KPI_F = { m: null, p: '', v: '', o: '', u: '' }; // mês AAAA-MM, obra ('_' = sem obra), veículo, tipo de frota ('propria' | 'locada'), uso ('obra' | 'comercial')
 const KPI_CATS = [['fuel', 'Combustível'], ['maint', 'Manutenção'], ['rent', 'Locação'], ['fines', 'Multas'], ['inc', 'Incidentes'], ['other', 'Outros']];
 const KIND_CAT = { 'Combustível': 'fuel', 'Manutenção': 'maint', 'Locação': 'rent', 'Multas': 'fines', 'Incidentes': 'inc', 'Pedágios': 'other', 'Documentação': 'other' };
 const CAT_VAR = Object.fromEntries(KPI_CATS.map(([k], i) => [k, `var(--viz-${i + 1})`]));
@@ -57,9 +57,9 @@ function incidentRows(from, to) {
 const kpiRows = (from, to) => [...periodCosts(from, to), ...rentalRows(from, to), ...incidentRows(from, to)].map(r => ({ ...r, cat: KIND_CAT[r.kind] || 'other' })).filter(r => +r.value);
 
 /* ---------- filtros ---------- */
-const kpiVehPass = v => !!v && (!KPI_F.v || v.id === KPI_F.v) && (!KPI_F.o || (KPI_F.o === 'locada') === isLeased(v));
+const kpiVehPass = v => !!v && (!KPI_F.v || v.id === KPI_F.v) && (!KPI_F.o || (KPI_F.o === 'locada') === isLeased(v)) && (!KPI_F.u || vFleet(v) === KPI_F.u);
 const kpiProjPass = pid => !KPI_F.p || (KPI_F.p === '_' ? !pid : pid === KPI_F.p);
-const kpiRowPass = r => (!KPI_F.v && !KPI_F.o ? true : kpiVehPass(veh(r.vehicleId))) && kpiProjPass(r.projectId);
+const kpiRowPass = r => (!KPI_F.v && !KPI_F.o && !KPI_F.u ? true : kpiVehPass(veh(r.vehicleId))) && kpiProjPass(r.projectId);
 
 /* km de cada veículo em cada obra no período (posse dividida pelo tempo em cada obra) */
 function kmSplit(from, to) {
@@ -263,10 +263,10 @@ PAGES.indicadores = {
     const sel = (id, all, opts) => `<select class="inp" id="${id}">${`<option value="">${all}</option>`}${opts}</select>`;
     const projOpts = S.projects.map(p => `<option value="${p.id}" ${KPI_F.p === p.id ? 'selected' : ''}>${esc(p.code)}</option>`).join('') + `<option value="_" ${KPI_F.p === '_' ? 'selected' : ''}>Sem obra</option>`;
     const vehOpts = S.vehicles.slice().sort((a, b) => a.plate.localeCompare(b.plate)).map(v => `<option value="${v.id}" ${KPI_F.v === v.id ? 'selected' : ''}>${esc(v.plate)}</option>`).join('');
-    const nFil = [KPI_F.p, KPI_F.v, KPI_F.o].filter(Boolean).length;
+    const nFil = [KPI_F.p, KPI_F.v, KPI_F.o, KPI_F.u].filter(Boolean).length;
     const head = `<div class="viz-filters">
       <div class="viz-month"><button class="icon-btn" data-act="kpi-m" data-d="-1" aria-label="Mês anterior" ${key <= first ? 'disabled' : ''}>${ic('back')}</button><b>${cap(monthName(key))}</b><button class="icon-btn" data-act="kpi-m" data-d="1" aria-label="Próximo mês" style="transform:scaleX(-1)" ${key >= curMonth ? 'disabled' : ''}>${ic('back')}</button>${partial ? '<span class="pill">parcial · até hoje</span>' : `<button class="btn sm" data-act="kpi-m" data-d="0">Mês atual</button>`}</div>
-      <div class="viz-sel">${sel('kf-p', 'Todas as obras', projOpts)}${sel('kf-v', 'Todos os veículos', vehOpts)}${sel('kf-o', 'Própria e locada', `<option value="propria" ${KPI_F.o === 'propria' ? 'selected' : ''}>Própria</option><option value="locada" ${KPI_F.o === 'locada' ? 'selected' : ''}>Locada</option>`)}${nFil ? '<button class="btn sm" data-act="kpi-clear">Limpar</button>' : ''}</div></div>`;
+      <div class="viz-sel">${sel('kf-p', 'Todas as obras', projOpts)}${sel('kf-v', 'Todos os veículos', vehOpts)}${sel('kf-o', 'Própria e locada', `<option value="propria" ${KPI_F.o === 'propria' ? 'selected' : ''}>Própria</option><option value="locada" ${KPI_F.o === 'locada' ? 'selected' : ''}>Locada</option>`)}${sel('kf-u', 'Obra e comercial', `<option value="obra" ${KPI_F.u === 'obra' ? 'selected' : ''}>Frota de obra</option><option value="comercial" ${KPI_F.u === 'comercial' ? 'selected' : ''}>Frota comercial</option>`)}${nFil ? '<button class="btn sm" data-act="kpi-clear">Limpar</button>' : ''}</div></div>`;
 
     /* 1 · resumo */
     const cards = `<div class="stats">
@@ -369,7 +369,7 @@ PAGES.indicadores = {
       <h2 class="viz-h">Histórico</h2>${trendPanel}</div>`;
   },
   mount() {
-    [['kf-p', 'p'], ['kf-v', 'v'], ['kf-o', 'o']].forEach(([id, k]) => $('#' + id)?.addEventListener('change', e => { KPI_F[k] = e.target.value; render(); }));
+    [['kf-p', 'p'], ['kf-v', 'v'], ['kf-o', 'o'], ['kf-u', 'u']].forEach(([id, k]) => $('#' + id)?.addEventListener('change', e => { KPI_F[k] = e.target.value; render(); }));
     $$('input[name=kby]').forEach(r => r.addEventListener('change', e => { ROUTE.p.by = e.target.value; render(); }));
     vizTipBind();
     const box = $('#trend-box');
@@ -378,7 +378,7 @@ PAGES.indicadores = {
 };
 const plateTxt = v => `<span class="mono">${esc(v.plate)}</span>`;
 ACTIONS['kpi-m'] = a => { const d = +a.dataset.d; const cur = monthKey(nowTs()); KPI_F.m = d === 0 ? cur : [shiftMonth(KPI_F.m || cur, d), cur].sort()[0]; render(); };
-ACTIONS['kpi-clear'] = () => { KPI_F.p = KPI_F.v = KPI_F.o = ''; render(); };
+ACTIONS['kpi-clear'] = () => { KPI_F.p = KPI_F.v = KPI_F.o = KPI_F.u = ''; render(); };
 
 /* incidentes sem custo: informar o valor (gestor/administrador) */
 ACTIONS['kpi-inc-list'] = () => {

@@ -26,3 +26,19 @@ window.NBSET = () => {
   S.checklists.push({ id: 'ks', type: 'diario', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T('2026-10-17T09:00'), serverAt: T('2026-10-17T09:00'), km: 15100, ok: true });
   return T;
 };
+// v1.14.0: frota comercial — obra reservada COMERCIAL, motorista administrativo (d3) e veículo comercial (v3)
+window.ADMSET = () => {
+  const T = FIX();
+  S.users.forEach(u => { u.email = u.email || u.id + '@x.com'; });
+  S.projects.push({ id: COM_ID, code: 'COMERCIAL', name: 'Frota comercial', ccId: null, active: true, system: 'comercial' });
+  S.drivers.push({ id: 'd3', name: 'Carla Dias', kind: 'administrativo', active: true, cnh: '12345678901', cnhCat: 'B', cnhExp: T('2030-01-01T00:00'), phone: '' });
+  S.users.push({ id: 'u_d3', name: 'Carla Dias', role: 'condutor', driverId: 'd3', active: true, email: 'carla@x.com' });
+  S.vehicles.push({ id: 'v3', plate: 'COM1A23', brand: 'Fiat', model: 'Cronos', year: 2025, fuelType: 'flex', avgKmL: 12, odometer: 5000, ownership: 'propria', fleet: 'comercial', active: true, tollTag: true });
+  docsOf(S.vehicles[2]);
+  return T;
+};
+window.ADMCUST = T => { // posse da Carla (administrativo) no v3 de 05/10 a 09/10 com diários e um sábado
+  S.checklists.push({ id: 'ra', type: 'recebimento', vehicleId: 'v3', driverId: 'd3', custodyId: 'ca', at: T('2026-10-05T08:00'), serverAt: T('2026-10-05T08:00'), km: 5000, items: {}, photos: {} });
+  S.custody.push({ id: 'ca', vehicleId: 'v3', driverId: 'd3', start: T('2026-10-05T08:00'), end: T('2026-10-10T18:00'), startKm: 5000, endKm: 5600, receiveChecklistId: 'ra', segments: [{ at: T('2026-10-05T08:00'), projectId: COM_ID }] });
+  ['06', '07', '10'].forEach((d, i) => S.checklists.push({ id: 'ka' + i, type: 'diario', vehicleId: 'v3', driverId: 'd3', custodyId: 'ca', at: T(`2026-10-${d}T09:00`), serverAt: T(`2026-10-${d}T09:00`), km: 5100 + i }));
+};

@@ -50,8 +50,8 @@ const SPEC = [
   { key: 'costCenters', table: 'cost_centers', cols: ['id', 'code', 'name', 'active'] },
   { key: 'projects', table: 'projects', cols: ['id', 'code', 'name', 'ccId', 'lat', 'lng', 'active'] },
   { key: 'workshops', table: 'workshops', cols: ['id', 'name', 'cnpj', 'phone', 'contact', 'email', 'address', 'city', 'services', 'active', 'createdAt'], ts: ['createdAt'] },
-  { key: 'drivers', table: 'drivers', cols: ['id', 'name', 'cnh', 'cnhCat', 'cnhExp', 'phone', 'active', 'inactiveAt', 'inactiveReason', 'telemetry', 'createdAt'], ts: ['cnhExp', 'inactiveAt', 'createdAt'] },
-  { key: 'vehicles', table: 'vehicles', cols: ['id', 'plate', 'brand', 'model', 'year', 'fuelType', 'avgKmL', 'odometer', 'tracker', 'seats', 'ownership', 'rental', 'docs', 'maintenance', 'maintenanceSince', 'maintenanceNote', 'active', 'traccarId', 'traccarUniqueId', 'insurance'], ts: ['maintenanceSince'] },
+  { key: 'drivers', table: 'drivers', cols: ['id', 'name', 'kind', 'cnh', 'cnhCat', 'cnhExp', 'phone', 'active', 'inactiveAt', 'inactiveReason', 'telemetry', 'createdAt'], ts: ['cnhExp', 'inactiveAt', 'createdAt'] },
+  { key: 'vehicles', table: 'vehicles', cols: ['id', 'plate', 'brand', 'model', 'year', 'fuelType', 'avgKmL', 'odometer', 'tracker', 'seats', 'ownership', 'fleet', 'rental', 'docs', 'maintenance', 'maintenanceSince', 'maintenanceNote', 'active', 'traccarId', 'traccarUniqueId', 'insurance'], ts: ['maintenanceSince'] },
   { key: 'qrcodes', table: 'qr_codes', cols: ['id', 'vehicleId', 'token', 'active', 'createdAt', 'revokedAt'], ts: ['createdAt', 'revokedAt'] },
   { key: 'custody', table: 'custody', cols: ['id', 'vehicleId', 'driverId', 'start', 'end', 'startKm', 'endKm', 'receiveChecklistId', 'deliverChecklistId', 'segments', 'closedReason', 'transferId', 'imported', 'serverStart', 'serverEnd'], ts: ['start', 'end', 'serverStart', 'serverEnd'], ren: { start: 'started_at', end: 'ended_at', serverStart: 'server_start_at', serverEnd: 'server_end_at' }, sort: 'start' },
   { key: 'transfers', table: 'transfers', cols: ['id', 'vehicleId', 'fromDriverId', 'toDriverId', 'status', 'requestedAt', 'forced', 'justification', 'requestedBy', 'fromCustodyId', 'toCustodyId', 'deliverChecklistId', 'receiveChecklistId', 'events'], ts: ['requestedAt'], sort: 'requestedAt' },
@@ -161,6 +161,7 @@ const CLOUD = {
       else if (back?.page && PAGES[back.page] && back.page !== 'login' && back.page !== 'senha') go(back.page, back.p || {}, { noPush: true });
       else go(homePage());
       try { autoCloseCheck(); } catch (e) { }
+      try { ensureComProj(); } catch (e) { }
       if (CUR.role === 'condutor') GPS.refresh();
       if (rec) toast(`${rec} registro(s) feito(s) sem conexão foram recuperados deste aparelho e estão sendo enviados.`);
     } catch (e) {

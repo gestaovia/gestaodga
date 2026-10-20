@@ -89,7 +89,7 @@ PAGES.dashboard = {
       <div class="panel"><div class="panel-h"><h2>Condutores em posse</h2><span class="pill blue">${inUse.length}</span></div>
         <div class="panel-b"><div class="cards">${inUse.map(c => { const v = veh(c.vehicleId); const d = drv(c.driverId); const seg = currentSegment(c); const dly = dailyDoneToday(v.id);
           return `<div class="vcard" data-go="condutor" data-id="${d.id}" style="gap:10px"><div class="person">${av(d, 'lg')}<div style="min-width:0"><b>${esc(d.name)}</b><small>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'} · ${dur(nowTs() - c.start)}</small></div></div>
-            <div class="foot" style="padding-top:8px">${plate(v.plate)}<span class="st small"><span class="dot ${dly ? 'ok' : 'warn'}"></span>${dly ? 'Checklist ok' : 'Sem checklist'}</span></div></div>`; }).join('') || empty('Nenhum veículo em uso.')}</div></div></div>
+            <div class="foot" style="padding-top:8px">${plate(v.plate)}${!dly && isAdmDrv(d) ? '<span class="small muted">Diário opcional</span>' : `<span class="st small"><span class="dot ${dly ? 'ok' : 'warn'}"></span>${dly ? 'Checklist ok' : 'Sem checklist'}</span>`}</div></div>`; }).join('') || empty('Nenhum veículo em uso.')}</div></div></div>
     </div>`;
   },
   mount() { buildMap($('#dash-map'), S.vehicles.filter(v => v.active)); },
@@ -111,7 +111,8 @@ const VFILTERS = {
   '': ['Todos', () => true], em_uso: ['Com condutor', v => !!activeCustody(v.id), 'vs-drv'], disponivel: ['Disponíveis', v => vStatus(v) === 'disponivel', 'vs-free'],
   problema: ['Com problema', v => ['bloqueado', 'pendencia'].includes(vStatus(v)), 'vs-prob'],
   manutencao: ['Manutenção', v => v.maintenance || vehicleMaint(v.id).worst === 'vencido'], alerta: ['Com alerta', v => openIssues(v.id).length > 0 || needsDaily(v) || !!(activeCustody(v.id) && !activeCustody(v.id).segments.length)],
-  propria: ['Próprios', v => v.ownership !== 'locada'], locada: ['Locados', v => v.ownership === 'locada']
+  propria: ['Próprios', v => v.ownership !== 'locada'], locada: ['Locados', v => v.ownership === 'locada'],
+  frota_obra: ['Frota de obra', v => vFleet(v) === 'obra'], comercial: ['Frota comercial', v => vFleet(v) === 'comercial']
 };
 let VSEARCH = '';
 function vehicleCard(v) {
@@ -121,7 +122,7 @@ function vehicleCard(v) {
     <div class="h"><div>${plate(v.plate)}<div class="model">${esc(v.brand)} ${esc(v.model)} · ${v.year}</div></div><span class="pill ${V_STATUS[st].c === 'gray' ? '' : V_STATUS[st].c}">${V_STATUS[st].l}</span></div>
     <div class="person">${c ? `${av(drv(c.driverId))}<div style="min-width:0"><b>${esc(drv(c.driverId).name)}</b><small>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</small></div>` : `<span class="avatar" style="background:var(--border2);color:var(--text3)">—</span><div><b class="muted">Sem condutor</b><small>${v.maintenance ? 'Na oficina' : 'No pátio'}</small></div>`}</div>
     ${nx ? `<div><div class="row small" style="justify-content:space-between;margin-bottom:5px"><span class="muted">${esc(nx.p.item)}</span><b class="num" style="color:${nx.s.lvl === 'normal' ? 'var(--text2)' : `var(--${{ atencao: 'yellow', urgente: 'orange', vencido: 'red' }[nx.s.lvl]})`}">${nx.s.remKm > 0 ? `${nf(nx.s.remKm)} km` : 'vencida'}</b></div><div class="bar ${M_LEVEL[nx.s.lvl].c}"><i style="width:${pct}%"></i></div></div>` : ''}
-    <div class="foot"><span class="tags">${ownTag(v)}${seatsTag(v)}${docBadge(v)}</span><span class="num">${km(v.odometer)}</span></div>
+    <div class="foot"><span class="tags">${ownTag(v)}${fleetTag(v)}${seatsTag(v)}${docBadge(v)}</span><span class="num">${km(v.odometer)}</span></div>
     ${rs ? `<div class="note ${rs.lvl === 'normal' ? '' : M_LEVEL[rs.lvl].c}" style="padding:7px 10px;font-size:.78rem">${ic('key')}<div>${rs.days < 0 ? `Devolução vencida há ${-rs.days} dias` : `Devolver ou renovar até ${fmtDate(v.rental.dueDate)}`}</div></div>` : ''}
   </div>`;
 }
@@ -154,7 +155,8 @@ function vehicleForm(v = {}) {
       <label class="field"><span>TAG de pedágio (Sem Parar)</span><select class="inp" name="tollTag"><option value="sim" ${v.tollTag !== false ? 'selected' : ''}>Tem TAG (fatura mensal)</option><option value="nao" ${v.tollTag === false ? 'selected' : ''}>Sem TAG (lançamento manual)</option></select></label>
       <label class="field"><span>Nº da TAG (opcional)</span><input class="inp num" name="tagNumber" value="${esc(v.tagNumber || '')}" placeholder="Ex.: 1234567890"></label>
     </div>
-    <div class="field"><span>Tipo de frota</span><div class="seg"><label><input type="radio" name="ownership" value="propria" ${!loc ? 'checked' : ''}><span>Frota própria</span></label><label><input type="radio" name="ownership" value="locada" ${loc ? 'checked' : ''}><span>${ic('key')} Locada</span></label></div></div>
+    <div class="form-grid"><div class="field"><span>Tipo de frota</span><div class="seg"><label><input type="radio" name="ownership" value="propria" ${!loc ? 'checked' : ''}><span>Frota própria</span></label><label><input type="radio" name="ownership" value="locada" ${loc ? 'checked' : ''}><span>${ic('key')} Locada</span></label></div></div>
+    <div class="field"><span>Uso do veículo</span><div class="seg"><label><input type="radio" name="fleet" value="obra" ${vFleet(v) === 'obra' ? 'checked' : ''}><span>Frota de obra</span></label><label><input type="radio" name="fleet" value="comercial" ${vFleet(v) === 'comercial' ? 'checked' : ''}><span>Frota comercial</span></label></div><small>Só classifica (filtros e indicadores); qualquer condutor pode receber.</small></div></div>
     <div id="rent-box" class="panel" style="box-shadow:none;background:var(--surface2)" ${loc ? '' : 'hidden'}><div class="panel-b form-grid" style="padding-top:14px">
       <label class="field"><span>Locadora</span><input class="inp" name="company" value="${esc(r.company || '')}"></label>
       <label class="field"><span>Nº do contrato</span><input class="inp" name="contract" value="${esc(r.contract || '')}"></label>
@@ -185,13 +187,13 @@ ACTIONS['veh-save'] = a => {
     if (parseDate(d.dueDate) <= parseDate(d.pickupDate)) return err('O prazo de devolução deve ser depois da retirada.');
     rental = { ...(edit?.rental || { history: [] }), company: d.company, contract: d.contract, pickupDate: parseDate(d.pickupDate), dueDate: parseDate(d.dueDate), monthly: numv(d.monthly) || 0, status: 'ativa' };
   }
-  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: edit?.tracker ?? false, ownership: d.ownership, rental, tollTag: d.tollTag !== 'nao', tagNumber: (d.tagNumber || '').replace(/\s/g, '') };
-  if (edit) { Object.assign(edit, fields); log('cadastro', `Cadastro do veículo atualizado por ${CUR.name}`, { vehicleId: edit.id }); save(); closeModal(); toast('Veículo atualizado.'); return render(); }
+  const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: edit?.tracker ?? false, ownership: d.ownership, fleet: d.fleet === 'comercial' ? 'comercial' : 'obra', rental, tollTag: d.tollTag !== 'nao', tagNumber: (d.tagNumber || '').replace(/\s/g, '') };
+  if (edit) { const fl = vFleet(edit) !== fields.fleet; Object.assign(edit, fields); log('cadastro', `Cadastro do veículo atualizado por ${CUR.name}${fl ? ` · uso: ${FLEETS[fields.fleet].toLowerCase()}` : ''}`, { vehicleId: edit.id }); save(); closeModal(); toast('Veículo atualizado.'); return render(); }
   const id = uid('veh');
   S.vehicles.push({ id, plate: p, ...fields, maintenance: false, active: true });
   S.qrcodes.push({ id: uid('qr'), vehicleId: id, token: newToken(), active: true, createdAt: nowTs() });
   [['Troca de óleo', 10000, 180], ['Filtros', 10000, 180], ['Alinhamento', 10000, null], ['Balanceamento', 10000, null], ['Revisão', 15000, 365]].forEach(([it, k, dd]) => S.plans.push({ id: uid('mp'), vehicleId: id, item: it, everyKm: k, everyDays: dd, lastKm: fields.odometer, lastDate: startOfDay(nowTs()) }));
-  log('cadastro', `Veículo ${p} cadastrado (${d.ownership === 'locada' ? 'locado' : 'frota própria'}) e QR Code gerado`, { vehicleId: id });
+  log('cadastro', `Veículo ${p} cadastrado (${d.ownership === 'locada' ? 'locado' : 'frota própria'} · ${FLEETS[fields.fleet].toLowerCase()}) e QR Code gerado`, { vehicleId: id });
   save(); closeModal(); go('veiculo', { id });
 };
 const newToken = () => { const a = new Uint32Array(16); crypto.getRandomValues(a); return 'VLK1-' + [...a].map(n => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[n % 32]).join(''); };
@@ -258,7 +260,7 @@ PAGES.veiculo = {
     if (tab === 'tf') body = `<div class="panel-h"><h3>Pedágios</h3></div>${tollTable(S.tolls.filter(x => x.plate === v.plate))}<div class="panel-h"><h3>Multas</h3></div>${fineTable(liveFines().filter(x => x.plate === v.plate))}`;
     return `<div class="stack">
       <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between;gap:16px">
-        <div class="row" style="gap:16px">${plate(v.plate, true)}<div><h2 style="font-size:1.15rem">${esc(v.brand)} ${esc(v.model)}</h2><div class="row" style="gap:8px;margin-top:6px">${stTag(st)}${ownTag(v)}${seatsTag(v)}${docBadge(v) ? `<button style="border:none;background:none;padding:0" data-go="veiculo" data-id="${id}" data-tab="docs">${docBadge(v)}</button>` : ''}<span class="muted small">${v.year} · ${v.fuelType}</span></div></div></div>
+        <div class="row" style="gap:16px">${plate(v.plate, true)}<div><h2 style="font-size:1.15rem">${esc(v.brand)} ${esc(v.model)}</h2><div class="row" style="gap:8px;margin-top:6px">${stTag(st)}${ownTag(v)}${fleetTag(v)}${seatsTag(v)}${docBadge(v) ? `<button style="border:none;background:none;padding:0" data-go="veiculo" data-id="${id}" data-tab="docs">${docBadge(v)}</button>` : ''}<span class="muted small">${v.year} · ${v.fuelType}</span></div></div></div>
         <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button><button class="btn" data-act="km-fix" data-id="${id}" title="Corrigir quilometragem digitada errada">${ic('gauge')}Corrigir km</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button><button class="btn" data-act="obra-fix" data-id="${c.id}" title="Corrigir a obra informada pelo condutor">${ic('pin')}Obra</button>` : ''}${M && !v.maintenance && openIssues(id).some(i => !i.canRun) ? `<button class="btn ok" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : M && !v.maintenance && !c ? `<button class="btn" data-go="checklist_full" data-vid="${id}" data-type="manut_entrada">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}${isOwner() ? `<button class="btn danger" data-act="veh-del" data-id="${id}" title="Excluir veículo (somente o proprietário)">${ic('trash')}Excluir</button>` : ''}</div>
       </div></div>
       ${iss.map(i => `<div class="note ${i.severity === 'critica' || !i.canRun ? 'bad' : 'warn'}">${ic('alert')}<div style="flex:1"><b>${esc(i.type)} · ${SEVERITY[i.severity].l}</b> — ${esc(i.desc)}<div class="small">${esc(drv(i.driverId)?.name || '')} · ${fmtShort(i.at)}</div></div>${i.severity === 'critica' || !i.canRun ? `<button class="btn sm danger" data-go="seguro" data-vid="${id}">${ic('shield')}Acionar seguro</button>` : ''}${M ? `<button class="btn sm" data-act="iss-resolve" data-id="${i.id}">Resolver</button>` : ''}</div>`).join('')}
@@ -271,7 +273,7 @@ PAGES.veiculo = {
       </div>
       <div class="grid3">
         <div class="panel"><div class="panel-h"><h3>Posse atual</h3>${c ? pill('Ativa', 'ok') : ''}</div><div class="panel-b">${c ? `<div class="person" style="margin-bottom:12px">${av(drv(c.driverId), 'lg')}<div><b>${drvLink(c.driverId)}</b><small>desde ${fmtDT(c.start)}</small></div></div>
-          <dl class="pairs"><div><dt>Obra</dt><dd>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</dd></div><div><dt>Obra · descrição</dt><dd class="small">${seg ? esc(prj(seg.projectId)?.name || '') : '—'}</dd></div><div><dt>Km inicial</dt><dd class="num">${nf(c.startKm)}</dd></div><div><dt>Checklist hoje</dt><dd>${dly ? `<span class="st"><span class="dot ok"></span>${fmtTime(dly.at)}</span>` : '<span class="st"><span class="dot warn"></span>Pendente</span>'}</dd></div></dl>`
+          <dl class="pairs"><div><dt>Obra</dt><dd>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</dd></div><div><dt>Obra · descrição</dt><dd class="small">${seg ? esc(prj(seg.projectId)?.name || '') : '—'}</dd></div><div><dt>Km inicial</dt><dd class="num">${nf(c.startKm)}</dd></div><div><dt>Checklist hoje</dt><dd>${dailyTag(dly, c.driverId)}</dd></div></dl>`
           : `<div class="empty" style="padding:20px">${v.maintenance ? `Em manutenção desde ${fmtDate(v.maintenanceSince)}<br><small>${esc(v.maintenanceNote || '')}</small>` : 'Sem condutor · no pátio'}</div>`}</div></div>
         <div class="panel"><div class="panel-h"><h3>Localização</h3><span class="muted small" id="route-info">${loc ? `${esc(loc.what)} · ${fmtShort(loc.at)}` : ''}</span></div><div class="panel-b">${loc ? '<div class="fleet-map sm" id="veh-map"></div>' : empty('Sem localização registrada.')}</div></div>
         ${v.ownership === 'locada' && v.rental ? `<div class="panel"><div class="panel-h"><h3>Contrato de locação</h3>${rs ? `<span class="pill ${M_LEVEL[rs.lvl].c === 'gray' ? 'ok' : M_LEVEL[rs.lvl].c}">${rs.days < 0 ? 'Vencida' : rs.days + ' dias'}</span>` : pill('Devolvida')}</div><div class="panel-b stack" style="gap:10px">
@@ -486,13 +488,13 @@ const driverActive = d => d.active !== false;
 PAGES.condutores = {
   title: 'Condutores',
   render({ f = 'ativos' }) {
-    const flt = { ativos: driverActive, inativos: d => !driverActive(d), todos: () => true };
+    const flt = { ativos: driverActive, obra: d => driverActive(d) && !isAdmDrv(d), adm: d => driverActive(d) && isAdmDrv(d), inativos: d => !driverActive(d), todos: () => true };
     const list = S.drivers.filter(flt[f] || flt.ativos).map(d => ({ d, c: driverCustodies(d.id)[0], sc: driverScore(d.id) })).sort((a, b) => (driverActive(b.d) ? 1 : 0) - (driverActive(a.d) ? 1 : 0) || (b.c ? 1 : 0) - (a.c ? 1 : 0) || b.sc.total - a.sc.total);
     const n = k => S.drivers.filter(flt[k]).length;
-    return `<div class="page-head"><div class="filters">${[['ativos', 'Ativos'], ['inativos', 'Inativos'], ['todos', 'Todos']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="condutores" data-f="${k}">${l}<span class="n">${n(k)}</span></button>`).join('')}</div>${isManager() ? `<button class="btn pri" data-act="drv-new">${ic('plus')}Cadastrar condutor</button>` : ''}</div>
+    return `<div class="page-head"><div class="filters">${[['ativos', 'Ativos'], ['obra', 'De obra'], ['adm', 'Administrativos'], ['inativos', 'Inativos'], ['todos', 'Todos']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="condutores" data-f="${k}">${l}<span class="n">${n(k)}</span></button>`).join('')}</div>${isManager() ? `<button class="btn pri" data-act="drv-new">${ic('plus')}Cadastrar condutor</button>` : ''}</div>
       <div class="cards">${list.map(({ d, c, sc }) => {
       const v = c && veh(c.vehicleId); const seg = currentSegment(c); const cnhDays = Math.floor((d.cnhExp - nowTs()) / DAY); const on = driverActive(d);
-      return `<div class="vcard" data-go="condutor" data-id="${d.id}" style="${on ? '' : 'opacity:.6'}"><div class="h"><div class="person"><span class="avatar lg" style="${on ? '' : 'background:var(--border2);color:var(--text3)'}">${initials(d.name)}</span><div><b>${esc(d.name)}</b><small>CNH ${d.cnhCat}${cnhDays < 0 ? ' · <span style="color:var(--red)">CNH vencida</span>' : cnhDays < 60 ? ` · <span style="color:var(--yellow)">vence em ${cnhDays} dias</span>` : ''}</small></div></div>${!on ? pill('Inativo') : sc.eligible ? ring(sc.total, true) : pill(sc.noValid ? 'sem uso comprovado' : 'sem posse no período')}</div>
+      return `<div class="vcard" data-go="condutor" data-id="${d.id}" style="${on ? '' : 'opacity:.6'}"><div class="h"><div class="person"><span class="avatar lg" style="${on ? '' : 'background:var(--border2);color:var(--text3)'}">${initials(d.name)}</span><div><b>${esc(d.name)}</b><small>CNH ${d.cnhCat}${cnhDays < 0 ? ' · <span style="color:var(--red)">CNH vencida</span>' : cnhDays < 60 ? ` · <span style="color:var(--yellow)">vence em ${cnhDays} dias</span>` : ''}</small></div></div>${!on ? pill('Inativo') : isAdmDrv(d) ? pill('Administrativo') : sc.eligible ? ring(sc.total, true) : pill(sc.noValid ? 'sem uso comprovado' : 'sem posse no período')}</div>
         <div class="foot">${v ? `${plate(v.plate)}<span class="small">${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</span>` : `<span class="muted">${on ? 'Sem veículo' : `Inativo desde ${fmtDate(d.inactiveAt)}`}</span><span></span>`}</div></div>`;
     }).join('') || empty('Nenhum condutor neste filtro.')}</div>`;
   }
@@ -501,6 +503,7 @@ function driverForm(d = {}) {
   const u = d.id ? S.users.find(x => x.driverId === d.id) : null;
   return `<form id="dform-cad" class="form-grid">
     <label class="field full"><span>Nome completo</span><input class="inp" name="name" value="${esc(d.name || '')}"></label>
+    <div class="field full"><span>Tipo de motorista</span><div class="seg"><label><input type="radio" name="kind" value="obra" ${!isAdmDrv(d) ? 'checked' : ''}><span>De obra · com premiação</span></label><label><input type="radio" name="kind" value="administrativo" ${isAdmDrv(d) ? 'checked' : ''}><span>Administrativo · comercial</span></label></div><small>Administrativo: não participa da premiação nem vai para obra (uso "Comercial"); faz checklist no recebimento e na entrega, o diário é opcional.</small></div>
     <label class="field"><span>Nº da CNH</span><input class="inp num" name="cnh" inputmode="numeric" maxlength="11" value="${esc(d.cnh || '')}"></label>
     <label class="field"><span>Categoria</span><select class="inp" name="cnhCat">${['A', 'B', 'AB', 'C', 'D', 'E'].map(c => `<option ${d.cnhCat === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     <label class="field"><span>Validade da CNH</span><input class="inp" type="date" name="cnhExp" value="${dateInput(d.cnhExp)}"></label>
@@ -519,16 +522,18 @@ ACTIONS['drv-save'] = a => {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email)) return err('Informe um e-mail válido para o acesso ao aplicativo.');
   const other = S.users.find(u => u.email.toLowerCase() === d.email.toLowerCase() && u.driverId !== edit?.id);
   if (other) return err('Este e-mail já está em uso por outro usuário.');
-  const fields = { name: d.name, cnh: d.cnh.replace(/\D/g, ''), cnhCat: d.cnhCat, cnhExp: parseDate(d.cnhExp), phone: d.phone };
+  const fields = { name: d.name, kind: d.kind === 'administrativo' ? 'administrativo' : 'obra', cnh: d.cnh.replace(/\D/g, ''), cnhCat: d.cnhCat, cnhExp: parseDate(d.cnhExp), phone: d.phone };
   if (edit) {
+    const kc = drvKind(edit) !== fields.kind;
     Object.assign(edit, fields);
-    log('cadastro', `Cadastro do condutor ${edit.name} atualizado por ${CUR.name}`, { driverId: edit.id }); save(); closeModal(); toast('Condutor atualizado.');
+    log('cadastro', `Cadastro do condutor ${edit.name} atualizado por ${CUR.name}${kc ? ` · tipo: ${DRV_KINDS[fields.kind].toLowerCase()}` : ''}`, { driverId: edit.id });
+    if (kc) notify(edit.id, fields.kind === 'administrativo' ? 'A gestão alterou seu cadastro para motorista administrativo (frota comercial): você não participa da premiação e o checklist diário passa a ser opcional.' : 'A gestão alterou seu cadastro para motorista de obra: você passa a participar da premiação e o checklist diário volta a ser obrigatório.', { link: { page: 'inicio' } }); save(); closeModal(); toast('Condutor atualizado.');
     if (APP_MODE === 'cloud') cloudDriverAccess(edit, d.email, false).then(render);
     return render();
   }
   const id = uid('drv');
   S.drivers.push({ id, ...fields, active: true, telemetry: { avarias: 0, harsh: 0, speeding: 0 }, createdAt: nowTs() });
-  log('cadastro', `Condutor ${d.name} cadastrado por ${CUR.name}`, { driverId: id });
+  log('cadastro', `Condutor ${d.name} cadastrado por ${CUR.name} (${DRV_KINDS[fields.kind].toLowerCase()})`, { driverId: id });
   save(); closeModal();
   if (APP_MODE === 'cloud') { a.disabled = true; cloudDriverAccess(drv(id), d.email, true).then(() => go('condutor', { id })); return; }
   toast('Condutor cadastrado e com acesso ao aplicativo.'); go('condutor', { id });
@@ -561,7 +566,8 @@ PAGES.condutor = {
     const fines = liveFines().filter(f => fineMatch(f).driverId === id);
     const iss = S.issues.filter(i => i.driverId === id);
     const avar = S.checklists.filter(k => k.driverId === id && (k.avarias || (k.items && Object.values(k.items).includes('ruim'))));
-    const tabs = [['posses', 'Posses'], ['score', 'Pontuação'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['multas', 'Multas'], ['ocor', 'Ocorrências'], ['tl', 'Histórico']];
+    const adm = isAdmDrv(d); if (adm && tab === 'score') tab = 'posses';
+    const tabs = [['posses', 'Posses'], ...(adm ? [] : [['score', 'Pontuação']]), ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['multas', 'Multas'], ['ocor', 'Ocorrências'], ['tl', 'Histórico']];
     let body = '';
     if (tab === 'posses') body = tbl(['Veículo', 'Início', 'Fim', 'Duração', '>Km', 'Obras'], cs.map(x => `<tr><td>${vehLink(x.vehicleId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td>${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || veh(x.vehicleId).odometer) - x.startKm)}</td><td>${custObras(x)}</td></tr>`));
     if (tab === 'ck') body = checklistTable(S.checklists.filter(k => k.driverId === id));
@@ -571,11 +577,12 @@ PAGES.condutor = {
     if (tab === 'score') body = `<div class="panel-b stack"><div class="row" style="gap:8px"><button class="icon-btn" data-go="condutor" data-id="${id}" data-tab="score" data-per="${shiftMonth(pk, -1)}" aria-label="Período anterior">${ic('back')}</button><b style="text-transform:capitalize;min-width:150px;text-align:center">${monthName(pk)}</b><button class="icon-btn" data-go="condutor" data-id="${id}" data-tab="score" data-per="${shiftMonth(pk, 1)}" aria-label="Próximo período" ${pk >= curPeriod() ? 'disabled' : ''}>${ic('chev')}</button>${clRow ? pill('fechado · valores guardados', 'ok') : ''}</div>${clRow ? statementHTML({ ...clRow, key: pk, total: clRow.score, partial: false, eligible: true }, { title: 'Extrato fechado' }) : statementHTML(sc, { manage: isManager(), did: id, key: pk, closed: !!closingOf(pk) })}</div>`;
     if (tab === 'tl') body = `<div class="panel-b" style="padding-top:12px">${timelineHTML(S.audit.filter(a => a.driverId === id).sort((a, b) => b.at - a.at).slice(0, 40))}</div>`;
     return `<div class="stack">
-      <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between"><div class="person">${av(d, 'lg')}<div><h2>${esc(d.name)}</h2><small>CNH ${d.cnhCat} · validade ${fmtDate(d.cnhExp)} · ${esc(d.phone)}</small></div></div>
+      <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between"><div class="person">${av(d, 'lg')}<div><h2>${esc(d.name)}</h2><small>CNH ${d.cnhCat} · validade ${fmtDate(d.cnhExp)} · ${esc(d.phone)}</small><div class="row" style="gap:6px;margin-top:6px">${pill(adm ? 'Administrativo · frota comercial' : 'Motorista de obra')}</div></div></div>
         <div class="row">${!driverActive(d) ? pill(`Inativo desde ${fmtDate(d.inactiveAt)}`) : c ? `${plate(veh(c.vehicleId).plate)}<span class="small muted">desde ${fmtShort(c.start)}</span>` : '<span class="pill">Sem veículo</span>'}
         ${isManager() ? `<button class="btn sm" data-act="drv-edit" data-id="${id}">${ic('edit')}Editar</button><button class="btn sm ${driverActive(d) ? 'danger' : 'pri'}" data-act="drv-toggle" data-id="${id}">${driverActive(d) ? 'Inativar' : 'Reativar'}</button>` : ''}</div></div></div>
       ${!driverActive(d) && d.inactiveReason ? `<div class="note">${ic('user')}<div>Motivo da inativação: ${esc(d.inactiveReason)}</div></div>` : ''}
-      <div class="kpis">${kpi('Pontuação do período', sc.eligible ? nf(sc.total, 0) : '—', 'trophy', sc.eligible ? 's-' + scoreTone(sc.total) : '', `data-go="condutor" data-id="${id}" data-tab="score"`)}${kpi('Prêmio previsto', money(sc.bonus), 'star', sc.bonus ? 'c-green' : '')}${kpi('Km no mês', nf(kmM), 'road')}${kpi('Dias com posse', `${sc.possDays}/${sc.bizDays}`, 'check')}${kpi('Multas', fines.length, 'fine', fines.length ? 'c-red' : '')}</div>
+      ${adm ? `<div class="note">${ic('user')}<div>Motorista administrativo (frota comercial): <b>não participa da premiação</b>. Posses, checklists de recebimento e entrega, abastecimentos, pedágios e multas continuam controlados; o checklist diário é opcional.</div></div>` : ''}
+      <div class="kpis">${adm ? `${kpi('Posses no mês', cs.filter(x => x.start < nowTs() && (!x.end || x.end >= from)).length, 'swap')}${kpi('Checklists no mês', S.checklists.filter(k => k.driverId === id && k.at >= from).length, 'check')}` : `${kpi('Pontuação do período', sc.eligible ? nf(sc.total, 0) : '—', 'trophy', sc.eligible ? 's-' + scoreTone(sc.total) : '', `data-go="condutor" data-id="${id}" data-tab="score"`)}${kpi('Prêmio previsto', money(sc.bonus), 'star', sc.bonus ? 'c-green' : '')}`}${kpi('Km no mês', nf(kmM), 'road')}${adm ? '' : kpi('Dias com posse', `${sc.possDays}/${sc.bizDays}`, 'check')}${kpi('Multas', fines.length, 'fine', fines.length ? 'c-red' : '')}</div>
       <div class="panel"><div class="panel-h"><div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-go="condutor" data-id="${id}" data-tab="${k}">${l}</button>`).join('')}</div></div>${body}</div></div>`;
   }
 };

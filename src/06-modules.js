@@ -232,7 +232,7 @@ PAGES.configuracoes = {
 const coordTxt = p => p.lat != null && p.lng != null ? `${nf(p.lat, 5)}, ${nf(p.lng, 5)}` : '<span class="muted">sem local</span>';
 function projectsTab() {
   const man = isManager();
-  const pRows = S.projects.slice().sort((a, b) => (b.active - a.active) || String(a.code).localeCompare(String(b.code), 'pt-BR', { numeric: true })).map(p => `<tr style="${p.active ? '' : 'opacity:.6'}"><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td><td class="small mono">${coordTxt(p)}</td><td>${S.vehicles.filter(v => currentSegment(activeCustody(v.id))?.projectId === p.id).map(v => plate(v.plate)).join(' ') || '<span class="muted">—</span>'}</td><td>${p.active ? pill('Ativa', 'ok') : pill('Encerrada')}</td><td class="r">${man ? `<button class="btn sm" data-act="prj-edit" data-id="${p.id}">${ic('edit')}Editar</button>` : ''}</td></tr>`);
+  const pRows = S.projects.slice().sort((a, b) => (b.active - a.active) || String(a.code).localeCompare(String(b.code), 'pt-BR', { numeric: true })).map(p => `<tr style="${p.active ? '' : 'opacity:.6'}"><td><b>${esc(p.code)}</b>${isComProj(p.id) ? ' ' + pill('Frota comercial', 'blue') : ''}</td><td>${esc(p.name)}${isComProj(p.id) ? '<div class="tiny muted">Uso dos motoristas administrativos. Pode trocar o número e a descrição; não pode ser encerrada.</div>' : ''}</td><td class="small mono">${coordTxt(p)}</td><td>${S.vehicles.filter(v => currentSegment(activeCustody(v.id))?.projectId === p.id).map(v => plate(v.plate)).join(' ') || '<span class="muted">—</span>'}</td><td>${p.active ? pill('Ativa', 'ok') : pill('Encerrada')}</td><td class="r">${man ? `<button class="btn sm" data-act="prj-edit" data-id="${p.id}">${ic('edit')}Editar</button>` : ''}</td></tr>`);
   return `<div class="panel-b row" style="justify-content:space-between"><div><h3>Obras</h3><p class="small muted">O número da obra é o centro de custo: todos os custos e relatórios são agrupados por ele.</p></div>${man ? `<button class="btn pri" data-act="prj-edit">${ic('plus')}Nova obra</button>` : ''}</div>
     ${tbl(['Obra (centro de custo)', 'Descrição', 'Local (lat, long)', 'Veículos agora', 'Situação', ''], pRows, 'Nenhuma obra cadastrada.')}
     <p class="panel-b small muted">O local da obra (latitude e longitude) aparece no mapa e serve para identificar quando o veículo está no canteiro. No Google Maps, clique com o botão direito no local e copie as coordenadas.</p>`;
@@ -244,7 +244,8 @@ ACTIONS['prj-edit'] = a => {
     body: `<form id="prj-form" class="form-grid"><label class="field"><span>Número da obra (centro de custo)</span><input class="inp" name="code" value="${esc(p?.code || '')}" placeholder="Ex.: 1015"></label>
       <label class="field full"><span>Descrição</span><input class="inp" name="name" value="${esc(p?.name || '')}" placeholder="Cliente, local ou escopo"></label>
       <label class="field full"><span>Local: latitude, longitude (opcional)</span><input class="inp mono" name="coords" value="${p && p.lat != null ? `${p.lat}, ${p.lng}` : ''}" placeholder="-22.90561, -47.06070" inputmode="text"><small><button type="button" class="link small" data-act="prj-here">Usar a minha localização atual</button></small></label>
-      ${p ? `<label class="field"><span>Situação</span><select class="inp" name="active"><option value="1" ${p.active ? 'selected' : ''}>Ativa</option><option value="0" ${!p.active ? 'selected' : ''}>Encerrada</option></select></label>` : ''}
+      ${p && isComProj(p.id) ? '<p class="note full small">Esta é a obra reservada para o uso <b>Comercial</b> (motoristas administrativos). Use o número do centro de custo comercial, se houver. Ela fica sempre ativa.</p>' : ''}
+      ${p && !isComProj(p.id) ? `<label class="field"><span>Situação</span><select class="inp" name="active"><option value="1" ${p.active ? 'selected' : ''}>Ativa</option><option value="0" ${!p.active ? 'selected' : ''}>Encerrada</option></select></label>` : ''}
       <p class="err full" id="prj-err"></p></form>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="prj-save" data-id="${p?.id || ''}">Salvar</button>`
   });
@@ -265,7 +266,7 @@ ACTIONS['prj-save'] = a => {
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return err('Coordenadas fora do intervalo válido.');
   }
   let p = a.dataset.id ? byId(S.projects, a.dataset.id) : null;
-  if (p) Object.assign(p, { code: d.code, name: d.name, lat, lng, active: d.active !== '0' });
+  if (p) Object.assign(p, { code: d.code, name: d.name, lat, lng, active: isComProj(p.id) || d.active !== '0' });
   else { p = { id: uid(), code: d.code, name: d.name, ccId: null, lat, lng, active: true }; S.projects.push(p); }
   log('config', `Obra ${d.code} ${a.dataset.id ? 'alterada' : 'cadastrada'} por ${CUR.name}`, {}); save(); closeModal(); toast('Obra salva.'); render();
 };
