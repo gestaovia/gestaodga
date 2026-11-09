@@ -99,8 +99,8 @@ function heldInDay(list, d, now) { // horas de posse no dia (sem contar duas vez
 
 /* ----- dias não úteis (v1.13.0) -----
    Todo checklist diário feito em sábado, domingo ou feriado por quem estava com o veículo entra na fila da gestão
-   (Premiação › Dias não úteis). Considerado: o dia entra como um dia útil a mais para aquele condutor, somando nos
-   dias com posse E nos dias úteis (ex.: 18/20 + 2 = 20/22). Não considerado: o dia não muda a premiação.
+   (Premiação › Dias não úteis). Considerado: o dia soma só nos dias com posse do condutor; os dias úteis do período
+   não mudam (v1.15.0; ex.: 18/20 + 1 = 19/20), e o fator fica limitado a 100% (20/20). Não considerado: o dia não muda a premiação.
    A decisão fica em bonus_adjustments (kind 'diaextra' ou 'diarecusa', key 'N:AAAA-MM-DD'); desfazer = cancelar o registro. */
 const NB_KINDS = { diaextra: 'Dia não útil considerado', diarecusa: 'Dia não útil não considerado' };
 const nbKey = d => `N:${dayKey(d)}`;
@@ -215,11 +215,12 @@ function driverScore(did, key = curPeriod()) {
   const total = Math.max(0, Math.min(100, subtotal - penalty + adjust));
   // premiação (item 7)
   // só tem pontuação quem teve ao menos um dia com posse válida (quem só recebeu e entregou não pontua)
-  // dias não úteis considerados pela gestão: somam nos dias com posse e nos dias úteis do condutor
+  // dias não úteis considerados pela gestão: somam só nos dias com posse (v1.15.0); os dias úteis do período não mudam.
+  // Limite: dias com posse não passam dos dias úteis (fator máximo de 100%).
   const nb = nonBizDays(did, key, cs);
   const extraDays = [...new Set(live.filter(a => a.kind === 'diaextra').map(a => nbDay(a.key)))].filter(d => d != null && d >= from && d < to && !isBizDay(d)).sort((a, b) => a - b);
   const nbPending = nb.filter(x => !x.decision).length;
-  const possN = possDays.length + extraDays.length; const bizN = biz.length + extraDays.length;
+  const bizN = biz.length; const possN = Math.min(bizN, possDays.length + extraDays.length);
   const eligible = possN > 0; const noValid = cs.length > 0 && !eligible;
   const base = (+P.baseValue || 0) * total / 100;
   // adicional de 100 pontos: vale para todos com 100 pontos; o de 90 a 99 continua exigindo os dias mínimos com posse
@@ -317,7 +318,7 @@ function statementHTML(sc, opts = {}) {
     <div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Descontos e evidências</h3>${opts.manage && !opts.closed ? `<button class="btn sm" data-act="bn-occ-new" data-did="${opts.did}" data-p="${key}">${ic('plus')}Ocorrência</button><button class="btn sm" data-act="bn-adj-new" data-did="${opts.did}" data-p="${key}">Ajuste manual</button>` : ''}</div>
       ${tbl(['Data', 'Mod.', 'Motivo e evidência', '>Pontos', ...(opts.manage ? [''] : [])], occ.map(o => occRow(o, { ...opts, key })), 'Nenhum desconto no período.')}</div>
     ${(sc.skipDays || []).length ? `<div class="note">${ic('cal')}<div>O dia só conta com ${esc(dayRuleText(P))}.${skipHTML(sc)}</div></div>` : ''}
-    ${sc.extraDays || sc.nbPending ? `<div class="note">${ic('cal')}<div>${sc.extraDays ? `Dia(s) não útil(eis) considerado(s) pela gestão: ${(sc.extraList || []).map(d => `<b class="num">${esc(nbShort(d))}</b>`).join(', ') || sc.extraDays}. Cada um conta como um dia útil a mais, nos dias com posse e nos dias úteis.` : ''}${sc.nbPending ? `${sc.extraDays ? '<br>' : ''}${sc.nbPending} checklist(s) diário(s) em fim de semana ou feriado aguardando avaliação da gestão.` : ''}</div></div>` : ''}
+    ${sc.extraDays || sc.nbPending ? `<div class="note">${ic('cal')}<div>${sc.extraDays ? `Dia(s) não útil(eis) considerado(s) pela gestão: ${(sc.extraList || []).map(d => `<b class="num">${esc(nbShort(d))}</b>`).join(', ') || sc.extraDays}. Cada um soma nos dias com posse; os dias úteis do período não mudam (máximo de 100%).` : ''}${sc.nbPending ? `${sc.extraDays ? '<br>' : ''}${sc.nbPending} checklist(s) diário(s) em fim de semana ou feriado aguardando avaliação da gestão.` : ''}</div></div>` : ''}
     ${sc.pending ? `<div class="note warn">${ic('check')}<div>Checklist diário de hoje ainda pendente: envie até ${P.deadline} para não ter desconto.</div></div>` : ''}
     <div class="grid2"><div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Cálculo da pontuação</h3></div>${kv(steps)}</div>
       <div class="panel" style="box-shadow:none"><div class="panel-h"><h3>Cálculo da premiação</h3></div>${kv(prem)}</div></div>
@@ -325,7 +326,7 @@ function statementHTML(sc, opts = {}) {
   </div>`;
 }
 const nbN = n => n > 1 ? `${n} dias não úteis` : `${n} dia não útil`;
-const nbExtraTxt = sc => `${nbN(sc.extraDays)} considerado${sc.extraDays > 1 ? 's' : ''} pela gestão (${(sc.extraList || []).map(nbShort).join(', ')}), somado${sc.extraDays > 1 ? 's' : ''} nos dois lados`;
+const nbExtraTxt = sc => `${nbN(sc.extraDays)} considerado${sc.extraDays > 1 ? 's' : ''} pela gestão (${(sc.extraList || []).map(nbShort).join(', ')}), somado${sc.extraDays > 1 ? 's' : ''} aos dias com posse`;
 function skipHTML(sc) {
   const l = sc.skipDays || []; if (!l.length) return '';
   return `<div class="small" style="margin-top:6px">Dia(s) com posse que não contaram${sc.partial ? ' (até agora)' : ''}:<br>${l.slice(0, 12).map(x => `<b class="num">${fmtDate(x.d)}</b> — ${esc(x.why)}${x.today ? ' <span class="muted">(hoje, ainda pode contar)</span>' : ''}`).join('<br>')}${l.length > 12 ? `<br>… e mais ${l.length - 12}` : ''}</div>`;
@@ -455,7 +456,7 @@ function nbView(key, M, closed) {
       <td class="r">${M && !closed ? `<button class="btn sm" data-act="bn-void" data-id="${a.id}">Desfazer</button>` : ''}</td>`; };
   const head = ['Condutor', 'Dia', 'Veículo e obra', 'Checklist diário', '>Posse no dia'];
   return `<div class="note">${ic('cal')}<div>Checklists diários feitos em <b>sábado, domingo ou feriado</b> por quem estava com o veículo entram aqui automaticamente.
-      <b>Considerar</b>: o dia entra como um dia útil a mais para o condutor, somando nos dias com posse e nos dias úteis dele (ex.: 18/20 + 1 = 19/21). <b>Não considerar</b>: o dia não muda a premiação (motivo obrigatório). O condutor recebe um aviso da decisão.${closed ? '<br><b>Período fechado:</b> as decisões não podem mais ser alteradas.' : ''}</div></div>
+      <b>Considerar</b>: o dia soma nos dias com posse do condutor; os dias úteis do período não mudam (ex.: 18/20 + 1 = 19/20, até o máximo de 20/20). <b>Não considerar</b>: o dia não muda a premiação (motivo obrigatório). O condutor recebe um aviso da decisão.${closed ? '<br><b>Período fechado:</b> as decisões não podem mais ser alteradas.' : ''}</div></div>
     <div class="panel"><div class="panel-h"><h2>Aguardando avaliação</h2>${pend.length ? pill(String(pend.length), 'warn') : ''}</div>
       ${tbl([...head, ''], pend.map(x => `<tr>${nbCells(x)}<td class="r">${btns(x)}</td></tr>`), 'Nenhum checklist em dia não útil aguardando avaliação neste período.')}</div>
     ${done.length ? `<div class="panel"><div class="panel-h"><h3>Avaliados</h3><span class="small muted">${done.filter(x => x.decision.kind === 'diaextra').length} considerado(s) · ${done.filter(x => x.decision.kind !== 'diaextra').length} não considerado(s)</span></div>
@@ -475,7 +476,7 @@ ACTIONS['nb-yes'] = a => {
   const before = driverScore(x.did, x.key); const tmp = { id: '_sim', driverId: x.did, period: x.key, kind: 'diaextra', key: nbKey(x.d) };
   (S.bonusAdj = S.bonusAdj || []).push(tmp); let after; try { after = driverScore(x.did, x.key); } finally { S.bonusAdj = S.bonusAdj.filter(y => y !== tmp); }
   openModal({ title: 'Considerar na premiação', body: `${nbHead(x)}
-      <div class="note ok"><div>O dia entra como um dia útil a mais para ${esc((drv(x.did)?.name || '').split(' ')[0])}: <b class="num">${before.possDays}/${before.bizDays}</b> → <b class="num">${after.possDays}/${after.bizDays}</b> dias (${nf((before.factor || 0) * 100, 1)}% → ${nf((after.factor || 0) * 100, 1)}%).<br>${before.partial ? 'Prêmio previsto até agora' : 'Premiação'}: ${money(before.bonus)} → <b>${money(after.bonus)}</b></div></div>
+      <div class="note ok"><div>O dia soma nos dias com posse de ${esc((drv(x.did)?.name || '').split(' ')[0])} (os dias úteis do período não mudam): <b class="num">${before.possDays}/${before.bizDays}</b> → <b class="num">${after.possDays}/${after.bizDays}</b> dias (${nf((before.factor || 0) * 100, 1)}% → ${nf((after.factor || 0) * 100, 1)}%).<br>${before.partial ? 'Prêmio previsto até agora' : 'Premiação'}: ${money(before.bonus)} → <b>${money(after.bonus)}</b>${after.possDays === before.possDays ? '<br>Os dias com posse já estão no máximo do período: considerar este dia não muda a premiação.' : ''}</div></div>
       <label class="field"><span>Observação (opcional)</span><textarea class="inp" id="nb-why" maxlength="300" placeholder="Ex.: plantão na obra autorizado pelo encarregado"></textarea></label><p class="err" id="nb-err"></p>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="nb-ok" data-v="1" data-did="${x.did}" data-day="${dayKey(x.d)}" data-p="${x.key}">Considerar</button>` });
 };
@@ -491,7 +492,7 @@ ACTIONS['nb-ok'] = a => {
   if (!yes && r.length < 5) return $('#nb-err').textContent = 'Informe o motivo (mínimo 5 letras).';
   if (yes && r.length < 5) r = 'Considerado pela gestão';
   newAdj({ driverId: x.did, period: x.key, kind: yes ? 'diaextra' : 'diarecusa', key: nbKey(x.d), at: x.d + 12 * 36e5, vehicleId: x.vehicleId, reason: r });
-  notify(x.did, yes ? `Seu checklist de ${nbShort(x.d)} (dia não útil) foi considerado na premiação: o dia conta como um dia útil a mais.`
+  notify(x.did, yes ? `Seu checklist de ${nbShort(x.d)} (dia não útil) foi considerado na premiação: o dia soma nos seus dias com posse.`
     : `Seu checklist de ${nbShort(x.d)} (dia não útil) não foi considerado na premiação: ${r}`, { level: yes ? 'ok' : 'info', link: { page: 'inicio' } });
   save(); closeModal(); toast(yes ? 'Dia considerado na premiação.' : 'Dia não considerado.'); render();
 };

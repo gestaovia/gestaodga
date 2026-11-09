@@ -1,0 +1,43 @@
+gestaovia v1.15.0 — alterações em relação à v1.14.0
+
+Como aplicar no GitHub: envie os arquivos desta pasta mantendo as mesmas pastas (substituindo os que já existem)
+e apague do repositório os arquivos da lista "Apagar", se houver.
+
+Arquivos para enviar:
+  [novo] .gitignore
+  [novo] .nojekyll
+  [alterado] CHANGELOG.md
+  [novo] README.md
+  [alterado] VERSION
+  [alterado] dist/index.html
+  [alterado] index.html
+  [alterado] manifest.webmanifest
+  [alterado] src/04-driver.js
+  [alterado] src/05-manager.js
+  [alterado] src/12-perfil.js
+  [alterado] src/14-premiacao.js
+  [alterado] src/15-oficinas-seguro.js
+  [alterado] src/18-indicadores.js
+  [alterado] tests/cases.js
+  [alterado] tests/fixture.js
+  [alterado] tests/ui.js
+
+Apagar do repositório (pastas inteiras — são restos da pasta .git que subiram junto num upload, não fazem parte do sistema):
+  info/
+  logs/
+  objects/
+  refs/
+
+O que mudou:
+— 09/11/2026
+- **Premiação: dia não útil considerado soma só nos dias com posse.** Quando a gestão considera um checklist feito em sábado, domingo ou feriado, o dia entra só nos **dias com posse** do condutor; os **dias úteis do período não mudam** (ex.: 18/20 + 1 = 19/20). Antes, o dia somava também nos dias úteis (18/20 + 1 = 19/21) e aumentava a quantidade de dias para a premiação completa.
+  - O fator de participação fica limitado a 100% (no máximo 20/20): quem já tem todos os dias úteis contados não ganha além disso. A simulação de "Considerar" avisa quando o dia não muda a premiação.
+  - Vale já para o período em aberto (26/10 a 25/11); períodos fechados não mudam.
+- **Envio para manutenção sem checklist:** o botão **Enviar p/ manutenção** (tela do veículo) passa a ser só um registro, para qualquer veículo: oficina credenciada, motivo e quilometragem. O checklist completo continua na **saída** da manutenção.
+  - Veículo com condutor: a posse é encerrada na hora, sem checklist de entrega e sem desconto na premiação, e o condutor é avisado (como já era para veículo bloqueado). Transferência em andamento do veículo é cancelada e o novo condutor é avisado.
+  - Os indicadores de utilização continuam contando os dias na oficina (a saída guarda a data de entrada).
+- **Cancelar transferência forçada (ação administrativa):** gestor de frota e administrador desfazem uma transferência forçada enquanto ninguém recebeu o veículo depois dela. Botão **Cancelar transf. forçada** na tela do veículo, na tela da transferência e na janela **Transferências › Transferência forçada** (lista das que podem ser canceladas).
+  - A posse do condutor anterior é **reaberta** (continua a mesma posse, como se não tivesse sido encerrada); a liberação para o novo condutor é cancelada; o desconto de −50 pts (se marcado) é cancelado. Motivo obrigatório; vai para a linha do tempo, para a transferência e os dois condutores são avisados.
+  - Não é possível cancelar depois que o novo condutor recebeu, com o veículo em manutenção, com o condutor anterior inativo ou já com outro veículo, nem quando o desconto caiu em período da premiação já fechado (o administrador reabre antes).
+- Testes: 91 casos (`UI=1 node tests/run.js`).
+- Banco: sem migration nesta versão (campos novos ficam em `extra`). Compatível com a v1.14.0.

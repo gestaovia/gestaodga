@@ -42,3 +42,13 @@ window.ADMCUST = T => { // posse da Carla (administrativo) no v3 de 05/10 a 09/1
   S.custody.push({ id: 'ca', vehicleId: 'v3', driverId: 'd3', start: T('2026-10-05T08:00'), end: T('2026-10-10T18:00'), startKm: 5000, endKm: 5600, receiveChecklistId: 'ra', segments: [{ at: T('2026-10-05T08:00'), projectId: COM_ID }] });
   ['06', '07', '10'].forEach((d, i) => S.checklists.push({ id: 'ka' + i, type: 'diario', vehicleId: 'v3', driverId: 'd3', custodyId: 'ca', at: T(`2026-10-${d}T09:00`), serverAt: T(`2026-10-${d}T09:00`), km: 5100 + i }));
 };
+// v1.15.0: oficina para o envio à manutenção e transferência forçada desfeita
+window.MSET = () => { const T = FIX(); CUR = S.users[0]; S.workshops = [{ id: 'w1', name: 'Oficina Central', active: true }]; return T; };
+window.MSEND = (vid, why) => { ACTIONS['maint-direct']({ dataset: { id: vid } }); $('#md-form [name=workshopId]').value = 'w1'; $('#md-form [name=shop]').value = why; ACTIONS['maint-direct-ok']({ dataset: { id: vid } }); };
+window.FSET = (T, disc) => { // posse da Ana (d1) encerrada por transferência forçada, liberada para o Bruno (d2)
+  S.checklists.push({ id: 'r1', type: 'recebimento', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T('2026-10-19T08:00'), serverAt: T('2026-10-19T08:00'), km: 15000, items: {}, photos: {} });
+  S.custody.push({ id: 'c1', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-19T08:00'), end: T('2026-10-20T09:00'), startKm: 15000, endKm: 15100, receiveChecklistId: 'r1', segments: [{ at: T('2026-10-19T08:00'), projectId: 'p1' }], closedReason: 'forcada', forcedDiscount: disc, transferId: 'tf' });
+  if (disc) S.custody[0].forcedAdjId = newAdj({ driverId: 'd1', period: '2026-10', kind: 'ocorrencia', modality: 'A', points: 50, at: T('2026-10-20T09:00'), vehicleId: 'v1', reason: 'Transferência forçada' }).id;
+  S.transfers.push({ id: 'tf', vehicleId: 'v1', fromDriverId: 'd1', toDriverId: 'd2', status: 'aguardando_recebimento', requestedAt: T('2026-10-20T09:00'), forced: true, justification: 'teste', discount: disc, fromCustodyId: 'c1', events: [] });
+};
+window.FUNDO = why => { ACTIONS['forced-undo']({ dataset: { id: 'v1' } }); const w = $('#fu-why'); if (w) w.value = why; ACTIONS['forced-undo-ok']({ dataset: { id: 'v1' } }); };

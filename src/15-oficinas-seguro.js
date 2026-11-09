@@ -85,7 +85,7 @@ ACTIONS['mnt-entry-save'] = a => {
 };
 ACTIONS['mnt-entry-cancel'] = a => {
   const v = veh(a.dataset.id);
-  openModal({ title: `Excluir entrada em manutenção · ${v.plate}`, body: `<p>Use quando a entrada foi registrada por engano. O veículo volta ao pátio, sem registro de serviço. O checklist de entrada continua no histórico.</p><label class="field"><span>Motivo</span><textarea class="inp" id="mc-why"></textarea></label><p class="err" id="mc-err"></p>`,
+  openModal({ title: `Excluir entrada em manutenção · ${v.plate}`, body: `<p>Use quando a entrada foi registrada por engano. O veículo volta ao pátio, sem registro de serviço. O registro da entrada continua no histórico do veículo.</p><label class="field"><span>Motivo</span><textarea class="inp" id="mc-why"></textarea></label><p class="err" id="mc-err"></p>`,
     foot: `<button class="btn" data-act="modal-close">Voltar</button><button class="btn danger" data-act="mnt-entry-cancel-ok" data-id="${v.id}">Excluir entrada</button>` });
 };
 ACTIONS['mnt-entry-cancel-ok'] = a => {

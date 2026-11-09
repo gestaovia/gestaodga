@@ -261,7 +261,7 @@ PAGES.veiculo = {
     return `<div class="stack">
       <div class="panel"><div class="panel-b row" style="padding:16px 18px;justify-content:space-between;gap:16px">
         <div class="row" style="gap:16px">${plate(v.plate, true)}<div><h2 style="font-size:1.15rem">${esc(v.brand)} ${esc(v.model)}</h2><div class="row" style="gap:8px;margin-top:6px">${stTag(st)}${ownTag(v)}${fleetTag(v)}${seatsTag(v)}${docBadge(v) ? `<button style="border:none;background:none;padding:0" data-go="veiculo" data-id="${id}" data-tab="docs">${docBadge(v)}</button>` : ''}<span class="muted small">${v.year} · ${v.fuelType}</span></div></div></div>
-        <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button><button class="btn" data-act="km-fix" data-id="${id}" title="Corrigir quilometragem digitada errada">${ic('gauge')}Corrigir km</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button><button class="btn" data-act="obra-fix" data-id="${c.id}" title="Corrigir a obra informada pelo condutor">${ic('pin')}Obra</button>` : ''}${M && !v.maintenance && openIssues(id).some(i => !i.canRun) ? `<button class="btn ok" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : M && !v.maintenance && !c ? `<button class="btn" data-go="checklist_full" data-vid="${id}" data-type="manut_entrada">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}${isOwner() ? `<button class="btn danger" data-act="veh-del" data-id="${id}" title="Excluir veículo (somente o proprietário)">${ic('trash')}Excluir</button>` : ''}</div>
+        <div class="row">${M ? `<button class="btn" data-act="veh-edit" data-id="${id}">${ic('edit')}Editar</button><button class="btn" data-act="km-fix" data-id="${id}" title="Corrigir quilometragem digitada errada">${ic('gauge')}Corrigir km</button>` : ''}${M && c ? `<button class="btn" data-go="forcar" data-vid="${id}">${ic('swap')}Transferir</button><button class="btn" data-act="obra-fix" data-id="${c.id}" title="Corrigir a obra informada pelo condutor">${ic('pin')}Obra</button>` : ''}${M && !c && forcedUndo(id) ? `<button class="btn" data-act="forced-undo" data-id="${id}" title="Desfazer a transferência forçada (ação administrativa)">${ic('swap')}Cancelar transf. forçada</button>` : ''}${M && !v.maintenance ? `<button class="btn ${openIssues(id).some(i => !i.canRun) ? 'ok' : ''}" data-act="maint-direct" data-id="${id}">${ic('wrench')}Enviar p/ manutenção</button>` : ''}${M && v.maintenance ? `<button class="btn pri" data-go="checklist_full" data-vid="${id}" data-type="manut_saida">${ic('wrench')}Saída de manutenção</button>` : ''}${isOwner() ? `<button class="btn danger" data-act="veh-del" data-id="${id}" title="Excluir veículo (somente o proprietário)">${ic('trash')}Excluir</button>` : ''}</div>
       </div></div>
       ${iss.map(i => `<div class="note ${i.severity === 'critica' || !i.canRun ? 'bad' : 'warn'}">${ic('alert')}<div style="flex:1"><b>${esc(i.type)} · ${SEVERITY[i.severity].l}</b> — ${esc(i.desc)}<div class="small">${esc(drv(i.driverId)?.name || '')} · ${fmtShort(i.at)}</div></div>${i.severity === 'critica' || !i.canRun ? `<button class="btn sm danger" data-go="seguro" data-vid="${id}">${ic('shield')}Acionar seguro</button>` : ''}${M ? `<button class="btn sm" data-act="iss-resolve" data-id="${i.id}">Resolver</button>` : ''}</div>`).join('')}
       ${t ? `<div class="note warn">${ic('swap')}<div style="flex:1"><b>Transferência:</b> ${esc(drv(t.fromDriverId).name)} → ${esc(drv(t.toDriverId).name)} · ${T_LABEL[t.status]}</div><button class="btn sm" data-go="transferencia" data-id="${t.id}">Abrir</button></div>` : ''}
@@ -443,6 +443,59 @@ PAGES.forcar = {
   }
 };
 
+/* ---------- Cancelar transferência forçada (v1.15.0 · ação administrativa) ----------
+   Desfaz a transferência forçada enquanto ninguém recebeu o veículo depois dela: a posse do condutor anterior é
+   reaberta (continua a mesma posse, como se não tivesse sido encerrada), a liberação para o novo condutor é cancelada
+   e o desconto na premiação (se houve) é cancelado. Motivo obrigatório; fica na linha do tempo e na transferência. */
+function forcedUndo(vid) {
+  const v = veh(vid); if (!v || activeCustody(vid) || v.maintenance) return null;
+  const c = S.custody.filter(x => x.vehicleId === vid && x.end).sort((a, b) => b.end - a.end)[0];
+  if (!c || c.closedReason !== 'forcada') return null;
+  if (S.custody.some(x => x.vehicleId === vid && x !== c && x.start >= c.end)) return null; // alguém já recebeu depois
+  const t = c.transferId ? byId(S.transfers, c.transferId) : null;
+  if (t && !['aguardando_recebimento', 'recebimento_andamento', 'cancelada'].includes(t.status)) return null;
+  return { c, t, v };
+}
+// impedimentos para reabrir a posse (mostrados na janela)
+function forcedUndoBlock(u) {
+  const d = drv(u.c.driverId);
+  if (!d || d.active === false) return `${d ? esc(d.name) : 'O condutor'} está inativo: reative o cadastro antes de devolver o veículo.`;
+  if (S.settings.oneVehiclePerDriver && driverCustodies(d.id).length) return `${esc(d.name)} já está com o ${esc(veh(driverCustodies(d.id)[0].vehicleId).plate)}.`;
+  const adj = u.c.forcedAdjId ? byId(S.bonusAdj || [], u.c.forcedAdjId) : null;
+  if (adj && !adj.voidedAt && closingOf(adj.period)) return `O desconto foi lançado no período ${periodDates(adj.period)}, que já está fechado. O administrador precisa reabrir o período antes.`;
+  return null;
+}
+const forcedUndoList = () => S.vehicles.map(v => forcedUndo(v.id)).filter(Boolean);
+ACTIONS['forced-undo'] = a => {
+  if (!isManager()) return toast('Exclusivo para a gestão.');
+  const u = forcedUndo(a.dataset.id); if (!u) return toast('Esta transferência forçada não pode mais ser cancelada.');
+  const { c, t, v } = u; const d = drv(c.driverId); const blk = forcedUndoBlock(u);
+  const adj = c.forcedAdjId ? byId(S.bonusAdj || [], c.forcedAdjId) : null;
+  openModal({ title: `Cancelar transferência forçada · ${v.plate}`, body: `<dl class="dl"><dt>Condutor anterior</dt><dd>${esc(d?.name || '—')}</dd><dt>Encerrada em</dt><dd>${fmtDT(c.end)}${c.endKm != null ? ` · ${nf(c.endKm)} km` : ''}</dd><dt>Liberada para</dt><dd>${t && t.status !== 'cancelada' ? esc(drv(t.toDriverId)?.name || '—') : 'Pátio'}</dd></dl>
+      <div class="note warn">${ic('alert')}<div>Ação administrativa: a posse de <b>${esc(d?.name || '')}</b> é reaberta, como se não tivesse sido encerrada${t && t.status !== 'cancelada' ? `, a liberação para ${esc(drv(t.toDriverId)?.name || '')} é cancelada` : ''}${adj && !adj.voidedAt ? ` e o desconto de ${nf(Math.abs(adj.points))} pts na premiação é cancelado` : ''}. Os condutores são avisados.</div></div>
+      ${blk ? `<div class="note bad">${blk}</div>` : `<label class="field"><span>Motivo</span><textarea class="inp" id="fu-why" maxlength="300" placeholder="Ex.: transferência feita no veículo errado"></textarea></label><p class="err" id="fu-err"></p>`}`,
+    foot: `<button class="btn" data-act="modal-close">Voltar</button>${blk ? '' : `<button class="btn danger" data-act="forced-undo-ok" data-id="${v.id}">Cancelar transferência forçada</button>`}` });
+};
+ACTIONS['forced-undo-ok'] = a => {
+  const u = forcedUndo(a.dataset.id); if (!u || !isManager()) { closeModal(); return toast('Esta transferência forçada não pode mais ser cancelada.'); }
+  const blk = forcedUndoBlock(u); if (blk) { closeModal(); return toast(blk.replace(/<[^>]+>/g, '')); }
+  const r = ($('#fu-why')?.value || '').trim(); if (r.length < 5) return $('#fu-err').textContent = 'Informe o motivo (pelo menos 5 caracteres).';
+  const { c, t, v } = u; const now = nowTs();
+  (c.forcedUndo = c.forcedUndo || []).push({ at: now, by: CUR.id, reason: r, end: c.end, endKm: c.endKm, discount: !!c.forcedDiscount, transferId: c.transferId || null });
+  c.end = null; c.endKm = null; c.closedReason = null; c.transferId = null; c.forcedDiscount = null;
+  const adj = c.forcedAdjId ? byId(S.bonusAdj || [], c.forcedAdjId) : null;
+  if (adj && !adj.voidedAt) { adj.voidedAt = now; adj.voidedBy = CUR.id; adj.voidReason = `Transferência forçada cancelada: ${r}`; }
+  c.forcedAdjId = null;
+  if (t && t.status !== 'cancelada') {
+    t.cancelReason = r; t.cancelledAt = now; t.cancelledBy = CUR.id;
+    setTransfer(t, 'cancelada', `Transferência forçada cancelada por ${CUR.name}: ${r}`);
+    notify(t.toDriverId, `A gestão cancelou a liberação do ${v.plate} para você: ${r}`, { level: 'warn' });
+  } else if (t) t.events.push({ at: now, status: 'cancelada', by: CUR.id, note: `Transferência forçada desfeita por ${CUR.name}: ${r}` });
+  log('transferencia_forcada', `Transferência forçada cancelada por ${CUR.name}: posse de ${drv(c.driverId)?.name || ''} reaberta${adj ? ', desconto na premiação cancelado' : ''}. Motivo: ${r}`, { vehicleId: v.id, driverId: c.driverId });
+  notify(c.driverId, `A gestão cancelou a transferência forçada do ${v.plate}: o veículo voltou para a sua posse${adj ? ' e o desconto na premiação foi cancelado' : ''}.`, { level: 'ok', link: { page: 'inicio' } });
+  save(); closeModal(); toast('Transferência forçada cancelada. Posse reaberta.'); render();
+};
+
 /* ---------- Transferências ---------- */
 PAGES.transferencias = {
   title: 'Transferências',
@@ -459,10 +512,11 @@ PAGES.transferencias = {
       <div class="panel">${tbl(['Veículo', 'De', '', 'Para', 'Situação', 'Solicitada'], rows, 'Nenhuma transferência neste filtro.')}</div>`;
   }
 };
-ACTIONS['force-pick'] = () => openModal({
-  title: 'Transferência forçada', body: `<label class="field"><span>Veículo em uso</span><select class="inp" id="fp-v">${S.vehicles.filter(v => activeCustody(v.id)).map(v => `<option value="${v.id}">${v.plate} — ${esc(drv(activeCustody(v.id).driverId).name)}</option>`).join('')}</select></label>`,
-  foot: '<button class="btn" data-act="modal-close">Cancelar</button><button class="btn pri" data-act="force-go">Continuar</button>'
-});
+ACTIONS['force-pick'] = () => { const inUse = S.vehicles.filter(v => activeCustody(v.id)); openModal({
+  title: 'Transferência forçada', body: `${inUse.length ? `<label class="field"><span>Veículo em uso</span><select class="inp" id="fp-v">${inUse.map(v => `<option value="${v.id}">${v.plate} — ${esc(drv(activeCustody(v.id).driverId).name)}</option>`).join('')}</select></label>` : '<div class="note">Nenhum veículo em uso no momento.</div>'}
+    ${(() => { const L = forcedUndoList(); return L.length ? `<div class="panel" style="margin-top:14px"><div class="panel-h"><h3>Cancelar transferência forçada</h3></div><div class="vlist">${L.map(u => `<div class="vrow" style="grid-template-columns:auto 1fr auto">${plate(u.v.plate)}<div class="who2"><b>${esc(drv(u.c.driverId)?.name || '—')}</b><small>encerrada em ${fmtShort(u.c.end)} · ${u.t && u.t.status !== 'cancelada' ? 'liberada para ' + esc(drv(u.t.toDriverId)?.name || '—') : 'no pátio'}</small></div><button class="btn sm danger" data-act="forced-undo" data-id="${u.v.id}">Cancelar</button></div>`).join('')}</div></div>` : ''; })()}`,
+  foot: `<button class="btn" data-act="modal-close">${inUse.length ? 'Cancelar' : 'Fechar'}</button>${inUse.length ? '<button class="btn pri" data-act="force-go">Continuar</button>' : ''}`
+}); };
 ACTIONS['force-go'] = () => { const vid = $('#fp-v').value; closeModal(); go('forcar', { vid }); };
 
 /* ---------- Checklists ---------- */

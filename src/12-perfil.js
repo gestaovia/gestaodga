@@ -134,16 +134,18 @@ PAGES.meus_checklists = {
   }
 };
 
-/* ---------- Gestão: veículo bloqueado vai direto para a manutenção ---------- */
+/* ---------- Gestão: envio para manutenção (v1.15.0: registro simples para qualquer veículo, sem checklist) ----------
+   Só registra a entrada e atualiza o veículo (oficina, motivo, km). Se houver posse, ela é encerrada sem checklist de
+   entrega (motivo 'manutencao', sem desconto na premiação) e o condutor é avisado. A saída continua com o checklist. */
 ACTIONS['maint-direct'] = a => {
   const v = veh(a.dataset.id); const c = activeCustody(v.id); const iss = openIssues(v.id).filter(i => !i.canRun);
   openModal({
     title: `Enviar ${v.plate} para manutenção`,
-    body: `<p>${iss.length ? `Problema informado: <b>${esc(iss[0].type)}</b> — ${esc(iss[0].desc)}` : 'Veículo bloqueado.'}</p>
-      ${c ? `<div class="note warn">${ic('alert')}<div>A posse de <b>${esc(drv(c.driverId)?.name || '')}</b> será encerrada agora, sem checklist de entrega. O condutor é avisado.</div></div>` : ''}
+    body: `${iss.length ? `<p>Problema informado: <b>${esc(iss[0].type)}</b> — ${esc(iss[0].desc)}</p>` : ''}<p class="small muted">Registro da entrada na oficina, sem checklist. O checklist completo é feito na saída da manutenção.</p>
+      ${c ? `<div class="note warn">${ic('alert')}<div>A posse de <b>${esc(drv(c.driverId)?.name || '')}</b> será encerrada agora, sem checklist de entrega e sem desconto na premiação. O condutor é avisado.</div></div>` : ''}
       ${activeShops().length ? '' : noShopsNote()}<form id="md-form" class="form-grid">
         <label class="field full"><span>Oficina credenciada</span>${shopSelect('workshopId', '')}</label>
-        <label class="field full"><span>Motivo</span><input class="inp" name="shop" placeholder="Ex.: freios sem resposta" value="${esc(iss[0] ? iss[0].type : '')}"></label>
+        <label class="field full"><span>Motivo</span><input class="inp" name="shop" placeholder="Ex.: revisão dos 120 mil km" value="${esc(iss[0] ? iss[0].type : '')}"></label>
         <label class="field"><span>Quilometragem</span><input class="inp num" name="km" inputmode="numeric" value="${nf(Math.max(v.odometer || 0, lastRecordedKm(v.id)))}"></label>
         <p class="err full" id="md-err"></p></form>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="maint-direct-ok" data-id="${v.id}">Enviar para manutenção</button>`
@@ -156,14 +158,16 @@ ACTIONS['maint-direct-ok'] = a => {
   if ((d.shop || '').length < 3) return err('Informe o motivo.');
   const k = parseInt(onlyDigits(d.km), 10) || v.odometer;
   const c = activeCustody(v.id);
+  const t = activeTransfer(v.id); // transferência em andamento (inclusive liberação de transferência forçada) é cancelada
+  if (t) { setTransfer(t, 'cancelada', 'Veículo enviado para manutenção pela gestão'); if (t.toDriverId && t.toDriverId !== c?.driverId) notify(t.toDriverId, `A transferência do ${v.plate} para você foi cancelada: o veículo foi enviado para manutenção.`, { level: 'warn' }); }
   if (c) {
     if (k < c.startKm) return err('A quilometragem não pode ser menor que a do início da posse.');
-    const t = activeTransfer(v.id); if (t) setTransfer(t, 'cancelada', 'Veículo enviado para manutenção pela gestão');
     c.end = nowTs(); c.endKm = k; c.closedReason = 'manutencao';
     notify(c.driverId, `O ${v.plate} foi enviado para manutenção pela gestão (${CUR.name}). Sua posse foi encerrada.`, { level: 'warn' });
-    log('posse_fim', `Posse de ${drv(c.driverId)?.name || ''} encerrada pela gestão: veículo bloqueado enviado para manutenção`, { vehicleId: v.id, driverId: c.driverId });
+    log('posse_fim', `Posse de ${drv(c.driverId)?.name || ''} encerrada pela gestão: veículo enviado para manutenção`, { vehicleId: v.id, driverId: c.driverId });
   }
   v.odometer = Math.max(v.odometer, k); v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = d.shop; v.maintenanceWorkshopId = d.workshopId;
-  log('manutencao', `Entrada em manutenção na ${shopName(d.workshopId)} sem checklist (veículo bloqueado por problema crítico): ${d.shop}`, { vehicleId: v.id });
+  const blk = openIssues(v.id).some(i => !i.canRun);
+  log('manutencao', `Entrada em manutenção registrada por ${CUR.name} na ${shopName(d.workshopId)}, ${nf(k)} km${blk ? ' (veículo bloqueado por problema crítico)' : ''}: ${d.shop}`, { vehicleId: v.id });
   save(); closeModal(); toast('Veículo enviado para manutenção.'); render();
 };

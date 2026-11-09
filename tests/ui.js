@@ -87,7 +87,7 @@ module.exports.v113 = async (p, ok, shots) => {
   ok('UI premiação: Não considerar exige motivo', /Informe o motivo/.test(await p.textContent('#nb-err')));
   await p.click('[data-act="modal-close"]');
   await p.click('[data-act="nb-yes"]'); await p.waitForTimeout(300); await shot('nb-considerar');
-  ok('UI premiação: simulação mostra 4/19 → 5/20', /4\/19.*5\/20/s.test(await p.textContent('#modal')), await p.textContent('#modal .note'));
+  ok('UI premiação: simulação mostra 4/19 → 5/19', /4\/19.*5\/19/s.test(await p.textContent('#modal')), await p.textContent('#modal .note'));
   await p.click('[data-act="nb-ok"]'); await p.waitForTimeout(80); await shot('nb-avaliado');
   const r = await p.evaluate(() => ({ adj: S.bonusAdj.filter(a => a.kind === 'diaextra' && a.key === 'N:2026-10-17').length, nt: S.notifications.some(n => n.to === 'd1' && /foi considerado/.test(n.text)), sc: driverScore('d1', '2026-10').possDays, log: S.audit.some(a => /considerado na premiação/.test(a.text)) }));
   ok('UI premiação: Considerar grava, avisa o condutor e soma o dia', r.adj === 1 && r.nt && r.sc === 5 && r.log, r);

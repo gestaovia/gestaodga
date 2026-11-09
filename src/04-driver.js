@@ -635,6 +635,7 @@ PAGES.checklist_full = {
   render({ vid, type }) {
     const v = veh(vid);
     if (['manut_entrada', 'manut_saida'].includes(type) && !isManager()) return '<div class="drv"><div class="note bad">Somente gestores registram entrada e saída de manutenção.</div></div>';
+    if (type === 'manut_entrada') return `<div class="drv" style="margin:0"><h1>Entrada em manutenção</h1><div class="note">A entrada em manutenção é só um registro (oficina, motivo e km), sem checklist. O checklist completo é feito na saída.</div><div class="row"><button class="btn" data-go="veiculo" data-id="${vid}">Voltar ao veículo</button><button class="btn ok" data-act="maint-direct" data-id="${vid}">${ic('wrench')}Enviar p/ manutenção</button></div></div>`;
     if (type === 'manut_entrada' && activeCustody(vid)) return `<div class="drv" style="margin:0"><h1>Entrada em manutenção</h1><div class="note warn">O veículo está com ${esc(drv(activeCustody(vid).driverId).name)}. O condutor precisa fazer a entrega (ou use a transferência forçada) antes da entrada em manutenção.</div><button class="btn" data-go="veiculo" data-id="${vid}">Voltar ao veículo</button></div>`;
     if (['manut_entrada', 'manut_saida'].includes(type) && !activeShops().length && !(type === 'manut_saida' && v.maintenanceWorkshopId)) return `<div class="drv" style="margin:0"><h1>${CK_TYPES[type]}</h1>${noShopsNote()}</div>`;
     if (!DRAFT || DRAFT.kind !== 'full_' + type) { newDraft('full_' + type, vid, { shop: type === 'manut_entrada' ? '' : v.maintenanceNote || '', workshopId: v.maintenanceWorkshopId || '', doneItems: [], cost: '' }); captureLocation(v); }
@@ -665,7 +666,7 @@ PAGES.checklist_full = {
       if (type === 'manut_entrada') { v.maintenance = true; v.maintenanceSince = nowTs(); v.maintenanceNote = DRAFT.shop; v.maintenanceWorkshopId = DRAFT.workshopId; log('manutencao', `Entrada em manutenção na ${shopName(DRAFT.workshopId)}: ${DRAFT.shop}`, { vehicleId: vid }); }
       if (type === 'manut_saida') {
         const cost = parseFloat(String(DRAFT.cost).replace(/\./g, '').replace(',', '.')) || 0;
-        S.maintRecords.push({ id: uid('mr'), vehicleId: vid, at: nowTs(), items: DRAFT.doneItems, cost, shop: shopName(DRAFT.workshopId), workshopId: DRAFT.workshopId, km: k, type: 'preventiva', notes: v.maintenanceNote || '', planPrev: planSnapshot(vid, DRAFT.doneItems) });
+        S.maintRecords.push({ id: uid('mr'), vehicleId: vid, at: nowTs(), since: v.maintenanceSince || null, items: DRAFT.doneItems, cost, shop: shopName(DRAFT.workshopId), workshopId: DRAFT.workshopId, km: k, type: 'preventiva', notes: v.maintenanceNote || '', planPrev: planSnapshot(vid, DRAFT.doneItems) });
         DRAFT.doneItems.forEach(i => S.plans.filter(p => p.vehicleId === vid && (p.item === i || (i === 'Alinhamento' && p.item === 'Balanceamento' && false))).forEach(p => { p.lastKm = k; p.lastDate = startOfDay(nowTs()); }));
         v.maintenance = false; v.maintenanceSince = null; v.maintenanceNote = ''; v.maintenanceWorkshopId = null;
         openIssues(vid).forEach(i => { i.status = 'resolvida'; i.resolvedAt = nowTs(); i.resolvedBy = CUR.id; i.resolution = `Resolvido na manutenção: ${DRAFT.doneItems.join(', ')}`; });
@@ -836,7 +837,7 @@ PAGES.transferencia = {
         ${t.status === 'negada' ? `<dt>Entrega negada</dt><dd><b>${esc(t.denyReason || '—')}</b><br><span class="small muted">${esc(userName(t.deniedBy))} · ${fmtDT(t.deniedAt)}</span></dd>` : ''}
         ${t.status === 'cancelada' && t.cancelReason ? `<dt>Motivo do cancelamento</dt><dd>${esc(t.cancelReason)}</dd>` : ''}
         <dt>Checklist de entrega</dt><dd>${t.deliverChecklistId ? ckLink(t.deliverChecklistId) : '—'}</dd><dt>Checklist de recebimento</dt><dd>${t.receiveChecklistId ? ckLink(t.receiveChecklistId) : '—'}</dd></dl>
-        <div class="row">${act}${canCancel ? `<button class="btn danger" data-act="t-cancel" data-id="${t.id}">Cancelar solicitação</button>` : ''}${isStaff() ? `<button class="btn" data-go="veiculo" data-id="${v.id}">Histórico do veículo</button>` : ''}</div>
+        <div class="row">${act}${canCancel ? `<button class="btn danger" data-act="t-cancel" data-id="${t.id}">Cancelar solicitação</button>` : ''}${t.forced && isManager() && forcedUndo(t.vehicleId)?.c.id === t.fromCustodyId ? `<button class="btn danger" data-act="forced-undo" data-id="${t.vehicleId}">Cancelar transferência forçada</button>` : ''}${isStaff() ? `<button class="btn" data-go="veiculo" data-id="${v.id}">Histórico do veículo</button>` : ''}</div>
       </div></div>
       <div class="panel"><div class="panel-h"><h3>Registro</h3></div><div class="panel-b"><ul class="tl">${t.events.slice().reverse().map(e => `<li class="${e.status === 'concluida' ? 'ok' : e.status === 'cancelada' ? 'gray' : e.status === 'negada' ? 'bad' : ''}"><span class="t">${fmtDate(e.at)} ${fmtTime(e.at)}</span><div class="x">${T_LABEL[e.status]}<small>${esc(e.note || '')} · ${esc(userName(e.by))}</small></div></li>`).join('')}</ul></div></div>
     </div>`;

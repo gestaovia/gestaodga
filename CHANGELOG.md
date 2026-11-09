@@ -7,6 +7,69 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.15.0 — 09/11/2026
+- **Premiação: dia não útil considerado soma só nos dias com posse.** Quando a gestão considera um checklist feito em sábado, domingo ou feriado, o dia entra só nos **dias com posse** do condutor; os **dias úteis do período não mudam** (ex.: 18/20 + 1 = 19/20). Antes, o dia somava também nos dias úteis (18/20 + 1 = 19/21) e aumentava a quantidade de dias para a premiação completa.
+  - O fator de participação fica limitado a 100% (no máximo 20/20): quem já tem todos os dias úteis contados não ganha além disso. A simulação de "Considerar" avisa quando o dia não muda a premiação.
+  - Vale já para o período em aberto (26/10 a 25/11); períodos fechados não mudam.
+- **Envio para manutenção sem checklist:** o botão **Enviar p/ manutenção** (tela do veículo) passa a ser só um registro, para qualquer veículo: oficina credenciada, motivo e quilometragem. O checklist completo continua na **saída** da manutenção.
+  - Veículo com condutor: a posse é encerrada na hora, sem checklist de entrega e sem desconto na premiação, e o condutor é avisado (como já era para veículo bloqueado). Transferência em andamento do veículo é cancelada e o novo condutor é avisado.
+  - Os indicadores de utilização continuam contando os dias na oficina (a saída guarda a data de entrada).
+- **Cancelar transferência forçada (ação administrativa):** gestor de frota e administrador desfazem uma transferência forçada enquanto ninguém recebeu o veículo depois dela. Botão **Cancelar transf. forçada** na tela do veículo, na tela da transferência e na janela **Transferências › Transferência forçada** (lista das que podem ser canceladas).
+  - A posse do condutor anterior é **reaberta** (continua a mesma posse, como se não tivesse sido encerrada); a liberação para o novo condutor é cancelada; o desconto de −50 pts (se marcado) é cancelado. Motivo obrigatório; vai para a linha do tempo, para a transferência e os dois condutores são avisados.
+  - Não é possível cancelar depois que o novo condutor recebeu, com o veículo em manutenção, com o condutor anterior inativo ou já com outro veículo, nem quando o desconto caiu em período da premiação já fechado (o administrador reabre antes).
+- Testes: 91 casos (`UI=1 node tests/run.js`).
+- Banco: sem migration nesta versão (campos novos ficam em `extra`). Compatível com a v1.14.0.
+
+## v1.14.0 — 20/10/2026
+- **Frota comercial e motorista administrativo.** Novo **Tipo de motorista** no cadastro do condutor: *Motorista de obra* (padrão) ou *Motorista administrativo (comercial)*; o condutor é avisado quando a gestão muda o tipo.
+  - Motorista administrativo: **não participa da premiação** (fora do ranking, do fechamento, da fila de dias não úteis e de ocorrências/abonos; o extrato mostra o aviso) e o **checklist diário é opcional** ("Opcional" em vez de "Pendente", sem item na lista de atenção). Recebimento e entrega continuam obrigatórios; no início dele, a ação principal com veículo é a entrega.
+  - Obra reservada **COMERCIAL**: vem marcada para o motorista administrativo (ele pode escolher uma obra); não pode ser excluída nem desativada; não aparece para o motorista de obra; vira uma linha própria em custos, pedágios, multas e indicadores.
+  - **Uso do veículo** no cadastro: *Frota de obra* ou *Frota comercial* (só classificação; qualquer condutor recebe qualquer veículo). Filtros em Veículos e Indicadores.
+  - Finalidades novas: "Atividade comercial" e "Visita a cliente".
+- Banco: migration `20261020013958_gestaovia_frota_comercial` (`drivers.kind`, `vehicles.fleet`, obra COMERCIAL protegida por gatilho).
+
+## v1.13.0 — 20/10/2026
+- **Premiação: checklist em fim de semana ou feriado avaliado pela gestão.** Todo checklist diário feito em sábado, domingo ou feriado por quem estava com o veículo entra sozinho na nova aba **Premiação › Dias não úteis** (o condutor não precisa pedir). A gestão recebe um aviso na hora e o ranking mostra quantos estão aguardando.
+  - Para cada dia aparecem condutor, dia (ou nome do feriado), veículo, obra, horário do checklist (abre o checklist) e horas de posse no dia.
+  - **Considerar** (verde): o dia entra como um dia útil a mais para aquele condutor, somando nos dias com posse **e** nos dias úteis dele (ex.: 18/20 + 1 = 19/21). Antes de confirmar, a tela mostra como ficam o fator e o prêmio. Observação opcional.
+  - **Não considerar** (vermelho): o dia não muda a premiação; motivo obrigatório.
+  - O condutor recebe aviso da decisão. A decisão vai para o histórico e para "Registros da gestão" no extrato; **Desfazer** (com motivo) devolve o dia para a fila. Período fechado não aceita decisões.
+  - O extrato do condutor mostra os dias não úteis considerados e os que aguardam avaliação; o fechamento guarda os dias considerados.
+  - Sem decisão, nada muda: fim de semana e feriado continuam sem desconto e sem contar dia.
+- **Fotos com setas:** ao abrir uma foto (checklists, abastecimentos), setas **‹ ›** passam para a foto anterior/seguinte do mesmo registro, com contador ("2 de 5"), miniaturas para pular direto, teclas ← → no computador e deslizar o dedo no celular. A foto abre por cima do checklist: ao fechar (× ou Esc), o checklist continua aberto.
+- Testes: 63 casos (`UI=1 node tests/run.js`).
+- Banco: migration `20261020000014_gestaovia_premiacao_dias_nao_uteis` (novos tipos `diaextra`/`diarecusa` em `bonus_adjustments`). Compatível com a v1.12.0.
+
+## v1.12.0 — 17/10/2026
+- **Premiação: o checklist diário vale por dia.** Cada dia útil com posse só conta (pontuação e fator de participação) se tiver o **seu** checklist diário, feito naquele dia, na posse. Antes, um único diário validava a posse inteira (ex.: 20 dias com o carro e 1 diário = 20 dias contados).
+  - No **dia do recebimento**, o checklist de recebimento vale como o do dia, desde que a posse tenha pelo menos um diário depois (o recebimento sozinho continua não comprovando o uso; a posse de 5 minutos continua sem pontos).
+  - Vale para as quatro regras do dia (posse mínima e diário · só posse mínima · só diário · um ou outro). O extrato mostra "sem checklist diário neste dia" nos dias que não contaram.
+  - Vale já para o período em aberto (26/09 a 25/10); períodos fechados não mudam.
+- **Correção de quilometragem pela gestão:** botão **Corrigir km** na tela do veículo (gestor de frota e administrador). Informe o km do painel e o motivo; o sistema lista os registros que ficaram acima (checklists, abastecimentos, início/fim de posse, plano e serviços de manutenção) para corrigir um a um. O valor original fica guardado e a correção vai para a linha do tempo. Antes, um km digitado errado (ex.: um zero a mais) não podia ser baixado por ninguém e travava os checklists dos condutores seguintes.
+- **Conferência de km no app do condutor:** quando o km informado sobe mais que o limite desde o último registro (padrão 2.000 km, em Configurações › Regras da frota), o app pede para conferir o painel e tocar de novo. Confirmado, a gestão recebe um aviso com o salto.
+- **Registros feitos sem sinal não se perdem:** o que não foi enviado por falta de conexão (checklists, abastecimentos, posses, fotos) fica guardado no celular e é enviado quando o app abre de novo com internet, mesmo que tenha sido fechado. O registro fica marcado "feito sem conexão"; na premiação vale o horário do aparelho (até 24 h de atraso no envio), então o diário feito às 8h sem sinal não vira atraso.
+  - Limite: protege o registro feito com o app aberto. O app ainda precisa de internet para abrir do zero.
+- **Horário do servidor na posse:** o banco passa a gravar a hora em que recebeu o início e o fim de cada posse. Se o relógio do celular divergir mais de 15 min, a premiação usa o horário do servidor e as listas de posses mostram o aviso **relógio** (ou **sem conexão**, quando foi envio atrasado).
+- **Fechamento mensal de pedágios:** em meses já encerrados, **Fechar o mês** congela o fechamento por obra e a lista de passagens (como foram enviados ao financeiro); o Excel do mês sai do fechamento. Depois de fechado, o banco recusa importar, lançar, ajustar ou excluir passagens daquele mês (a importação ignora as linhas desse mês). Se uma correção de obra mudar o cálculo depois, a tela avisa a diferença, mas o fechamento não muda. Só o administrador **reabre**, com motivo (fica na auditoria).
+- Correção: erro interno ao trocar de tela logo depois de salvar um checklist com o teclado aberto (o registro já era salvo normalmente).
+- Testes automáticos agora ficam no repositório (`tests/`, 43 casos): `UI=1 node tests/run.js`.
+- Banco: migration `20261017000013_gestaovia_km_horario_posse_fechamento_pedagios` (horário do servidor na posse, tabela `toll_closings` com trava de passagens em mês fechado). Compatível com a v1.11.0.
+
+## v1.11.0 — 17/10/2026
+- **Premiação só para quem realmente usou o veículo:** o dia útil só conta como "dia com posse" (para a pontuação e para o fator de participação) quando atende à regra configurada em Premiação › Parâmetros. Padrão: **posse de 5 h ou mais no dia e ao menos um checklist diário feito na posse, depois do recebimento**. Quem só fez o checklist de recebimento e entregou logo depois (ou não fez nenhum diário) **não tem pontuação nem premiação** no período.
+  - Parâmetros novos: **Regra para contar o dia com posse** (posse mínima e checklist diário · só posse mínima · só checklist diário · um ou outro) e **Posse mínima no dia** (horas; padrão 5 h).
+  - O extrato mostra os dias com posse que não contaram e o motivo (ex.: "posse de 0 h 05 min no dia (mínimo 5,0 h) e sem checklist diário na posse depois do recebimento"). Ranking e cadastro do condutor mostram "sem uso comprovado".
+  - Vale já para o período em aberto (26/09 a 25/10); períodos fechados não mudam. Alterações nos parâmetros continuam valendo a partir do período seguinte.
+- **Adicional de 100 pontos para todos:** quem fecha com 100 pontos recebe o adicional, sem exigir 15 dias com posse (continua proporcional aos dias com posse ÷ dias úteis). O adicional de 90 a 99 pontos continua exigindo os dias mínimos (parâmetro renomeado para "Dias com posse mínimos para o adicional de 90 a 99 pontos").
+- **Transferência forçada: descontar ou não a pontuação.** O gestor marca obrigatoriamente **Sim, descontar** (ocorrência de −50 pts na modalidade A no extrato do condutor que estava com o veículo, cancelável com motivo em Premiação) ou **Não descontar**. A escolha aparece na transferência, na linha do tempo e no aviso ao condutor.
+- **Gestor corrige a obra informada pelo condutor:** botão **Corrigir** na coluna Obras das posses (veículo e condutor) e botão **Obra** na tela do veículo com posse ativa. Corrige cada trecho da posse, com motivo obrigatório; checklists e abastecimentos daquela posse vão junto para a obra certa; custos, pedágios, multas e indicadores por obra são recalculados. O original fica guardado ("corrigida"), a correção vai para a linha do tempo e o condutor recebe aviso.
+- **Pedágios com fechamento mensal:**
+  - **Importar fatura Sem Parar** (Excel .xlsx/.xls ou CSV, ou linhas coladas): o sistema acha o cabeçalho, reconhece as colunas (placa, data, hora, praça, valor, tipo, TAG — dá para trocar), mostra a prévia com a obra de cada passagem, ignora estacionamento/mensalidade/taxas (opcional) e não importa passagem repetida. A obra é a da posse no horário da passagem; sem posse no horário (ou sem hora), a da posse do veículo no mesmo dia. Importação pode ser desfeita.
+  - **Lançar manual (sem TAG):** veículo, data, hora (opcional), praça, valor, quantidade de passagens e comprovante; a obra vem da posse do dia ou é escolhida.
+  - Tela por **mês**: total, Sem Parar, manual, "Sem obra" para ajustar, **fechamento por obra**, faturas importadas e **Excel do mês** (abas Por obra e Passagens). Ajuste manual de obra/condutor em qualquer passagem, com volta ao automático.
+  - Cadastro do veículo: **TAG de pedágio (Sem Parar)** — tem TAG / sem TAG — e nº da TAG.
+- Banco: sem migration nesta versão (campos novos ficam em `extra` e nas configurações).
+
 ## v1.10.0 — 16/10/2026
 - **Documento do veículo para o condutor:** novo botão **Documento do veículo** no início do condutor e na tela do veículo. Mostra o CRLV-e mais recente do veículo que está com ele (exercício, RENAVAM e situação do licenciamento) para apresentar à fiscalização: foto em tela cheia ou PDF aberto no leitor do celular, e **Salvar no celular** para mostrar mesmo sem internet. Se o veículo ainda não tem CRLV no sistema, o condutor toca em **Avisar a gestão** e a gestão recebe o aviso.
 - O condutor vê só o CRLV atual do veículo que está com ele (até 2 h depois de entregar, como no seguro). IPVA, taxa de licenciamento e exercícios anteriores continuam só com a gestão. Cada abertura do documento fica registrada na linha do tempo do veículo.

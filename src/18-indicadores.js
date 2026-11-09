@@ -96,7 +96,9 @@ function maintIntervals(v) {
   const out = []; let open = null;
   ks.forEach(k => { if (k.type === 'manut_entrada') open = open ?? k.at; else if (open != null) { out.push([open, k.at]); open = null; } });
   if (v.maintenance) out.push([v.maintenanceSince || open || 0, Infinity]); else if (open != null) out.push([open, Infinity]);
-  return out;
+  // v1.15.0: entrada registrada sem checklist (a saída guarda o início em "since")
+  S.maintRecords.filter(r => r.vehicleId === v.id && r.since && r.since < r.at).forEach(r => { if (!out.some(([a, b]) => a < r.at && b > r.since)) out.push([r.since, r.at]); });
+  return out.sort((a, b) => a[0] - b[0]);
 }
 function utilization(v, from, to) {
   const end = Math.min(to, nowTs());

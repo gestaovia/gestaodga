@@ -131,11 +131,11 @@ t('dia não útil: diário de sábado entra na fila e não muda nada antes da de
   NBSET(); const q = nbQueue('2026-10'); const sc = driverScore('d1', '2026-10');
   return { ok: q.length === 1 && dayKey(q[0].d) === '2026-10-17' && !q[0].decision && /Sábado/.test(nbLabel(q[0].d)) && sc.possDays === 4 && sc.bizDays === 19 && sc.nbPending === 1 && nbPendingCount('2026-10') === 1, q: q.length, poss: sc.possDays, biz: sc.bizDays };
 });
-t('dia não útil considerado: soma nos dois lados (4/19 → 5/20)', () => {
+t('dia não útil considerado: soma só nos dias com posse (4/19 → 5/19)', () => {
   NBSET(); const b0 = driverScore('d1', '2026-10');
   newAdj({ driverId: 'd1', period: '2026-10', kind: 'diaextra', key: 'N:2026-10-17', reason: 'Considerado pela gestão' });
-  const sc = driverScore('d1', '2026-10'); const exp = Math.round(sc.full * 5 / 20 * 100) / 100;
-  return { ok: sc.possDays === 5 && sc.bizDays === 20 && sc.baseBizDays === 19 && sc.extraDays === 1 && sc.bonus === exp && sc.bonus > b0.bonus && nbPendingCount('2026-10') === 0, poss: sc.possDays, biz: sc.bizDays, bonus: sc.bonus, antes: b0.bonus };
+  const sc = driverScore('d1', '2026-10'); const exp = Math.round(sc.full * 5 / 19 * 100) / 100;
+  return { ok: sc.possDays === 5 && sc.bizDays === 19 && sc.baseBizDays === 19 && sc.extraDays === 1 && sc.bonus === exp && sc.bonus > b0.bonus && nbPendingCount('2026-10') === 0, poss: sc.possDays, biz: sc.bizDays, bonus: sc.bonus, antes: b0.bonus };
 });
 t('dia não útil não considerado: premiação igual', () => {
   NBSET(); const b0 = driverScore('d1', '2026-10');
@@ -166,7 +166,7 @@ t('dia aprovado que deixou de ser não útil é ignorado (sem contar duas vezes)
 t('fechamento guarda os dias não úteis considerados', () => {
   NBSET(); newAdj({ driverId: 'd1', period: '2026-10', kind: 'diaextra', key: 'N:2026-10-17', reason: 'Considerado pela gestão' });
   const r = statementRow(S.drivers[0], driverScore('d1', '2026-10'));
-  return { ok: r.extraDays === 1 && r.extraList.length === 1 && r.possDays === 5 && r.bizDays === 20 };
+  return { ok: r.extraDays === 1 && r.extraList.length === 1 && r.possDays === 5 && r.bizDays === 19 };
 });
 
 // ---------- v1.14.0: frota comercial / motorista administrativo ----------
@@ -204,5 +204,53 @@ t('relatórios: coluna Tipo do condutor e Uso do veículo', () => {
 t('indicadores: filtro Frota comercial separa os veículos', () => {
   ADMSET(); CUR = S.users[0]; KPI_F.u = 'comercial'; const a = S.vehicles.filter(kpiVehPass).map(v => v.plate); KPI_F.u = 'obra'; const b = S.vehicles.filter(kpiVehPass).map(v => v.plate); KPI_F.u = '';
   return { ok: a.join() === 'COM1A23' && b.length === 2 && !b.includes('COM1A23'), a, b };
+});
+
+// ---------- v1.15.0 ----------
+t('dia não útil considerado não passa de 100% (todos os dias úteis já contados)', () => {
+  const T = FIX(); CUR = S.users[0]; const [from, to] = periodRange('2026-09');
+  S.checklists.push({ id: 'r9', type: 'recebimento', vehicleId: 'v1', driverId: 'd1', custodyId: 'c9', at: from + 8 * 36e5, serverAt: from + 8 * 36e5, km: 15000, items: {}, photos: {} });
+  S.custody.push({ id: 'c9', vehicleId: 'v1', driverId: 'd1', start: from + 8 * 36e5, end: to - 6 * 36e5, startKm: 15000, endKm: 16000, receiveChecklistId: 'r9', segments: [{ at: from + 8 * 36e5, projectId: 'p1' }] });
+  daysBetween(from, to).forEach((d, i) => { if (isBizDay(d) || new Date(d).getDay() === 6) S.checklists.push({ id: 'k9' + i, type: 'diario', vehicleId: 'v1', driverId: 'd1', custodyId: 'c9', at: d + 8.5 * 36e5, serverAt: d + 8.5 * 36e5, km: 15000 + i }); });
+  const b0 = driverScore('d1', '2026-09'); const sat = nonBizDays('d1', '2026-09')[0];
+  newAdj({ driverId: 'd1', period: '2026-09', kind: 'diaextra', key: nbKey(sat.d), reason: 'Considerado' });
+  const sc = driverScore('d1', '2026-09');
+  return { ok: b0.possDays === b0.bizDays && sc.possDays === sc.bizDays && sc.bizDays === b0.bizDays && sc.factor === 1 && sc.bonus === b0.bonus, antes: `${b0.possDays}/${b0.bizDays}`, depois: `${sc.possDays}/${sc.bizDays}` };
+});
+t('manutenção: envio é só registro, sem checklist (veículo no pátio)', () => {
+  MSET(); const n = S.checklists.length; MSEND('v1', 'revisão dos 20 mil km'); const v = veh('v1');
+  return { ok: v.maintenance === true && v.maintenanceWorkshopId === 'w1' && v.maintenanceNote === 'revisão dos 20 mil km' && S.checklists.length === n && vStatus(v) === 'manutencao' };
+});
+t('manutenção: veículo em uso vai direto, posse encerrada sem desconto de entrega', () => {
+  const T = MSET();
+  S.checklists.push({ id: 'r1', type: 'recebimento', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T('2026-10-20T08:00'), serverAt: T('2026-10-20T08:00'), km: 15000, items: {}, photos: {} });
+  S.custody.push({ id: 'c1', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-20T08:00'), end: null, startKm: 15000, receiveChecklistId: 'r1', segments: [{ at: T('2026-10-20T08:00'), projectId: 'p1' }] });
+  MSEND('v1', 'barulho na suspensão'); const c = S.custody[0]; const sc = driverScore('d1', '2026-10');
+  return { ok: veh('v1').maintenance && c.end && c.closedReason === 'manutencao' && !activeCustody('v1') && !sc.occurrences.some(o => o.key === 'A:ent:c1') && S.notifications.some(x => x.to === 'd1') };
+});
+t('manutenção sem checklist de entrada conta nos indicadores de utilização', () => {
+  const T = MSET(); S.maintRecords.push({ id: 'm1', vehicleId: 'v1', at: T('2026-10-16T17:00'), since: T('2026-10-13T08:00'), items: ['Revisão'], cost: 0, km: 15000, workshopId: 'w1' });
+  const u = utilization(veh('v1'), T('2026-10-12T00:00'), T('2026-10-17T00:00'));
+  return { ok: u.maint === 4, u };
+});
+t('cancelar transferência forçada: posse reaberta, liberação e desconto cancelados', () => {
+  const T = FIX(); CUR = S.users[0]; FSET(T, true); const aid = byId(S.custody, 'c1').forcedAdjId; const b0 = driverScore('d1', '2026-10').occurrences.some(o => o.manual === aid);
+  FUNDO('transferência feita no veículo errado'); const c = byId(S.custody, 'c1'); const t = byId(S.transfers, 'tf'); const sc = driverScore('d1', '2026-10');
+  return { ok: !c.end && !c.closedReason && activeCustody('v1')?.driverId === 'd1' && t.status === 'cancelada' && S.bonusAdj[0].voidedAt && b0 && !sc.occurrences.some(o => o.manual === aid) && c.forcedUndo.length === 1 && S.notifications.some(x => x.to === 'd2') && vStatus(veh('v1')) === 'em_uso' };
+});
+t('cancelar transferência forçada: não vale depois que o novo condutor recebeu', () => {
+  const T = FIX(); CUR = S.users[0]; FSET(T, false);
+  S.custody.push({ id: 'c2', vehicleId: 'v1', driverId: 'd2', start: T('2026-10-20T10:00'), end: null, startKm: 15100, segments: [] }); byId(S.transfers, 'tf').status = 'concluida';
+  return { ok: forcedUndo('v1') === null && forcedUndoList().length === 0 };
+});
+t('cancelar transferência forçada: exige motivo e respeita período fechado', () => {
+  const T = FIX(); CUR = S.users[0]; FSET(T, true);
+  FUNDO(''); const semMotivo = !!byId(S.custody, 'c1').end;
+  S.closings.push({ id: 'x', month: '2026-10', rows: [] }); const blk = forcedUndoBlock(forcedUndo('v1')); closeModal();
+  return { ok: semMotivo && /fechado/.test(blk || ''), blk };
+});
+t('manutenção com liberação forçada pendente cancela a liberação', () => {
+  const T = MSET(); FSET(T, false); MSEND('v1', 'pneu furado');
+  return { ok: veh('v1').maintenance && byId(S.transfers, 'tf').status === 'cancelada' && forcedUndo('v1') === null && S.notifications.some(x => x.to === 'd2') };
 });
 module.exports = C;
