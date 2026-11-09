@@ -7,6 +7,13 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.16.0 — 09/11/2026
+- **Checklist diário: foto do hodômetro obrigatória e km sem sugestão.** O campo de quilometragem começa vazio (antes vinha preenchido com o último km e o condutor confirmava sem conferir) e o diário só é concluído com o km digitado **e** a foto do painel com o hodômetro. Vale para os diários feitos a partir de hoje; os anteriores não mudam.
+- **Abastecimento: limite por registro de 60 litros e R$ 500,00** (condutor e gestão). Acima disso o registro é recusado com "Confira os litros informados" / "Confira o valor total informado", sem mostrar o limite na tela.
+- **Lançar manutenção realizada:** novo botão em **Manutenção › Serviços realizados** e na aba **Manutenção** do veículo para registrar serviços já feitos sem passar o veículo pela oficina: placa, data, oficina credenciada, km e serviços (custo e observações opcionais). O plano de manutenção avança quando o lançamento é o mais recente do item (lançamento mais antigo que o último registrado não volta o plano). O km não pode passar do km atual do veículo. Edição e exclusão como nos outros serviços.
+- Testes: 96 casos (`UI=1 node tests/run.js`).
+- Banco: sem migration. Compatível com a v1.15.0.
+
 ## v1.15.0 — 09/11/2026
 - **Premiação: dia não útil considerado soma só nos dias com posse.** Quando a gestão considera um checklist feito em sábado, domingo ou feriado, o dia entra só nos **dias com posse** do condutor; os **dias úteis do período não mudam** (ex.: 18/20 + 1 = 19/20). Antes, o dia somava também nos dias úteis (18/20 + 1 = 19/21) e aumentava a quantidade de dias para a premiação completa.
   - O fator de participação fica limitado a 100% (no máximo 20/20): quem já tem todos os dias úteis contados não ganha além disso. A simulação de "Considerar" avisa quando o dia não muda a premiação.

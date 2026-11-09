@@ -58,6 +58,9 @@ const PROBLEM_TYPES = ['Freios', 'Pneus', 'Motor', 'Elétrica / painel', 'Ilumin
 const SEVERITY = { baixa: { l: 'Baixa', c: 'gray' }, media: { l: 'Média', c: 'warn' }, alta: { l: 'Alta', c: 'urg' }, critica: { l: 'Crítica', c: 'bad' } };
 const MAINT_ITEMS = ['Troca de óleo', 'Filtros', 'Alinhamento', 'Balanceamento', 'Pneus', 'Revisão', 'Correia dentada', 'Freios', 'Bateria', 'Outros'];
 const M_LEVEL = { normal: { l: 'Normal', c: 'gray', r: 0 }, atencao: { l: 'Atenção', c: 'warn', r: 1 }, urgente: { l: 'Urgente', c: 'urg', r: 2 }, vencido: { l: 'Vencido', c: 'bad', r: 3 } };
+// v1.16.0: limite por abastecimento (evita litros/valor digitados errado)
+const FUEL_MAX = { liters: 60, total: 500 };
+const fuelLimitErrs = (l, t) => [...(l > FUEL_MAX.liters ? ['Confira os litros informados.'] : []), ...(t > FUEL_MAX.total ? ['Confira o valor total informado.'] : [])];
 const FINE_TYPES = { leve: 88.38, media: 130.16, grave: 195.23, gravissima: 293.47 };
 
 

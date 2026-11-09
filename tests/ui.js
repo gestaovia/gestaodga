@@ -67,6 +67,11 @@ module.exports.diario = async (p, ok) => {
     S.custody.push({ id: 'c9', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-19T07:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-19T07:00'), projectId: 'p1' }] }); go('diario', { vid: 'v1' }); });
   await p.waitForTimeout(100);
   await p.click('[data-act="d-ans"][data-v="sim"]'); await p.waitForTimeout(80);
+  // v1.16.0: km começa vazio e a foto do hodômetro é obrigatória
+  ok('UI condutor: diário sem km sugerido', (await p.inputValue('#dform [name="km"]')) === '');
+  await p.fill('#dform [name="km"]', '15010'); await p.evaluate(() => document.querySelector('#dform').requestSubmit()); await p.waitForTimeout(100);
+  ok('UI condutor: diário sem foto do hodômetro é recusado', /foto do painel com o hodômetro/.test(await p.textContent('#ck-err')) && (await p.evaluate(() => S.checklists.length)) === 0, await p.textContent('#ck-err'));
+  await p.evaluate(() => { DRAFT.photos.painel_d = 'data:image/png;base64,AA=='; });
   await p.fill('#dform [name="km"]', '150000');
   await p.evaluate(() => document.querySelector('#dform').requestSubmit()); await p.waitForTimeout(100);
   const t1 = await p.textContent('#app'); const n1 = await p.evaluate(() => S.checklists.length);
@@ -101,6 +106,7 @@ module.exports.v113 = async (p, ok, shots) => {
   await p.evaluate(() => { const T = FIX(); CUR = S.users[1]; CLOUD.on = false; DRAFT = null; const N = T('2026-10-24T09:00'); Date.now = () => N;
     S.custody.push({ id: 'c9', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-23T07:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-23T07:00'), projectId: 'p1' }] }); go('diario', { vid: 'v1' }); });
   await p.waitForTimeout(80); await p.click('[data-act="d-ans"][data-v="sim"]'); await p.waitForTimeout(60);
+  await p.evaluate(() => { DRAFT.photos.painel_d = 'data:image/png;base64,AA=='; });
   await p.fill('#dform [name="km"]', '15050'); await p.evaluate(() => document.querySelector('#dform').requestSubmit()); await p.waitForTimeout(100);
   const n = await p.evaluate(() => ({ ck: S.checklists.length, nt: S.notifications.filter(x => x.to === 'gestao' && /dia não útil/.test(x.text)).map(x => x.text) }));
   ok('UI condutor: diário no sábado avisa a gestão', n.ck === 1 && n.nt.length === 1, n);

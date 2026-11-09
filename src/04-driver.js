@@ -515,7 +515,7 @@ PAGES.diario = {
     const d = myDriver(); vid = vid || (d && driverCustodies(d.id)[0]?.vehicleId);
     const v = vid && veh(vid); const c = v && activeCustody(vid);
     if (!v || !c || (d && c.driverId !== d.id)) return `<div class="drv"><h1>Checklist diário</h1><div class="note">O checklist diário é feito pelo condutor responsável pelo veículo. Escaneie o veículo para começar.</div><button class="btn ok lg block" data-go="scanner">Escanear veículo</button></div>`;
-    if (!DRAFT || DRAFT.kind !== 'diario') { newDraft('diario', vid, { answer: null, projOk: '1', projectId: currentSegment(c)?.projectId || '', ccId: currentSegment(c)?.ccId || '', type: '', desc: '', severity: '', canRun: '' }); captureLocation(v); }
+    if (!DRAFT || DRAFT.kind !== 'diario') { newDraft('diario', vid, { km: '', answer: null, projOk: '1', projectId: currentSegment(c)?.projectId || '', ccId: currentSegment(c)?.ccId || '', type: '', desc: '', severity: '', canRun: '' }); captureLocation(v); }
     const done = dailyDoneToday(vid); const seg = currentSegment(c); const D = DRAFT;
     const sim = D.answer === 'sim', nao = D.answer === 'nao';
     return `<form class="drv" id="dform" novalidate>
@@ -527,8 +527,8 @@ PAGES.diario = {
       <div class="yn"><button type="button" class="${sim ? 'on-ok' : ''}" data-act="d-ans" data-v="sim">Sim</button><button type="button" class="${nao ? 'on-bad' : ''}" data-act="d-ans" data-v="nao">Não</button></div>
       ${D.answer ? `
       <div class="panel"><div class="panel-b stack" style="gap:12px">
-        <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}"><small>Confira no painel ou envie a foto abaixo.</small></label>
-        ${singlePhoto('painel_d', 'Foto do painel (opcional)')}
+        <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}" placeholder="Km do painel"><small>Digite o km que aparece no painel agora.</small></label>
+        ${singlePhoto('painel_d', 'Foto do painel com o hodômetro')}
       </div></div>` : ''}
       ${sim ? `<div class="panel"><div class="panel-b stack" style="gap:10px">
         <span class="field"><span>Confirmar obra</span></span>
@@ -547,12 +547,14 @@ PAGES.diario = {
       e.preventDefault();
       const v = veh(DRAFT.vid); const c = activeCustody(v.id); const D = DRAFT; const errs = [];
       const k = parseInt(String(D.km).replace(/\D/g, ''), 10);
-      if (!k && !D.photos.painel_d) errs.push('Informe a quilometragem ou envie a foto do painel.');
+      // v1.16.0: km digitado (sem sugestão) e foto do hodômetro obrigatórios
+      if (!k) errs.push('Informe a quilometragem do painel.');
+      if (!D.photos.painel_d) errs.push('Envie a foto do painel com o hodômetro.');
       if (k) kmGuard(v, k, errs);
       if (D.answer === 'sim' && (D.projOk === '0' || !currentSegment(c)) && !D.projectId) errs.push('Selecione a obra.');
       if (D.answer === 'nao') errs.push(...problemErrors());
       if (errs.length) return showErrors(errs);
-      const kmv = k || suggestedKm(v);
+      const kmv = k;
       const [h, m] = deadlineNow().split(':').map(Number); const n = new Date();
       const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: n.getHours() * 60 + n.getMinutes() > h * 60 + m };
       S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv); kmJumpNote(v, c.driverId);
@@ -763,7 +765,7 @@ PAGES.abastecer = {
       const v = veh(DRAFT.vid); const c = activeCustody(v.id); const errs = [];
       const k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10); const l = num(DRAFT.liters); const t = num(DRAFT.total);
       if (!k) errs.push('Informe a quilometragem.'); else kmGuard(v, k, errs);
-      if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.');
+      if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.'); errs.push(...fuelLimitErrs(l, t));
       if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.hodometro) errs.push('Envie a foto do hodômetro (vale pontos na premiação).'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
       if (!errs.length && k && l) { const dup = fuelDuplicates(v.id, nowTs(), k, l); if (dup.same.length) errs.push(fuelByStaff(dup.same[0]) ? 'A gestão já lançou este abastecimento. Não é preciso registrar de novo.' : 'Este abastecimento já foi registrado.'); }
       if (errs.length) return showErrors(errs);

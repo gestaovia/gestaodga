@@ -156,6 +156,35 @@ ACTIONS['mr-del-ok'] = a => {
   log('manutencao', `Registro de manutenção excluído por ${CUR.name} (${fmtDate(r.at)} · ${r.items.join(', ')} · ${money(r.cost)} · ${recShop(r)}): ${why}`, { vehicleId: r.vehicleId, data: { deleted: { ...r } } });
   save(); closeModal(); toast('Registro excluído.'); render();
 };
+/* ---------- manutenção já realizada (v1.16.0): lança serviço passado sem passar o veículo pela oficina ----------
+   Placa, data, oficina credenciada, km e serviços (custo e observações opcionais). Atualiza o plano de manutenção
+   quando o km lançado é o mais recente daquele item. */
+ACTIONS['mr-new'] = a => {
+  if (!isManager()) return toast('Exclusivo para a gestão.');
+  const vid = a.dataset.vid || '';
+  openModal({ title: vid ? `Lançar manutenção realizada · ${veh(vid).plate}` : 'Lançar manutenção realizada', wide: true,
+    body: `${activeShops().length ? '' : noShopsNote()}${vid ? `<input type="hidden" id="mr-vid" value="${vid}">` : `<label class="field" style="margin-bottom:12px"><span>Veículo (placa)</span><select class="inp" id="mr-vid"><option value="">Selecione</option>${S.vehicles.slice().sort((x, y) => x.plate.localeCompare(y.plate)).map(v => `<option value="${v.id}">${v.plate} — ${esc(v.brand || '')} ${esc(v.model || '')}</option>`).join('')}</select></label>`}
+      ${mrForm({ at: null, km: null, items: [], cost: 0, workshopId: '', notes: '' })}`,
+    foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="mr-new-save">Lançar</button>` });
+};
+ACTIONS['mr-new-save'] = () => {
+  const f = $('#mr-form'); const d = formData(f); const err = t => $('#mr-err').textContent = t;
+  const v = veh($('#mr-vid')?.value); if (!v) return err('Escolha o veículo.');
+  const items = $$('input[name=it]:checked', f).map(x => x.value); const kmv = parseInt(onlyDigits(d.km), 10); const at = parseDate(d.date);
+  if (!at || at > nowTs()) return err('Informe a data da manutenção (hoje ou antes).');
+  if (!shopOk(d.workshopId)) return err('Escolha a oficina credenciada.');
+  if (!kmv) return err('Informe a quilometragem.');
+  if (kmv > v.odometer) return err(`A quilometragem não pode passar do km atual do veículo (${nf(v.odometer)}).`);
+  if (!items.length) return err('Marque ao menos um serviço.');
+  const cost = parseFloat(String(d.cost || '').replace(/\./g, '').replace(',', '.')) || 0;
+  const nat = at + 12 * 36e5;
+  const r = { id: uid('mr'), vehicleId: v.id, at: nat, items, cost, shop: shopName(d.workshopId), workshopId: d.workshopId, km: kmv, type: 'preventiva', notes: d.notes || '', planPrev: planSnapshot(v.id, items), past: true, createdBy: CUR.id, createdAt: nowTs() };
+  S.maintRecords.push(r);
+  // plano: só avança quando este é o registro mais recente do item
+  S.plans.filter(p => p.vehicleId === v.id && items.includes(p.item) && (p.lastKm == null || kmv >= p.lastKm)).forEach(p => { p.lastKm = kmv; p.lastDate = startOfDay(nat); });
+  log('manutencao', `Manutenção realizada lançada por ${CUR.name}: ${fmtDate(nat)} · ${nf(kmv)} km · ${items.join(', ')} · ${shopName(d.workshopId)}${cost ? ' · ' + money(cost) : ''}`, { vehicleId: v.id, at: nowTs(), data: { recordId: r.id } });
+  save(); closeModal(); toast('Manutenção lançada.'); render();
+};
 // guarda a última troca anterior de cada item do plano (para desfazer ao excluir)
 function planSnapshot(vid, items) { const o = {}; S.plans.filter(p => p.vehicleId === vid && items.includes(p.item)).forEach(p => { o[p.id] = { lastKm: p.lastKm, lastDate: p.lastDate }; }); return o; }
 

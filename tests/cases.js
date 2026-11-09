@@ -253,4 +253,26 @@ t('manutenção com liberação forçada pendente cancela a liberação', () => 
   const T = MSET(); FSET(T, false); MSEND('v1', 'pneu furado');
   return { ok: veh('v1').maintenance && byId(S.transfers, 'tf').status === 'cancelada' && forcedUndo('v1') === null && S.notifications.some(x => x.to === 'd2') };
 });
+
+// ---------- v1.16.0 ----------
+t('abastecimento: limite de 60 L e R$ 500 por registro', () => {
+  FIX(); return { ok: fuelLimitErrs(60, 500).length === 0 && fuelLimitErrs(60.5, 300).length === 1 && fuelLimitErrs(40, 500.01).length === 1 && fuelLimitErrs(600, 3500).length === 2 };
+});
+t('manutenção passada: lança registro e atualiza o plano', () => {
+  const T = MSET(); veh('v1').odometer = 15000;
+  ACTIONS['mr-new']({ dataset: {} }); $('#mr-vid').value = 'v1'; const f = $('#mr-form');
+  f.date.value = '2026-09-15'; f.km.value = '14500'; f.workshopId.value = 'w1'; $$('input[name=it]', f).find(x => x.value === 'Troca de óleo').checked = true; f.cost.value = '350,00';
+  ACTIONS['mr-new-save'](); const r = S.maintRecords[0]; const p = S.plans[0];
+  return { ok: !!r && r.past && r.km === 14500 && r.cost === 350 && r.workshopId === 'w1' && dayKey(r.at) === '2026-09-15' && p.lastKm === 14500 && dayKey(p.lastDate) === '2026-09-15' && !veh('v1').maintenance && !$('#mr-form'), r, p };
+});
+t('manutenção passada: mais antiga que o plano não volta o plano; km acima do atual é recusado', () => {
+  const T = MSET(); veh('v1').odometer = 15000; const p0 = { ...S.plans[0] };
+  ACTIONS['mr-new']({ dataset: { vid: 'v1' } }); let f = $('#mr-form');
+  f.date.value = '2026-03-01'; f.km.value = '9000'; f.workshopId.value = 'w1'; $$('input[name=it]', f).find(x => x.value === 'Troca de óleo').checked = true;
+  ACTIONS['mr-new-save'](); const keep = S.plans[0].lastKm === p0.lastKm && S.maintRecords.length === 1;
+  ACTIONS['mr-new']({ dataset: { vid: 'v1' } }); f = $('#mr-form');
+  f.date.value = '2026-10-01'; f.km.value = '16000'; f.workshopId.value = 'w1'; $$('input[name=it]', f)[0].checked = true;
+  ACTIONS['mr-new-save'](); const err = $('#mr-err').textContent; closeModal();
+  return { ok: keep && /km atual/.test(err) && S.maintRecords.length === 1, err };
+});
 module.exports = C;

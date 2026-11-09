@@ -70,7 +70,7 @@ PAGES.manutencao = {
       ${!activeShops().length && isManager() ? noShopsNote() : ''}
       ${inShop.length ? `<div class="panel"><div class="panel-h"><h3>Em manutenção agora</h3></div>${tbl(['Veículo', 'Desde', 'Oficina', 'Motivo', ''], inShop.map(v => `<tr><td>${vehLink(v.id)}</td><td>${fmtDT(v.maintenanceSince)}</td><td>${v.maintenanceWorkshopId ? esc(shopName(v.maintenanceWorkshopId)) : '<span class="muted">não informada</span>'}</td><td>${esc(v.maintenanceNote || '—')}</td><td class="r nowrap">${isManager() ? `<button class="btn sm" data-act="mnt-entry-edit" data-id="${v.id}">${ic('edit')}Editar</button> <button class="btn sm pri" data-go="checklist_full" data-vid="${v.id}" data-type="manut_saida">Registrar saída</button>` : ''}</td></tr>`))}</div>` : ''}
       <div class="panel">${maintTable(vs, l)}</div>
-      <div class="panel"><div class="panel-h"><h3>Serviços realizados</h3>${isManager() ? '<span class="small muted">Editar ou excluir pelo botão de cada linha</span>' : ''}</div>${maintRecordsTable(S.maintRecords.filter(r => !id || r.vehicleId === id))}</div>
+      <div class="panel"><div class="panel-h"><h3>Serviços realizados</h3>${isManager() ? `<button class="btn sm" data-act="mr-new" ${id ? `data-vid="${id}"` : ''}>${ic('plus')}Lançar manutenção realizada</button>` : ''}</div>${maintRecordsTable(S.maintRecords.filter(r => !id || r.vehicleId === id))}</div>
       </div>`;
   }
 };

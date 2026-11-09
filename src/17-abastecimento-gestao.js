@@ -86,7 +86,7 @@ PAGES.lancar_abastecimento = {
       if (isNaN(ts)) errs.push('Informe a data e a hora do abastecimento.'); else if (ts > nowTs() + 5 * MIN) errs.push('A data do abastecimento não pode ser no futuro.');
       if (!k) errs.push('Informe a quilometragem.');
       else if (!isNaN(ts)) { const ar = kmAround(v.id, ts); if (k < ar.prev) errs.push(`A quilometragem não pode ser menor que o registro anterior a essa data (${km(ar.prev)}).`); if (ar.next != null && k > ar.next) errs.push(`A quilometragem não pode ser maior que o registro seguinte a essa data (${km(ar.next)}).`); }
-      if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.');
+      if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.'); errs.push(...fuelLimitErrs(l, t));
       if (!isNaN(ts) && k && l) {
         const dup = fuelDuplicates(v.id, ts, k, l);
         if (dup.same.length) errs.push('Este abastecimento já está registrado (mesmo veículo, quilometragem e litros). Não é preciso lançar de novo.');
