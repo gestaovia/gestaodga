@@ -378,7 +378,8 @@ PAGES.receber = {
     if (!DRAFT || DRAFT.kind !== 'receber') {
       // motorista administrativo: já vem "Comercial" (pode trocar por uma obra)
       const adm0 = isAdmDrv(CUR.driverId);
-      newDraft('receber', vid, { projectId: adm0 ? comProj()?.id || '' : '', ccId: '', purpose: adm0 ? 'Atividade comercial' : PURPOSES[0] });
+      // v1.18.0: km começa vazio (o condutor confere no painel e digita), como no checklist diário
+      newDraft('receber', vid, { km: '', projectId: adm0 ? comProj()?.id || '' : '', ccId: '', purpose: adm0 ? 'Atividade comercial' : PURPOSES[0] });
       const t = rc.t;
       if (t && t.status === 'aguardando_recebimento') { setTransfer(t, 'recebimento_andamento', 'Novo condutor iniciou o checklist de recebimento'); log('transferencia', `${drv(t.toDriverId).name} iniciou o checklist de recebimento`, { vehicleId: vid, driverId: t.toDriverId }); save(); }
       captureLocation(v);
@@ -839,7 +840,7 @@ PAGES.transferencia = {
         ${t.status === 'negada' ? `<dt>Entrega negada</dt><dd><b>${esc(t.denyReason || '—')}</b><br><span class="small muted">${esc(userName(t.deniedBy))} · ${fmtDT(t.deniedAt)}</span></dd>` : ''}
         ${t.status === 'cancelada' && t.cancelReason ? `<dt>Motivo do cancelamento</dt><dd>${esc(t.cancelReason)}</dd>` : ''}
         <dt>Checklist de entrega</dt><dd>${t.deliverChecklistId ? ckLink(t.deliverChecklistId) : '—'}</dd><dt>Checklist de recebimento</dt><dd>${t.receiveChecklistId ? ckLink(t.receiveChecklistId) : '—'}</dd></dl>
-        <div class="row">${act}${canCancel ? `<button class="btn danger" data-act="t-cancel" data-id="${t.id}">Cancelar solicitação</button>` : ''}${t.forced && isManager() && forcedUndo(t.vehicleId)?.c.id === t.fromCustodyId ? `<button class="btn danger" data-act="forced-undo" data-id="${t.vehicleId}">Cancelar transferência forçada</button>` : ''}${isStaff() ? `<button class="btn" data-go="veiculo" data-id="${v.id}">Histórico do veículo</button>` : ''}</div>
+        <div class="row">${act}${canCancel ? `<button class="btn danger" data-act="t-cancel" data-id="${t.id}">Cancelar solicitação</button>` : ''}${tCanAdminCancel(t) ? `<button class="btn danger" data-act="t-adm-cancel" data-id="${t.id}">Cancelar transferência</button>` : ''}${t.forced && isManager() && forcedUndo(t.vehicleId)?.c.id === t.fromCustodyId ? `<button class="btn danger" data-act="forced-undo" data-id="${t.vehicleId}">Cancelar transferência forçada</button>` : ''}${isStaff() ? `<button class="btn" data-go="veiculo" data-id="${v.id}">Histórico do veículo</button>` : ''}</div>
       </div></div>
       <div class="panel"><div class="panel-h"><h3>Registro</h3></div><div class="panel-b"><ul class="tl">${t.events.slice().reverse().map(e => `<li class="${e.status === 'concluida' ? 'ok' : e.status === 'cancelada' ? 'gray' : e.status === 'negada' ? 'bad' : ''}"><span class="t">${fmtDate(e.at)} ${fmtTime(e.at)}</span><div class="x">${T_LABEL[e.status]}<small>${esc(e.note || '')} · ${esc(userName(e.by))}</small></div></li>`).join('')}</ul></div></div>
     </div>`;

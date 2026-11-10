@@ -54,3 +54,17 @@ window.FSET = (T, disc) => { // posse da Ana (d1) encerrada por transferência f
 window.FUNDO = why => { ACTIONS['forced-undo']({ dataset: { id: 'v1' } }); const w = $('#fu-why'); if (w) w.value = why; ACTIONS['forced-undo-ok']({ dataset: { id: 'v1' } }); };
 // v1.17.0: veículo v2 locado
 window.RENT = (T, o) => { const v = veh('v2'); v.ownership = 'locada'; v.rental = { company: 'Locadora X', pickupDate: T('2026-08-05T00:00'), dueDate: T('2027-08-05T00:00'), monthly: 3000, status: 'ativa', history: [], ...o }; return v; };
+// v1.18.0: transferência entregue (Ana → Bruno) com checklist de recebimento em andamento
+window.TSET = () => { // Ana (d1) entregou o v1; Bruno (d2) começou o checklist de recebimento e parou
+  const T = FIX(); CUR = S.users[0]; DRAFT = null;
+  S.checklists.push({ id: 'r1', type: 'recebimento', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T('2026-10-19T08:00'), serverAt: T('2026-10-19T08:00'), km: 15000, items: {}, photos: {} });
+  S.checklists.push({ id: 'e1', type: 'entrega', vehicleId: 'v1', driverId: 'd1', custodyId: 'c1', at: T('2026-10-20T09:00'), serverAt: T('2026-10-20T09:00'), km: 15100, items: {}, photos: {} });
+  S.custody.push({ id: 'c1', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-19T08:00'), end: T('2026-10-20T09:00'), startKm: 15000, endKm: 15100, receiveChecklistId: 'r1', deliverChecklistId: 'e1', segments: [{ at: T('2026-10-19T08:00'), projectId: 'p1' }], closedReason: 'transferencia', transferId: 'tt' });
+  S.transfers.push({ id: 'tt', vehicleId: 'v1', fromDriverId: 'd1', toDriverId: 'd2', status: 'recebimento_andamento', requestedAt: T('2026-10-20T08:00'), forced: false, requestedBy: 'u_d2', fromCustodyId: 'c1', toCustodyId: null, deliverChecklistId: 'e1', receiveChecklistId: null, events: [] });
+  S.vehicles[0].odometer = 15100; return T;
+};
+window.TCANCEL = (dest, why = 'Bruno desistiu de receber') => {
+  ACTIONS['t-adm-cancel']({ dataset: { id: 'tt' } });
+  const r = $(`input[name="tac-dest"][value="${dest}"]`); if (r && !r.disabled) r.checked = true;
+  $('#tac-why').value = why; ACTIONS['t-adm-cancel-ok']({ dataset: { id: 'tt' } });
+};

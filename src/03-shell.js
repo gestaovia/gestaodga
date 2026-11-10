@@ -245,7 +245,8 @@ function toast(msg) {
 /* ----- eventos globais ----- */
 document.addEventListener('click', e => {
   const g = e.target.closest('[data-go]');
-  if (g) {
+  const a0 = e.target.closest('[data-act]');
+  if (g && !(a0 && a0 !== g && g.contains(a0))) { // botão de ação dentro de uma linha clicável: vale a ação (v1.18.0)
     e.preventDefault(); const p = {}; Object.entries(g.dataset).forEach(([k, v]) => { if (k !== 'go') p[k] = v; });
     // botão dentro do próprio formulário (ex.: Cancelar) sai direto; fora dele, pergunta antes
     if (FORM_DIRTY && !g.closest('#app form')) return confirmLeave(() => go(g.dataset.go, p));

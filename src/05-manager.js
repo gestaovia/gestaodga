@@ -262,7 +262,7 @@ PAGES.veiculo = {
     if (tab === 'posses') body = tbl(['Condutor', 'Início', 'Fim', 'Duração', '>Km rodados', 'Obras'], S.custody.filter(x => x.vehicleId === id).sort((a, b) => b.start - a.start).map(x => `<tr><td>${drvLink(x.driverId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td class="nowrap">${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || v.odometer) - x.startKm)}</td><td>${custObras(x)}</td></tr>`));
     if (tab === 'ck') body = checklistTable(S.checklists.filter(k => k.vehicleId === id));
     if (tab === 'fuel') body = `${isStaff() ? `<div class="panel-b" style="padding-bottom:0"><button class="btn ok sm" data-go="lancar_abastecimento" data-vid="${id}">${ic('plus')}Lançar abastecimento</button></div>` : ''}${fuelTable(S.fuel.filter(f => f.vehicleId === id))}`;
-    if (tab === 'mnt') body = `${planEditor(v)}<div class="panel-h"><h3>Serviços realizados</h3>${isManager() ? `<button class="btn sm" data-act="mr-new" data-vid="${id}">${ic('plus')}Lançar manutenção realizada</button>` : ''}</div>${maintRecordsTable(S.maintRecords.filter(r => r.vehicleId === id), { noVeh: true })}`;
+    if (tab === 'mnt') body = `<div class="panel-h"><h3>Serviços realizados</h3>${isManager() ? `<button class="btn sm" data-act="mr-new" data-vid="${id}">${ic('plus')}Lançar manutenção realizada</button>` : ''}</div>${maintRecordsTable(S.maintRecords.filter(r => r.vehicleId === id), { noVeh: true })}${planEditor(v)}`;
     if (tab === 'docs') body = docsTab(v);
     if (tab === 'tf') body = `<div class="panel-h"><h3>Pedágios</h3></div>${tollTable(S.tolls.filter(x => x.plate === v.plate))}<div class="panel-h"><h3>Multas</h3></div>${fineTable(liveFines().filter(x => x.plate === v.plate))}`;
     return `<div class="stack">
@@ -504,6 +504,60 @@ ACTIONS['forced-undo-ok'] = a => {
   save(); closeModal(); toast('Transferência forçada cancelada. Posse reaberta.'); render();
 };
 
+/* ---------- Cancelar transferência já entregue (v1.18.0 · somente administrador) ----------
+   Depois da entrega (aguardando recebimento / checklist de recebimento em andamento) o novo condutor pode desistir
+   ou o veículo ficar parado. O administrador cancela e escolhe o destino do veículo:
+   - devolver ao condutor anterior: a mesma posse é reaberta (como se não tivesse sido encerrada);
+   - deixar no pátio: o veículo fica sem condutor e qualquer condutor pode recebê-lo com o checklist completo.
+   Motivo obrigatório; fica na transferência, na linha do tempo e na posse (custody.reopened). */
+const isAdmin = () => !!CUR && CUR.role === 'admin';
+const tCanAdminCancel = t => !!t && isAdmin() && ['aguardando_recebimento', 'recebimento_andamento'].includes(t.status);
+function tReturnInfo(t) {
+  const v = veh(t.vehicleId);
+  if (t.forced) return { blk: 'transferência forçada: use "Cancelar transferência forçada" para devolver ao condutor anterior.' };
+  const c = t.fromCustodyId ? byId(S.custody, t.fromCustodyId) : null;
+  if (!c || !c.end) return { blk: 'a posse anterior não foi encontrada.' };
+  if (activeCustody(v.id)) return { blk: 'o veículo já está com outro condutor.' };
+  if (v.maintenance) return { blk: 'o veículo está em manutenção.' };
+  if (S.custody.some(x => x.vehicleId === v.id && x !== c && x.start >= c.end)) return { blk: 'alguém recebeu o veículo depois da entrega.' };
+  const d = drv(c.driverId);
+  if (!d || d.active === false) return { blk: `${d ? esc(d.name) : 'o condutor anterior'} está inativo.` };
+  if (S.settings.oneVehiclePerDriver && driverCustodies(d.id).length) return { blk: `${esc(d.name)} já está com o ${esc(veh(driverCustodies(d.id)[0].vehicleId).plate)}.` };
+  return { c };
+}
+ACTIONS['t-adm-cancel'] = a => {
+  const t = byId(S.transfers, a.dataset.id); if (!tCanAdminCancel(t)) return toast('Esta transferência não pode ser cancelada.');
+  const v = veh(t.vehicleId); const from = drv(t.fromDriverId)?.name || '—'; const to = drv(t.toDriverId)?.name || '—';
+  const r = tReturnInfo(t); const pc = t.fromCustodyId ? byId(S.custody, t.fromCustodyId) : null;
+  openModal({ title: `Cancelar transferência · ${v.plate}`, body: `<dl class="dl"><dt>Entregue por</dt><dd>${esc(from)}${pc?.end ? ` em ${fmtDT(pc.end)}${pc.endKm != null ? ` · ${nf(pc.endKm)} km` : ''}` : ''}</dd><dt>Liberada para</dt><dd>${esc(to)}</dd><dt>Situação</dt><dd>${T_LABEL[t.status]}</dd></dl>
+      <div class="note warn">${ic('alert')}<div>Ação do administrador: a liberação para <b>${esc(to)}</b> é cancelada. Os dois condutores são avisados.</div></div>
+      <div class="field"><span>O que fazer com o veículo</span><div class="stack" style="gap:8px;margin-top:4px">
+        <label class="row" style="gap:8px;align-items:flex-start;${r.c ? '' : 'opacity:.55'}"><input type="radio" name="tac-dest" value="volta" ${r.c ? 'checked' : 'disabled'}><span>Devolver para <b>${esc(from)}</b><br><small class="muted">A posse é reaberta, como se a entrega não tivesse acontecido.</small></span></label>
+        <label class="row" style="gap:8px;align-items:flex-start"><input type="radio" name="tac-dest" value="patio" ${r.c ? '' : 'checked'}><span>Deixar no pátio, sem condutor<br><small class="muted">Qualquer condutor pode receber depois, com o checklist completo.</small></span></label>
+        ${r.blk ? `<small class="muted">Não dá para devolver: ${r.blk}</small>` : ''}</div></div>
+      <label class="field"><span>Motivo</span><textarea class="inp" id="tac-why" maxlength="300" placeholder="Ex.: ${esc(to.split(' ')[0])} desistiu de receber; veículo parado na obra"></textarea></label><p class="err" id="tac-err" role="alert"></p>`,
+    foot: `<button class="btn" data-act="modal-close">Voltar</button><button class="btn danger" data-act="t-adm-cancel-ok" data-id="${t.id}">Cancelar transferência</button>` });
+};
+ACTIONS['t-adm-cancel-ok'] = a => {
+  const t = byId(S.transfers, a.dataset.id); if (!tCanAdminCancel(t)) { closeModal(); return toast('Esta transferência não pode ser cancelada.'); }
+  const why = ($('#tac-why')?.value || '').trim(); if (why.length < 5) return $('#tac-err').textContent = 'Informe o motivo (pelo menos 5 caracteres).';
+  const dest = $('input[name="tac-dest"]:checked')?.value || 'patio';
+  const v = veh(t.vehicleId); const now = nowTs(); const from = drv(t.fromDriverId)?.name || ''; let back = false;
+  if (dest === 'volta') {
+    const r = tReturnInfo(t); if (!r.c) return $('#tac-err').textContent = 'Não dá para devolver: ' + r.blk.replace(/<[^>]+>/g, '');
+    const c = r.c;
+    (c.reopened = c.reopened || []).push({ at: now, by: CUR.id, reason: why, end: c.end, endKm: c.endKm, deliverChecklistId: c.deliverChecklistId || null, transferId: t.id });
+    c.end = null; c.endKm = null; c.closedReason = null; c.transferId = null; c.deliverChecklistId = null; back = true;
+  }
+  t.cancelReason = why; t.cancelledAt = now; t.cancelledBy = CUR.id; t.cancelDest = back ? 'condutor_anterior' : 'patio';
+  setTransfer(t, 'cancelada', `Cancelada pelo administrador ${CUR.name} após a entrega (${back ? `veículo devolvido para ${from}` : 'veículo no pátio'}): ${why}`);
+  log('transferencia', `Transferência cancelada pelo administrador ${CUR.name} após a entrega: ${back ? `posse de ${from} reaberta` : 'veículo no pátio, sem condutor'}. Motivo: ${why}`, { vehicleId: v.id, driverId: back ? t.fromDriverId : t.toDriverId });
+  notify(t.toDriverId, `O administrador cancelou a transferência do ${v.plate} para você: ${why}`, { level: 'warn' });
+  notify(t.fromDriverId, back ? `O administrador cancelou a transferência do ${v.plate}: o veículo voltou para a sua posse.` : `O administrador cancelou a transferência do ${v.plate}. O veículo ficou no pátio, sem condutor.`, { level: 'warn', link: { page: 'inicio' } });
+  if (DRAFT?.kind === 'receber' && DRAFT.vid === v.id) DRAFT = null;
+  save(); closeModal(); toast(back ? `Transferência cancelada. ${v.plate} voltou para ${from}.` : `Transferência cancelada. ${v.plate} no pátio, sem condutor.`); render();
+};
+
 /* ---------- Transferências ---------- */
 PAGES.transferencias = {
   title: 'Transferências',
@@ -513,11 +567,12 @@ PAGES.transferencias = {
     const list = S.transfers.filter(flt).sort((a, b) => b.requestedAt - a.requestedAt);
     const late = t => tOpen(t) && nowTs() - t.requestedAt > S.settings.transferAlertHours * 36e5;
     const order = T_STATUS.map(s => s[0]);
+    const M = isManager();
     const rows = list.map(t => { const i = order.indexOf(t.status); return `<tr class="click" data-go="transferencia" data-id="${t.id}"><td>${plate(veh(t.vehicleId).plate)}</td><td><div class="person"><span class="avatar">${initials(drv(t.fromDriverId)?.name || '—')}</span>${esc(drv(t.fromDriverId)?.name || '—')}</div></td><td>→</td><td><div class="person"><span class="avatar">${initials(drv(t.toDriverId)?.name || 'P')}</span>${esc(drv(t.toDriverId)?.name || 'Pátio')}</div></td>
-      <td style="min-width:150px"><div class="row" style="gap:6px;flex-wrap:nowrap">${pill(T_LABEL[t.status], t.status === 'concluida' ? 'ok' : t.status === 'cancelada' ? '' : t.status === 'negada' ? 'bad' : late(t) ? 'urg' : 'warn')}${t.forced ? pill('forçada') : ''}</div>${!['cancelada', 'negada'].includes(t.status) ? `<div class="bar ${t.status === 'concluida' ? 'ok' : 'blue'}" style="margin-top:6px"><i style="width:${(i / (order.length - 1)) * 100}%"></i></div>` : ''}</td><td class="nowrap small muted">${fmtShort(t.requestedAt)}</td></tr>`; });
+      <td style="min-width:150px"><div class="row" style="gap:6px;flex-wrap:nowrap">${pill(T_LABEL[t.status], t.status === 'concluida' ? 'ok' : t.status === 'cancelada' ? '' : t.status === 'negada' ? 'bad' : late(t) ? 'urg' : 'warn')}${t.forced ? pill('forçada') : ''}</div>${!['cancelada', 'negada'].includes(t.status) ? `<div class="bar ${t.status === 'concluida' ? 'ok' : 'blue'}" style="margin-top:6px"><i style="width:${(i / (order.length - 1)) * 100}%"></i></div>` : ''}</td><td class="nowrap small muted">${fmtShort(t.requestedAt)}</td>${M ? `<td class="r nowrap">${tCanAdminCancel(t) ? `<button class="btn sm danger" data-act="t-adm-cancel" data-id="${t.id}">Cancelar</button>` : tCanCancel(t) ? `<button class="btn sm danger" data-act="t-cancel" data-id="${t.id}">Cancelar</button>` : ''}</td>` : ''}</tr>`; });
     const n = s => S.transfers.filter(t => inF(t, s)).length;
     return `<div class="page-head"><div class="filters">${[['abertas', 'Em andamento'], ['concluidas', 'Concluídas'], ['nao', 'Negadas ou canceladas'], ['todas', 'Todas']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-go="transferencias" data-f="${k}">${l}<span class="n">${n(k)}</span></button>`).join('')}</div>${isManager() ? `<button class="btn" data-act="force-pick">${ic('swap')}Transferência forçada</button>` : ''}</div>
-      <div class="panel">${tbl(['Veículo', 'De', '', 'Para', 'Situação', 'Solicitada'], rows, 'Nenhuma transferência neste filtro.')}</div>`;
+      <div class="panel">${tbl(['Veículo', 'De', '', 'Para', 'Situação', 'Solicitada', ...(M ? [''] : [])], rows, 'Nenhuma transferência neste filtro.')}</div>`;
   }
 };
 ACTIONS['force-pick'] = () => { const inUse = S.vehicles.filter(v => activeCustody(v.id)); openModal({

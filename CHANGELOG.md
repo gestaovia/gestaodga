@@ -7,6 +7,16 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.18.0 — 10/11/2026
+- **Administrador cancela transferência já entregue.** Quando o condutor anterior já entregou o veículo (*Aguardando recebimento* ou *Checklist de recebimento em andamento*) e o novo condutor desiste de receber ou o veículo fica parado, o administrador pode cancelar a transferência — pelo botão **Cancelar** na lista de **Transferências** ou por **Cancelar transferência** na tela da transferência. Motivo obrigatório. Ele escolhe o destino do veículo:
+  - **Devolver ao condutor anterior:** a mesma posse é reaberta, como se a entrega não tivesse acontecido (não disponível se ele estiver inativo, já estiver com outro veículo, se o veículo estiver em manutenção ou se for transferência forçada — esta continua com "Cancelar transferência forçada");
+  - **Deixar no pátio, sem condutor:** qualquer condutor pode receber depois, com o checklist completo.
+  Os dois condutores são avisados; o motivo fica na transferência e na linha do tempo do veículo. Somente o perfil Administrador (antes da entrega, a gestão continua cancelando a solicitação como já fazia).
+- **Serviços realizados no topo** da tela Manutenção (e da aba Manutenção do veículo), com o botão **Lançar manutenção realizada**.
+- **Checklist de recebimento: km começa vazio.** O condutor confere o hodômetro e digita (antes vinha preenchido com o último km), como no checklist diário.
+- Testes: 110 casos (`UI=1 node tests/run.js`).
+- Banco: sem migration (a gestão já podia alterar transferências e posses no servidor). Compatível com a v1.17.0.
+
 ## v1.17.0 — 10/11/2026
 - **Checklist diário sem foto: correção.** A regra da v1.16.0 (km digitado e foto do hodômetro obrigatórios) estava certa no sistema publicado, mas o aplicativo instalado no celular podia continuar aberto em segundo plano com a versão antiga na memória — e o banco aceitava o diário sem foto. Agora:
   - **O banco recusa** checklist diário sem quilometragem ou sem a foto do painel (migration `20261110000015_gestaovia_diario_foto_obrigatoria`, também em `supabase/EXECUTAR-NO-SQL-EDITOR-v1.17.0.sql`). Quem ainda estiver com a versão antiga recebe "Não foi possível salvar: … Feche e abra o aplicativo para atualizar".

@@ -304,4 +304,46 @@ t('locação sem km contratado ou devolvida: sem aviso', () => {
   return { ok: a === null && rentalKmState(v) === null };
 });
 t('atualização: compara versões', () => ({ ok: verCmp('1.17.0', '1.16.0') > 0 && verCmp('1.16.0', '1.16.0') === 0 && verCmp('1.9.1', '1.10.0') < 0 && verCmp('2.0.0', '1.99.9') > 0 }));
+
+// ---------- v1.18.0: administrador cancela transferência já entregue; recebimento sem km; serviços realizados no topo ----------
+t('cancelar transferência entregue: só o administrador (gestor e condutor não)', () => {
+  TSET(); const t = S.transfers[0]; const a = tCanAdminCancel(t);
+  CUR = { id: 'u_g', name: 'Gestor', role: 'gestor', active: true }; const g = tCanAdminCancel(t);
+  CUR = S.users[2]; const d = tCanAdminCancel(t); CUR = S.users[0];
+  t.status = 'solicitada'; const antes = tCanAdminCancel(t);
+  return { ok: a && !g && !d && !antes, a, g, d, antes };
+});
+t('cancelar transferência entregue: devolver ao condutor anterior reabre a mesma posse', () => {
+  TSET(); TCANCEL('volta'); const t = S.transfers[0]; const c = activeCustody('v1'); closeModal();
+  return { ok: t.status === 'cancelada' && t.cancelDest === 'condutor_anterior' && c?.id === 'c1' && c.end === null && c.reopened?.length === 1 && c.reopened[0].endKm === 15100 && !activeTransfer('v1') && S.notifications.some(n => n.to === 'd1' && /voltou para a sua posse/.test(n.text)), st: t.status, c: c?.id };
+});
+t('cancelar transferência entregue: deixar no pátio libera o veículo para qualquer condutor', () => {
+  TSET(); TCANCEL('patio'); const t = S.transfers[0]; closeModal();
+  const rc = receiveCheck(veh('v1'), 'd2');
+  return { ok: t.status === 'cancelada' && t.cancelDest === 'patio' && !activeCustody('v1') && !activeTransfer('v1') && rc.ok && !rc.t && S.custody[0].end != null, st: t.status, rc: rc.msg };
+});
+t('cancelar transferência entregue: motivo obrigatório', () => {
+  TSET(); TCANCEL('patio', 'x'); const st = S.transfers[0].status; const err = $('#tac-err')?.textContent; closeModal();
+  return { ok: st === 'recebimento_andamento' && /motivo/.test(err), st, err };
+});
+t('cancelar transferência entregue: não devolve se o condutor anterior já pegou outro veículo', () => {
+  const T = TSET(); S.settings.oneVehiclePerDriver = true;
+  S.custody.push({ id: 'c9', vehicleId: 'v2', driverId: 'd1', start: T('2026-10-20T10:00'), end: null, startKm: 30000, segments: [] });
+  ACTIONS['t-adm-cancel']({ dataset: { id: 'tt' } }); const dis = $('input[name="tac-dest"][value="volta"]').disabled; const msg = $('.modal')?.textContent || document.body.textContent;
+  TCANCEL('volta'); closeModal(); const t = S.transfers[0];
+  return { ok: dis && /XYZ9K88/.test(msg) && t.cancelDest === 'patio' && !activeCustody('v1'), dis, dest: t.cancelDest };
+});
+t('lista de transferências: botão Cancelar para o administrador', () => {
+  TSET(); go('transferencias', {}); const b = $('[data-act="t-adm-cancel"][data-id="tt"]');
+  return { ok: !!b && !!b.closest('tr[data-go="transferencia"]') };
+});
+t('checklist de recebimento: km começa vazio', () => {
+  TSET(); CUR = S.users[2]; DRAFT = null; go('receber', { vid: 'v1' }); const inp = $('#ckform [name=km]');
+  const r = { ok: DRAFT?.km === '' && inp && inp.value === '', km: DRAFT?.km, v: inp?.value }; DRAFT = null; FORM_DIRTY = false; CUR = S.users[0]; return r;
+});
+t('manutenção: serviços realizados no topo da tela', () => {
+  MSET(); go('manutencao', {}); const h = [...document.querySelectorAll('#app h3, #app th')].map(x => x.textContent.trim());
+  const i = h.indexOf('Serviços realizados'), j = h.indexOf('Controle');
+  return { ok: i >= 0 && j > i, i, j };
+});
 module.exports = C;
