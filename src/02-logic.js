@@ -194,6 +194,40 @@ function rentalState(v) {
   return { days, lvl };
 }
 
+/* ----- km contratado da locação (v1.17.0) -----
+   rental.kmLimit = km contratado; rental.kmMode = 'mes' (franquia mensal, ciclo a partir do dia da retirada) ou
+   'contrato' (total do contrato, da retirada ao prazo de devolução); rental.pickupKm = km na retirada.
+   Km usado = km atual do veículo − km no início do ciclo (último registro até aquele dia; na retirada, pickupKm).
+   Aviso: atenção a partir de kmWarnPct (80%) ou quando o ritmo atual passa do contratado até o fim do ciclo;
+   urgente a partir de kmUrgentPct (90%); excedido a partir de 100%. */
+function kmCycle(r, now = nowTs()) {
+  if (r.kmMode === 'contrato') return [r.pickupDate, Math.max(r.dueDate, r.pickupDate + DAY)];
+  const pd = new Date(r.pickupDate); const day = pd.getDate(); const n = new Date(now);
+  const at = (y, m) => { const last = new Date(y, m + 1, 0).getDate(); return new Date(y, m, Math.min(day, last), 0, 0, 0, 0).getTime(); };
+  let a = at(n.getFullYear(), n.getMonth()); if (a > now) { const p = new Date(n.getFullYear(), n.getMonth() - 1, 1); a = at(p.getFullYear(), p.getMonth()); }
+  a = Math.max(a, startOfDay(r.pickupDate)); const ad = new Date(a); const nx = new Date(ad.getFullYear(), ad.getMonth() + 1, 1);
+  return [a, at(nx.getFullYear(), nx.getMonth())];
+}
+function kmAtStart(v, ts) {
+  const r = v.rental; if (r.pickupKm != null && startOfDay(ts) <= startOfDay(r.pickupDate)) return +r.pickupKm;
+  const pts = [...S.checklists.filter(k => k.vehicleId === v.id && k.km).map(k => [k.at, k.km]), ...S.fuel.filter(f => f.vehicleId === v.id && f.km).map(f => [f.at, f.km]),
+    ...S.custody.filter(c => c.vehicleId === v.id).flatMap(c => [[c.start, c.startKm], ...(c.end && c.endKm ? [[c.end, c.endKm]] : [])])].filter(p => p[1]);
+  const before = pts.filter(p => p[0] <= ts).sort((a, b) => b[0] - a[0])[0]; if (before) return Math.max(before[1], r.pickupKm || 0);
+  const after = pts.filter(p => p[0] > ts).sort((a, b) => a[0] - b[0])[0]; // sem registro antes: o primeiro do ciclo
+  return after ? after[1] : (r.pickupKm != null ? +r.pickupKm : v.odometer);
+}
+function rentalKmState(v) {
+  const r = v?.rental; if (v.ownership !== 'locada' || !r || r.status !== 'ativa' || !(+r.kmLimit > 0)) return null;
+  const now = nowTs(); const [from, to] = kmCycle(r, now); const limit = +r.kmLimit; const R = S.settings.rental || {};
+  const start = kmAtStart(v, from); const used = Math.max(0, (v.odometer || 0) - start); const pct = used / limit * 100;
+  const frac = Math.min(1, Math.max(0, (now - from) / (to - from))); const proj = frac >= 0.15 ? used / frac : null;
+  const warn = +R.kmWarnPct || 80, urg = +R.kmUrgentPct || 90;
+  const lvl = pct >= 100 ? 'vencido' : pct >= urg ? 'urgente' : (pct >= warn || (proj != null && proj > limit)) ? 'atencao' : 'normal';
+  return { from, to, start, used, limit, pct, rem: limit - used, proj, lvl, mode: r.kmMode === 'contrato' ? 'contrato' : 'mes' };
+}
+const kmModeLabel = m => m === 'contrato' ? 'no contrato' : 'por mês';
+const rentalKmText = k => k.rem < 0 ? `${nf(-k.rem)} km acima do contratado` : `${nf(k.used)} de ${nf(k.limit)} km ${k.mode === 'mes' ? 'no mês' : 'do contrato'} (${nf(k.pct, 0)}%)`;
+
 /* ----- projeção de manutenção pelo uso médio ----- */
 function avgDailyKm(vid) {
   const now = nowTs(); const km = kmInPeriod(now - 30 * DAY, now, c => c.vehicleId === vid);
@@ -225,6 +259,8 @@ function attentionItems() {
       const sub = s.lvl === 'vencido' ? (s.remKm != null && s.remKm <= 0 ? `Vencida há ${nf(-s.remKm)} km` : `Vencida há ${-s.remDays} dias`) : (s.remKm != null && s.remKm <= S.settings.maint.urgentKm ? `Faltam ${nf(s.remKm)} km` : `Faltam ${s.remDays} dias`);
       out.push({ c: M_LEVEL[s.lvl].c, r: s.lvl === 'vencido' ? 8 : 4, icon: 'wrench', title: `${v.plate} · ${p.item}`, sub, text: `Veículo ${v.plate}: ${p.item} — ${sub.toLowerCase()}.`, at: null, go: { page: 'calendario', vid: v.id } });
     });
+    const rk = rentalKmState(v);
+    if (rk && rk.lvl !== 'normal') out.push({ c: M_LEVEL[rk.lvl].c, r: rk.lvl === 'vencido' ? 8 : rk.lvl === 'urgente' ? 6 : 2, icon: 'gauge', title: `${v.plate} · km da locação`, sub: rk.lvl === 'vencido' ? rentalKmText(rk) : `${rentalKmText(rk)}${rk.proj != null && rk.proj > rk.limit ? ` · ritmo para ${nf(rk.proj)} km` : ''}`, text: `Locação do ${v.plate}: ${rentalKmText(rk)}.`, at: null, go: { page: 'veiculo', id: v.id } });
     const rs = rentalState(v);
     if (rs && rs.lvl !== 'normal') out.push({ c: M_LEVEL[rs.lvl].c, r: rs.lvl === 'vencido' ? 9 : rs.lvl === 'urgente' ? 6 : 2, icon: 'key', title: `${v.plate} · locação`, sub: rs.days < 0 ? `Devolução vencida há ${-rs.days} dias` : rs.days === 0 ? 'Devolver ou renovar hoje' : `Devolver ou renovar em ${rs.days} dias`, text: `Locação do ${v.plate} vence em ${rs.days} dias.`, at: null, go: { page: 'veiculo', id: v.id } });
   });
@@ -254,7 +290,8 @@ function fleetCounts() {
     semCk: S.vehicles.filter(needsDaily).length,
     semObra: S.vehicles.filter(v => { const c = activeCustody(v.id); return c && !c.segments.length; }).length,
     locados: S.vehicles.filter(v => v.ownership === 'locada' && v.rental?.status === 'ativa').length,
-    locVence: S.vehicles.filter(v => { const r = rentalState(v); return r && r.lvl !== 'normal'; }).length
+    locVence: S.vehicles.filter(v => { const r = rentalState(v); return r && r.lvl !== 'normal'; }).length,
+    locKm: S.vehicles.filter(v => { const r = rentalKmState(v); return r && r.lvl !== 'normal'; }).length
   };
 }
 

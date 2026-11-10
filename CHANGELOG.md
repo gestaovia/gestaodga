@@ -7,6 +7,17 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.17.0 — 10/11/2026
+- **Checklist diário sem foto: correção.** A regra da v1.16.0 (km digitado e foto do hodômetro obrigatórios) estava certa no sistema publicado, mas o aplicativo instalado no celular podia continuar aberto em segundo plano com a versão antiga na memória — e o banco aceitava o diário sem foto. Agora:
+  - **O banco recusa** checklist diário sem quilometragem ou sem a foto do painel (migration `20261110000015_gestaovia_diario_foto_obrigatoria`, também em `supabase/EXECUTAR-NO-SQL-EDITOR-v1.17.0.sql`). Quem ainda estiver com a versão antiga recebe "Não foi possível salvar: … Feche e abra o aplicativo para atualizar".
+  - **O aplicativo se atualiza sozinho:** ao voltar para a tela (e a cada 10 min) ele confere a versão publicada (`version.json`). Sem formulário em andamento, envia o que falta e recarrega; com formulário em andamento, mostra a faixa "Nova versão" e atualiza assim que o formulário termina. O service worker passa a buscar a página sempre direto da rede.
+- **Km contratado nos veículos locados.** No cadastro do veículo locado: **Km contratado**, **Km contratado vale** (*por mês* — franquia mensal, contada a partir do dia da retirada — ou *no contrato todo*) e **Km na retirada** (opcional). Também dá para trocar o km contratado na **Renovação**.
+  - Tela do veículo: barra com o km usado no mês (ou no contrato), quanto falta e a projeção no ritmo atual.
+  - Aviso em **Atenção necessária** (painel), no cartão do veículo e na tela dele: *atenção* a partir de 80% do contratado ou quando o ritmo atual vai passar do contratado até o fim do ciclo; *urgente* a partir de 90%; *excedido* acima de 100%. Percentuais em Configurações › Regras.
+  - O km usado é o km atual do veículo menos o último km registrado (checklists, abastecimentos e posses) até o início do ciclo.
+- Testes: 102 casos (`UI=1 node tests/run.js`).
+- Banco: migration `20261110000015_gestaovia_diario_foto_obrigatoria` (gatilho em `checklists`). Campos novos da locação ficam em `rental` (sem migration). Compatível com a v1.16.0.
+
 ## v1.16.0 — 09/11/2026
 - **Checklist diário: foto do hodômetro obrigatória e km sem sugestão.** O campo de quilometragem começa vazio (antes vinha preenchido com o último km e o condutor confirmava sem conferir) e o diário só é concluído com o km digitado **e** a foto do painel com o hodômetro. Vale para os diários feitos a partir de hoje; os anteriores não mudam.
 - **Abastecimento: limite por registro de 60 litros e R$ 500,00** (condutor e gestão). Acima disso o registro é recusado com "Confira os litros informados" / "Confira o valor total informado", sem mostrar o limite na tela.

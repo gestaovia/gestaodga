@@ -124,6 +124,7 @@ function vehicleCard(v) {
     ${nx ? `<div><div class="row small" style="justify-content:space-between;margin-bottom:5px"><span class="muted">${esc(nx.p.item)}</span><b class="num" style="color:${nx.s.lvl === 'normal' ? 'var(--text2)' : `var(--${{ atencao: 'yellow', urgente: 'orange', vencido: 'red' }[nx.s.lvl]})`}">${nx.s.remKm > 0 ? `${nf(nx.s.remKm)} km` : 'vencida'}</b></div><div class="bar ${M_LEVEL[nx.s.lvl].c}"><i style="width:${pct}%"></i></div></div>` : ''}
     <div class="foot"><span class="tags">${ownTag(v)}${fleetTag(v)}${seatsTag(v)}${docBadge(v)}</span><span class="num">${km(v.odometer)}</span></div>
     ${rs ? `<div class="note ${rs.lvl === 'normal' ? '' : M_LEVEL[rs.lvl].c}" style="padding:7px 10px;font-size:.78rem">${ic('key')}<div>${rs.days < 0 ? `Devolução vencida há ${-rs.days} dias` : `Devolver ou renovar até ${fmtDate(v.rental.dueDate)}`}</div></div>` : ''}
+    ${(() => { const rk = rentalKmState(v); return rk && rk.lvl !== 'normal' ? `<div class="note ${M_LEVEL[rk.lvl].c}" style="padding:7px 10px;font-size:.78rem">${ic('gauge')}<div>Km da locação: ${rentalKmText(rk)}</div></div>` : ''; })()}
   </div>`;
 }
 PAGES.veiculos = {
@@ -163,6 +164,9 @@ function vehicleForm(v = {}) {
       <label class="field"><span>Data de retirada</span><input class="inp" type="date" name="pickupDate" value="${dateInput(r.pickupDate)}"></label>
       <label class="field"><span>Prazo para devolução ou renovação</span><input class="inp" type="date" name="dueDate" value="${dateInput(r.dueDate)}"></label>
       <label class="field"><span>Valor mensal (R$)</span><input class="inp num" name="monthly" inputmode="decimal" value="${r.monthly ? nf(r.monthly, 2) : ''}"></label>
+      <label class="field"><span>Km contratado</span><input class="inp num" name="kmLimit" inputmode="numeric" value="${r.kmLimit ? nf(r.kmLimit) : ''}" placeholder="Ex.: 3.000"></label>
+      <label class="field"><span>Km contratado vale</span><select class="inp" name="kmMode"><option value="mes" ${r.kmMode !== 'contrato' ? 'selected' : ''}>Por mês (franquia mensal)</option><option value="contrato" ${r.kmMode === 'contrato' ? 'selected' : ''}>No contrato todo</option></select></label>
+      <label class="field"><span>Km na retirada</span><input class="inp num" name="pickupKm" inputmode="numeric" value="${r.pickupKm != null ? nf(r.pickupKm) : ''}" placeholder="Opcional"></label>
     </div></div>
     <p class="err" id="vf-err"></p></form>`;
 }
@@ -185,7 +189,9 @@ ACTIONS['veh-save'] = a => {
   if (d.ownership === 'locada') {
     if (!d.company || !d.pickupDate || !d.dueDate) return err('Para veículo locado, informe locadora, data de retirada e prazo de devolução.');
     if (parseDate(d.dueDate) <= parseDate(d.pickupDate)) return err('O prazo de devolução deve ser depois da retirada.');
-    rental = { ...(edit?.rental || { history: [] }), company: d.company, contract: d.contract, pickupDate: parseDate(d.pickupDate), dueDate: parseDate(d.dueDate), monthly: numv(d.monthly) || 0, status: 'ativa' };
+    const kmL = parseInt(String(d.kmLimit || '').replace(/\D/g, ''), 10) || null; const pk = String(d.pickupKm || '').replace(/\D/g, ''); const pkm = pk ? parseInt(pk, 10) : null;
+    if (pkm != null && pkm > Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0)) return err('O km na retirada não pode passar da quilometragem atual.');
+    rental = { ...(edit?.rental || { history: [] }), company: d.company, contract: d.contract, pickupDate: parseDate(d.pickupDate), dueDate: parseDate(d.dueDate), monthly: numv(d.monthly) || 0, kmLimit: kmL, kmMode: d.kmMode === 'contrato' ? 'contrato' : 'mes', pickupKm: pkm, status: 'ativa' };
   }
   const fields = { brand: d.brand, model: d.model, year: +d.year, fuelType: d.fuelType, seats: +d.seats || null, avgKmL: numv(d.avgKmL) || 10, odometer: Math.max(+String(d.odometer).replace(/\D/g, ''), edit?.odometer || 0), tracker: edit?.tracker ?? false, ownership: d.ownership, fleet: d.fleet === 'comercial' ? 'comercial' : 'obra', rental, tollTag: d.tollTag !== 'nao', tagNumber: (d.tagNumber || '').replace(/\s/g, '') };
   if (edit) { const fl = vFleet(edit) !== fields.fleet; Object.assign(edit, fields); log('cadastro', `Cadastro do veículo atualizado por ${CUR.name}${fl ? ` · uso: ${FLEETS[fields.fleet].toLowerCase()}` : ''}`, { vehicleId: edit.id }); save(); closeModal(); toast('Veículo atualizado.'); return render(); }
@@ -203,7 +209,7 @@ ACTIONS['rent-renew'] = a => {
   const v = veh(a.dataset.id);
   openModal({
     title: `Renovar locação · ${v.plate}`, body: `<div class="pairs"><div><dt>Prazo atual</dt><dd>${fmtDate(v.rental.dueDate)}</dd></div><div><dt>Locadora</dt><dd>${esc(v.rental.company)}</dd></div></div>
-      <div class="form-grid"><label class="field"><span>Novo prazo</span><input class="inp" type="date" id="rn-date" value="${dateInput(v.rental.dueDate + 180 * DAY)}"></label><label class="field"><span>Valor mensal (R$)</span><input class="inp num" id="rn-val" value="${nf(v.rental.monthly, 2)}"></label><label class="field full"><span>Nº do aditivo / contrato</span><input class="inp" id="rn-ct" value="${esc(v.rental.contract || '')}"></label></div><p class="err" id="rn-err"></p>`,
+      <div class="form-grid"><label class="field"><span>Novo prazo</span><input class="inp" type="date" id="rn-date" value="${dateInput(v.rental.dueDate + 180 * DAY)}"></label><label class="field"><span>Valor mensal (R$)</span><input class="inp num" id="rn-val" value="${nf(v.rental.monthly, 2)}"></label><label class="field full"><span>Nº do aditivo / contrato</span><input class="inp" id="rn-ct" value="${esc(v.rental.contract || '')}"></label><label class="field"><span>Km contratado</span><input class="inp num" id="rn-km" value="${v.rental.kmLimit ? nf(v.rental.kmLimit) : ''}"></label><label class="field"><span>Km contratado vale</span><select class="inp" id="rn-mode"><option value="mes" ${v.rental.kmMode !== 'contrato' ? 'selected' : ''}>Por mês</option><option value="contrato" ${v.rental.kmMode === 'contrato' ? 'selected' : ''}>No contrato todo</option></select></label></div><p class="err" id="rn-err"></p>`,
     foot: `<button class="btn" data-act="modal-close">Cancelar</button><button class="btn ok" data-act="rent-renew-ok" data-id="${v.id}">Renovar</button>`
   });
 };
@@ -212,6 +218,7 @@ ACTIONS['rent-renew-ok'] = a => {
   if (!nd || nd <= v.rental.dueDate) return $('#rn-err').textContent = 'O novo prazo deve ser depois do prazo atual.';
   v.rental.history.push({ at: nowTs(), from: v.rental.dueDate, to: nd, by: CUR.id });
   v.rental.dueDate = nd; v.rental.monthly = parseFloat($('#rn-val').value.replace(/\./g, '').replace(',', '.')) || v.rental.monthly; v.rental.contract = $('#rn-ct').value;
+  const rk = parseInt(($('#rn-km')?.value || '').replace(/\D/g, ''), 10); v.rental.kmLimit = rk || null; v.rental.kmMode = $('#rn-mode')?.value === 'contrato' ? 'contrato' : 'mes';
   log('locacao', `Locação renovada até ${fmtDate(nd)} (${v.rental.company})`, { vehicleId: v.id }); save(); closeModal(); toast('Locação renovada.'); render();
 };
 ACTIONS['rent-return'] = a => {
@@ -277,7 +284,8 @@ PAGES.veiculo = {
           : `<div class="empty" style="padding:20px">${v.maintenance ? `Em manutenção desde ${fmtDate(v.maintenanceSince)}<br><small>${esc(v.maintenanceNote || '')}</small>` : 'Sem condutor · no pátio'}</div>`}</div></div>
         <div class="panel"><div class="panel-h"><h3>Localização</h3><span class="muted small" id="route-info">${loc ? `${esc(loc.what)} · ${fmtShort(loc.at)}` : ''}</span></div><div class="panel-b">${loc ? '<div class="fleet-map sm" id="veh-map"></div>' : empty('Sem localização registrada.')}</div></div>
         ${v.ownership === 'locada' && v.rental ? `<div class="panel"><div class="panel-h"><h3>Contrato de locação</h3>${rs ? `<span class="pill ${M_LEVEL[rs.lvl].c === 'gray' ? 'ok' : M_LEVEL[rs.lvl].c}">${rs.days < 0 ? 'Vencida' : rs.days + ' dias'}</span>` : pill('Devolvida')}</div><div class="panel-b stack" style="gap:10px">
-          <dl class="pairs"><div><dt>Locadora</dt><dd>${esc(v.rental.company)}</dd></div><div><dt>Contrato</dt><dd>${esc(v.rental.contract || '—')}</dd></div><div><dt>Retirada</dt><dd>${fmtDate(v.rental.pickupDate)}</dd></div><div><dt>Devolver/renovar</dt><dd>${fmtDate(v.rental.dueDate)}</dd></div></dl>
+          <dl class="pairs"><div><dt>Locadora</dt><dd>${esc(v.rental.company)}</dd></div><div><dt>Contrato</dt><dd>${esc(v.rental.contract || '—')}</dd></div><div><dt>Retirada</dt><dd>${fmtDate(v.rental.pickupDate)}</dd></div><div><dt>Devolver/renovar</dt><dd>${fmtDate(v.rental.dueDate)}</dd></div>${v.rental.kmLimit ? `<div><dt>Km contratado</dt><dd class="num">${nf(v.rental.kmLimit)} km ${kmModeLabel(v.rental.kmMode)}</dd></div>` : ''}</dl>
+          ${(() => { const rk = rentalKmState(v); if (!rk) return ''; const tone = 's-' + (rk.lvl === 'normal' ? 'ok' : M_LEVEL[rk.lvl].c); return `<div><div class="row small" style="justify-content:space-between;margin-bottom:5px"><span class="muted">Km ${rk.mode === 'mes' ? `no mês (${fmtDate(rk.from).slice(0, 5)} a ${fmtDate(rk.to - 1).slice(0, 5)})` : 'do contrato'}</span><b class="num">${nf(rk.used)} / ${nf(rk.limit)}</b></div><div class="bar ${tone}"><i style="width:${Math.min(100, Math.max(3, rk.pct))}%"></i></div><div class="tiny muted" style="margin-top:4px">${rk.rem >= 0 ? `Restam ${nf(rk.rem)} km` : `<b style="color:var(--red)">${nf(-rk.rem)} km acima do contratado</b>`}${rk.proj != null ? ` · no ritmo atual: ${nf(rk.proj)} km até ${fmtDate(rk.to - 1)}` : ''}</div></div>`; })()}
           ${rs ? `<div class="bar ${M_LEVEL[rs.lvl].c === 'gray' ? '' : M_LEVEL[rs.lvl].c}"><i style="width:${Math.min(100, Math.max(3, (nowTs() - v.rental.pickupDate) / (v.rental.dueDate - v.rental.pickupDate) * 100))}%"></i></div>` : ''}
           ${M && rs ? `<div class="row"><button class="btn sm pri" data-act="rent-renew" data-id="${id}">Renovar</button><button class="btn sm" data-act="rent-return" data-id="${id}">Devolver</button></div>` : ''}</div></div>`
           : qrPanel(v, qr)}

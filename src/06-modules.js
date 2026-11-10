@@ -209,7 +209,7 @@ PAGES.configuracoes = {
       <label class="field"><span>Manutenção: atenção a (dias)</span><input class="inp num" name="attentionDays" value="${st.maint.attentionDays}"></label><label class="field"><span>Manutenção: urgente a (dias)</span><input class="inp num" name="urgentDays" value="${st.maint.urgentDays}"></label>
       <label class="field"><span>Consumo fora do padrão acima de (%)</span><input class="inp num" name="fuelDeviationPct" value="${st.fuelDeviationPct}"></label>
       <label class="field"><span>Conferir km quando subir mais de (km desde o último registro)</span><input class="inp num" name="kmJumpMax" value="${st.kmJumpMax ?? 2000}"></label>
-      <label class="field"><span>Locação: avisar com (dias)</span><input class="inp num" name="rentWarn" value="${st.rental.warnDays}"></label><label class="field"><span>Locação: urgente com (dias)</span><input class="inp num" name="rentUrg" value="${st.rental.urgentDays}"></label>
+      <label class="field"><span>Locação: avisar com (dias)</span><input class="inp num" name="rentWarn" value="${st.rental.warnDays}"></label><label class="field"><span>Locação: urgente com (dias)</span><input class="inp num" name="rentUrg" value="${st.rental.urgentDays}"></label><label class="field"><span>Km da locação: avisar com (% do contratado)</span><input class="inp num" name="rentKmWarn" value="${st.rental.kmWarnPct ?? 80}"></label><label class="field"><span>Km da locação: urgente com (%)</span><input class="inp num" name="rentKmUrg" value="${st.rental.kmUrgentPct ?? 90}"></label>
       <div class="full"><button class="btn ok">Salvar regras</button></div></form>`;
     if (tab === 'usuarios') body = cloudUsersTab();
     if (tab === 'obras') body = projectsTab();
@@ -222,7 +222,7 @@ PAGES.configuracoes = {
     const f = $('#cfg-form');
     f?.addEventListener('submit', e => {
       e.preventDefault(); const d = formData(f); const st = S.settings; const n = x => parseFloat(String(x).replace(',', '.'));
-      if (f.dataset.sec === 'regras') { st.transferAlertHours = n(d.transferAlertHours); st.oneVehiclePerDriver = d.oneVehiclePerDriver === '1'; st.requirePhotos = d.requirePhotos === '1'; Object.assign(st.maint, { attentionKm: n(d.attentionKm), urgentKm: n(d.urgentKm), attentionDays: n(d.attentionDays), urgentDays: n(d.urgentDays) }); st.fuelDeviationPct = n(d.fuelDeviationPct); st.kmJumpMax = Math.max(100, n(d.kmJumpMax) || 2000); st.rental = { warnDays: n(d.rentWarn), urgentDays: n(d.rentUrg) }; }
+      if (f.dataset.sec === 'regras') { st.transferAlertHours = n(d.transferAlertHours); st.oneVehiclePerDriver = d.oneVehiclePerDriver === '1'; st.requirePhotos = d.requirePhotos === '1'; Object.assign(st.maint, { attentionKm: n(d.attentionKm), urgentKm: n(d.urgentKm), attentionDays: n(d.attentionDays), urgentDays: n(d.urgentDays) }); st.fuelDeviationPct = n(d.fuelDeviationPct); st.kmJumpMax = Math.max(100, n(d.kmJumpMax) || 2000); st.rental = { warnDays: n(d.rentWarn), urgentDays: n(d.rentUrg), kmWarnPct: Math.min(99, Math.max(1, n(d.rentKmWarn) || 80)), kmUrgentPct: Math.min(100, Math.max(1, n(d.rentKmUrg) || 90)) }; }
       log('config', `Configurações alteradas (${f.dataset.sec}) por ${CUR.name}`, {}); save(); toast('Configurações salvas.');
     });
   }

@@ -52,3 +52,5 @@ window.FSET = (T, disc) => { // posse da Ana (d1) encerrada por transferência f
   S.transfers.push({ id: 'tf', vehicleId: 'v1', fromDriverId: 'd1', toDriverId: 'd2', status: 'aguardando_recebimento', requestedAt: T('2026-10-20T09:00'), forced: true, justification: 'teste', discount: disc, fromCustodyId: 'c1', events: [] });
 };
 window.FUNDO = why => { ACTIONS['forced-undo']({ dataset: { id: 'v1' } }); const w = $('#fu-why'); if (w) w.value = why; ACTIONS['forced-undo-ok']({ dataset: { id: 'v1' } }); };
+// v1.17.0: veículo v2 locado
+window.RENT = (T, o) => { const v = veh('v2'); v.ownership = 'locada'; v.rental = { company: 'Locadora X', pickupDate: T('2026-08-05T00:00'), dueDate: T('2027-08-05T00:00'), monthly: 3000, status: 'ativa', history: [], ...o }; return v; };

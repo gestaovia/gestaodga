@@ -18,6 +18,7 @@ scripts/release.py       gera as pastas de uma versão (alteracoes e completo)
 index.html               aplicativo pronto para publicar
 icons/ favicon.ico       logo do GestaoVia (navegador e app instalado); refazer com scripts/icones.py <logo.png>
 manifest.webmanifest     dados do app instalável (PWA)
+version.json             versão publicada (o app aberto no celular confere e se atualiza sozinho)
 sw.js                    service worker do PWA (abre a última versão sem internet) (cópia de dist/index.html, usada pelo GitHub Pages)
 dist/index.html          aplicativo pronto para publicar
 tests/                   testes automáticos (UI=1 node tests/run.js)

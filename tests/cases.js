@@ -275,4 +275,33 @@ t('manutenção passada: mais antiga que o plano não volta o plano; km acima do
   ACTIONS['mr-new-save'](); const err = $('#mr-err').textContent; closeModal();
   return { ok: keep && /km atual/.test(err) && S.maintRecords.length === 1, err };
 });
+
+// ---------- v1.17.0 ----------
+t('locação: km por mês conta desde o dia da retirada (ciclo de 05/10 a 04/11)', () => {
+  const T = FIX(); CUR = S.users[0]; const v = RENT(T, { kmLimit: 3000, kmMode: 'mes' });
+  S.checklists.push({ id: 'a', type: 'diario', vehicleId: 'v2', at: T('2026-10-04T08:00'), km: 29000 }, { id: 'b', type: 'diario', vehicleId: 'v2', at: T('2026-10-10T08:00'), km: 29500 });
+  v.odometer = 30000; const k = rentalKmState(v);
+  return { ok: dayKey(k.from) === '2026-10-05' && dayKey(k.to) === '2026-11-05' && k.start === 29000 && k.used === 1000 && k.lvl === 'normal', k };
+});
+t('locação: aviso em 80%, urgente em 90%, excedido acima de 100%', () => {
+  const T = FIX(); CUR = S.users[0]; const v = RENT(T, { kmLimit: 3000, kmMode: 'mes' });
+  S.checklists.push({ id: 'a', type: 'diario', vehicleId: 'v2', at: T('2026-10-04T08:00'), km: 27000 });
+  const at = o => { v.odometer = o; return rentalKmState(v).lvl; };
+  const r = [at(29400), at(29700), at(30100)]; const att = attentionItems().some(x => /km da locação/.test(x.title));
+  return { ok: r.join() === 'atencao,urgente,vencido' && att, r };
+});
+t('locação: ritmo acima do contratado já avisa (projeção)', () => {
+  const T = FIX(); CUR = S.users[0]; const v = RENT(T, { kmLimit: 3000, kmMode: 'mes' });
+  S.checklists.push({ id: 'a', type: 'diario', vehicleId: 'v2', at: T('2026-10-04T08:00'), km: 28000 }); v.odometer = 30000; // 2.000 km em 15 dias
+  const k = rentalKmState(v); return { ok: k.pct < 80 && k.proj > 3000 && k.lvl === 'atencao', pct: k.pct, proj: k.proj };
+});
+t('locação: km no contrato todo usa o km na retirada', () => {
+  const T = FIX(); CUR = S.users[0]; const v = RENT(T, { kmLimit: 40000, kmMode: 'contrato', pickupKm: 20000 }); v.odometer = 26000;
+  const k = rentalKmState(v); return { ok: k.start === 20000 && k.used === 6000 && dayKey(k.from) === '2026-08-05' && k.lvl === 'normal', k };
+});
+t('locação sem km contratado ou devolvida: sem aviso', () => {
+  const T = FIX(); const v = RENT(T, {}); const a = rentalKmState(v); v.rental.kmLimit = 100; v.rental.status = 'devolvida';
+  return { ok: a === null && rentalKmState(v) === null };
+});
+t('atualização: compara versões', () => ({ ok: verCmp('1.17.0', '1.16.0') > 0 && verCmp('1.16.0', '1.16.0') === 0 && verCmp('1.9.1', '1.10.0') < 0 && verCmp('2.0.0', '1.99.9') > 0 }));
 module.exports = C;
