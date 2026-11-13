@@ -346,4 +346,87 @@ t('manutenção: serviços realizados no topo da tela', () => {
   const i = h.indexOf('Serviços realizados'), j = h.indexOf('Controle');
   return { ok: i >= 0 && j > i, i, j };
 });
+
+// ---------- v1.19.0: painel da frota, placa Mercosul e lavagem ----------
+t('painel: veículo inativo (devolvido à locadora) não conta como disponível', () => {
+  FIX(); CUR = S.users[0]; S.vehicles.push({ id: 'v9', plate: 'OLD1A11', brand: 'Fiat', model: 'Mobi', year: 2020, odometer: 50000, ownership: 'locada', rental: { status: 'devolvida' }, active: false });
+  const k = fleetCounts(); go('dashboard', {}); const kp = [...document.querySelectorAll('.kpi')].find(x => /Disponíveis/.test(x.textContent))?.querySelector('.v')?.textContent;
+  return { ok: k.disp === 2 && k.total === 2 && kp === '2' && !attentionItems().some(a => /OLD1A11/.test(a.title)), disp: k.disp, total: k.total, kp };
+});
+t('painel: veículos disponíveis no topo da lista de status', () => {
+  const T = FIX(); CUR = S.users[0];
+  S.custody.push({ id: 'c1', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-20T08:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-20T08:00'), projectId: 'p1' }] });
+  go('dashboard', {}); const rows = [...document.querySelectorAll('.vlist .vrow')].map(r => r.dataset.id);
+  return { ok: rows[0] === 'v2' && rows[1] === 'v1', rows };
+});
+t('placa: faixa azul Mercosul', () => {
+  FIX(); CUR = S.users[0]; go('veiculo', { id: 'v1' }); const i = document.querySelector('.plate i'); const lg = document.querySelector('.plate.lg i');
+  const bg = getComputedStyle(i).backgroundColor; const txt = getComputedStyle(lg, '::after').content;
+  return { ok: bg === 'rgb(0, 57, 166)' && /BRASIL/.test(txt), bg, txt };
+});
+t('lavagem: gestão registra placa, dia, km e valor', () => {
+  FIX(); CUR = S.users[0]; const err = WASH('v1', '2026-10-15', '14.800', '45,00'); const w = S.vehicles[0].washes?.[0];
+  return { ok: !err && w && w.km === 14800 && w.value === 45 && new Date(w.at).getDate() === 15 && w.by === 'u_adm' && S.audit.some(a => a.type === 'lavagem' && a.vehicleId === 'v1'), err, w };
+});
+t('lavagem: km acima do atual, valor vazio e dia repetido são recusados', () => {
+  FIX(); CUR = S.users[0]; const a = WASH('v1', '2026-10-15', '15.500', '45'); const b = WASH('v1', '2026-10-15', '14.900', ''); const c = WASH('v1', '2026-10-21', '14.900', '40');
+  WASH('v1', '2026-10-15', '14.900', '40'); const d = WASH('v1', '2026-10-15', '14.950', '40');
+  return { ok: /km atual/.test(a) && /valor/.test(b) && /hoje ou antes/.test(c) && /Já existe/.test(d) && S.vehicles[0].washes.length === 1, a, b, c, d };
+});
+t('lavagem: só a gestão registra', () => {
+  FIX(); CUR = S.users[1]; ACTIONS['wash-new']({ dataset: {} }); const open = !!$('#wash-form'); closeModal(); CUR = S.users[0];
+  return { ok: !open };
+});
+t('lavagem: lembrete pelo prazo (30 dias) em Atenção, calendário e notificação única', () => {
+  FIX(); CUR = S.users[0]; WASH('v1', '2026-09-15', '14.000', '40'); WASH('v2', '2026-10-17', '29.000', '40');
+  const s1 = washState(veh('v1')), s2 = washState(veh('v2'));
+  const att = attentionItems().filter(a => a.icon === 'wash');
+  washRemind(); washRemind(); const n = S.notifications.filter(x => x.to === 'gestao' && x.link?.page === 'lavagens');
+  const cal = calEvents(startOfDay(nowTs()), startOfDay(nowTs()) + 40 * DAY).filter(e => e.kind === 'wash');
+  return { ok: s1.lvl === 'vencido' && s1.days === -5 && s2.lvl === 'normal' && att.length === 1 && /ABC1D23/.test(att[0].title) && n.length === 1 && /ABC1D23/.test(n[0].text) && cal.length === 2, s1: [s1.lvl, s1.days], s2: s2.lvl, att: att.length, n: n.length, cal: cal.length };
+});
+t('lavagem: aviso antes do prazo (5 dias)', () => {
+  FIX(); CUR = S.users[0]; WASH('v1', '2026-09-23', '14.000', '40'); const s = washState(veh('v1'));
+  return { ok: s.lvl === 'atencao' && s.days === 3 && s.remind, lvl: s.lvl, days: s.days };
+});
+t('lavagem: checklist com limpeza ruim depois da lavagem pede nova lavagem e avisa a gestão', () => {
+  const T = FIX(); CUR = S.users[0]; WASH('v1', '2026-10-10', '14.000', '40');
+  S.checklists.push({ id: 'old', type: 'recebimento', vehicleId: 'v1', driverId: 'd1', at: T('2026-10-05T08:00'), items: { limpeza: 'ruim' } });
+  const antes = washState(veh('v1')).lvl;
+  CUR = S.users[1]; DRAFT = { items: { limpeza: 'ruim' }, avarias: '', notes: '', photos: {}, fuel: '1/2', geo: null };
+  saveFullChecklist('recebimento', veh('v1'), 'd1', null, 15010); DRAFT = null; CUR = S.users[0];
+  const s = washState(veh('v1')); const att = attentionItems().find(a => a.icon === 'wash'); const n = S.notifications.find(x => /limpeza marcada como RUIM/.test(x.text));
+  WASH('v1', '2026-10-20', '15.010', '40'); const depois = washState(veh('v1')).lvl;
+  return { ok: antes === 'normal' && s.lvl === 'ruim' && !!att && att.c === 'urg' && !!n && n.to === 'gestao' && /Ana Souza/.test(n.text) && depois === 'normal', antes, lvl: s.lvl, n: n?.text, depois };
+});
+t('lavagem: veículo na oficina não gera lembrete', () => {
+  FIX(); CUR = S.users[0]; WASH('v1', '2026-09-01', '14.000', '40'); veh('v1').maintenance = true;
+  return { ok: !washState(veh('v1')).remind && !attentionItems().some(a => a.icon === 'wash') };
+});
+t('lavagem: prazo configurável em Configurações › Regras', () => {
+  FIX(); CUR = S.users[0]; WASH('v1', '2026-09-15', '14.000', '40');
+  go('configuracoes', { tab: 'regras' }); const f = $('#cfg-form'); f.querySelector('[name=washEvery]').value = '45'; f.querySelector('[name=washWarn]').value = '7';
+  f.dispatchEvent(new Event('submit', { cancelable: true })); const s = washState(veh('v1'));
+  return { ok: S.settings.wash.everyDays === 45 && S.settings.wash.warnDays === 7 && s.lvl === 'normal' && s.days === 10, wash: S.settings.wash, lvl: s.lvl, days: s.days };
+});
+t('lavagem: entra nos custos e no relatório por veículo', () => {
+  FIX(); CUR = S.users[0]; WASH('v1', '2026-10-15', '14.800', '45,50');
+  const rows = periodCosts(startOfMonth(nowTs()), nowTs() + 1).filter(r => r.kind === 'Lavagem'); const rep = monthReport('2026-10').vehicles.find(o => o.placa === 'ABC1D23');
+  return { ok: rows.length === 1 && rows[0].value === 45.5 && rep?.lavagem === 45.5 && rep.total >= 45.5, rows: rows.length, rep: rep && [rep.lavagem, rep.total] };
+});
+t('lavagem: editar e excluir (com motivo)', () => {
+  FIX(); CUR = S.users[0]; WASH('v1', '2026-10-15', '14.800', '45'); const w = veh('v1').washes[0];
+  ACTIONS['wash-edit']({ dataset: { vid: 'v1', id: w.id } }); $('#wash-form [name=value]').value = '50,00'; ACTIONS['wash-save']({ dataset: { id: w.id } }); closeModal();
+  const ed = w.value;
+  ACTIONS['wash-del']({ dataset: { vid: 'v1', id: w.id } }); $('#wash-why').value = 'x'; ACTIONS['wash-del-ok']({ dataset: { vid: 'v1', id: w.id } }); const still = veh('v1').washes.length; const e2 = $('#wash-err2').textContent;
+  $('#wash-why').value = 'lançada em duplicidade'; ACTIONS['wash-del-ok']({ dataset: { vid: 'v1', id: w.id } }); closeModal();
+  return { ok: ed === 50 && still === 1 && /motivo/.test(e2) && veh('v1').washes.length === 0 && S.audit.some(a => /Lavagem excluída/.test(a.text)), ed, still };
+});
+t('lavagem: tela Lavagens e aba do veículo', () => {
+  FIX(); CUR = S.users[0]; WASH('v1', '2026-09-15', '14.000', '40');
+  go('lavagens', { f: '' }); const tx = $('#app').textContent; go('lavagens', { f: 'lavar' }); const rows = document.querySelectorAll('#app tbody tr').length; const navOk = !!document.querySelector('[data-go="lavagens"]');
+  go('veiculo', { id: 'v1', tab: 'lav' }); const tv = $('#app').textContent; go('veiculos', {}); const card = document.querySelector('.vcard[data-id="v1"]')?.textContent || '';
+  WASH_F = '';
+  return { ok: /Situação da frota/.test(tx) && /Lavagens registradas/.test(tx) && rows >= 2 && navOk && /Lavagem vencida/.test(tv) && /Lavagem vencida/.test(card), rows };
+});
 module.exports = C;

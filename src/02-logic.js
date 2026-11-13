@@ -164,6 +164,7 @@ function periodCosts(from, to) {
   liveFines().filter(f => inP(f.at)).forEach(f => { const m = fineMatch(f); rows.push({ kind: 'Multas', value: f.value, vehicleId: m.vehicleId, driverId: m.driverId, projectId: m.projectId }); });
   S.maintRecords.filter(r => inP(r.at)).forEach(r => { const c = custodyAt(r.vehicleId, r.at); rows.push({ kind: 'Manutenção', value: r.cost, vehicleId: r.vehicleId, driverId: null, projectId: c ? segmentAt(c, r.at)?.projectId : null }); });
   rows.push(...docCosts(from, to));
+  rows.push(...washCosts(from, to));
   return rows;
 }
 function kmInPeriod(from, to, filter = () => true) {
@@ -251,7 +252,7 @@ function attentionItems() {
     const v = veh(i.vehicleId);
     out.push({ c: i.severity === 'critica' || !i.canRun ? 'bad' : i.severity === 'alta' ? 'urg' : 'warn', r: i.severity === 'critica' ? 10 : 6, icon: 'alert', title: `${v.plate} · ${i.type}`, sub: `Problema ${SEVERITY[i.severity].l.toLowerCase()}${i.canRun ? '' : ' · bloqueado'}`, text: `Veículo ${v.plate} possui problema ${SEVERITY[i.severity].l.toLowerCase()}: ${i.type}.`, at: i.at, go: { page: 'veiculo', id: v.id } });
   });
-  S.vehicles.forEach(v => {
+  S.vehicles.filter(v => v.active).forEach(v => { // v1.19.0: veículo inativo (devolvido) não gera aviso
     const c = activeCustody(v.id);
     if (c && !c.segments.length) out.push({ c: 'urg', r: 7, icon: 'pin', title: `${v.plate} sem obra`, sub: drv(c.driverId).name, text: `Veículo ${v.plate} está sem obra vinculada.`, at: c.start, go: { page: 'veiculo', id: v.id } });
     if (needsDaily(v)) out.push({ c: pastDeadline ? 'urg' : 'warn', r: pastDeadline ? 5 : 3, icon: 'check', title: `${v.plate} sem checklist hoje`, sub: `${drv(c.driverId).name}${pastDeadline ? ` · prazo ${deadlineNow()}` : ''}`, text: `Veículo ${v.plate} está sem checklist hoje.`, at: null, go: { page: 'veiculo', id: v.id } });
@@ -276,22 +277,26 @@ function attentionItems() {
   const unF = liveFines().filter(f => fineMatch(f).how === 'sem').length;
   if (unF) out.push({ c: 'warn', r: 1, icon: 'fine', title: `${unF} multa(s) sem condutor`, sub: 'Sem posse no horário', text: '', at: null, go: { page: 'multas' } });
   out.push(...docAttention());
+  out.push(...washAttention());
   return out.sort((a, b) => b.r - a.r);
 }
+/* v1.19.0: os números do painel contam só a frota ativa (a mesma lista da tela Veículos). Antes um veículo
+   inativo (ex.: devolvido à locadora) sem condutor entrava como "Disponível" e o cartão mostrava 1 a mais. */
 function fleetCounts() {
-  const st = S.vehicles.map(v => ({ v, s: vStatus(v) }));
+  const act = S.vehicles.filter(v => v.active);
+  const st = act.map(v => ({ v, s: vStatus(v) }));
   return {
-    total: S.vehicles.length,
-    emUso: S.vehicles.filter(v => activeCustody(v.id)).length,
+    total: act.length,
+    emUso: act.filter(v => activeCustody(v.id)).length,
     disp: st.filter(x => x.s === 'disponivel').length,
-    manut: S.vehicles.filter(v => v.maintenance).length,
-    manutVenc: S.vehicles.filter(v => vehicleMaint(v.id).worst === 'vencido').length,
-    pend: S.vehicles.filter(v => openIssues(v.id).length).length,
-    semCk: S.vehicles.filter(needsDaily).length,
-    semObra: S.vehicles.filter(v => { const c = activeCustody(v.id); return c && !c.segments.length; }).length,
-    locados: S.vehicles.filter(v => v.ownership === 'locada' && v.rental?.status === 'ativa').length,
-    locVence: S.vehicles.filter(v => { const r = rentalState(v); return r && r.lvl !== 'normal'; }).length,
-    locKm: S.vehicles.filter(v => { const r = rentalKmState(v); return r && r.lvl !== 'normal'; }).length
+    manut: act.filter(v => v.maintenance).length,
+    manutVenc: act.filter(v => vehicleMaint(v.id).worst === 'vencido').length,
+    pend: act.filter(v => openIssues(v.id).length).length,
+    semCk: act.filter(needsDaily).length,
+    semObra: act.filter(v => { const c = activeCustody(v.id); return c && !c.segments.length; }).length,
+    locados: act.filter(v => v.ownership === 'locada' && v.rental?.status === 'ativa').length,
+    locVence: act.filter(v => { const r = rentalState(v); return r && r.lvl !== 'normal'; }).length,
+    locKm: act.filter(v => { const r = rentalKmState(v); return r && r.lvl !== 'normal'; }).length
   };
 }
 

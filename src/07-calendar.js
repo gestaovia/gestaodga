@@ -15,6 +15,7 @@ function calEvents(from, to, vid) {
   });
   S.maintRecords.filter(r => (!vid || r.vehicleId === vid) && r.at >= from && r.at < to).forEach(r => ev.push({ date: startOfDay(r.at), kind: 'done', c: 'ok', lvl: 'ok', label: r.items.join(', '), plate: veh(r.vehicleId).plate, vid: r.vehicleId, rec: r }));
   ev.push(...docCalEvents(from, to, vid));
+  ev.push(...washCalEvents(from, to, vid));
   return ev.sort((a, b) => a.date - b.date || (M_LEVEL[b.lvl]?.r || 0) - (M_LEVEL[a.lvl]?.r || 0));
 }
 function upcomingEvents(days) { const t = startOfDay(nowTs()); return calEvents(t, t + days * DAY).filter(e => e.kind !== 'done'); }
@@ -54,6 +55,7 @@ ACTIONS['cal-nav'] = a => { const d = +a.dataset.d; CAL_M = d === 0 ? 0 : CAL_M 
 ACTIONS['cal-ev'] = a => {
   const k = a.dataset.k, id = a.dataset.id;
   if (k === 'doc') { closeModal(); return go('veiculo', { id, tab: 'docs' }); }
+  if (k === 'wash') { closeModal(); return go('veiculo', { id, tab: 'lav' }); }
   if (k === 'rent') { const v = veh(id); const rs = rentalState(v); return openModal({ title: `Locação · ${v.plate}`, body: `<div class="pairs"><div><dt>Locadora</dt><dd>${esc(v.rental.company)}</dd></div><div><dt>Contrato</dt><dd>${esc(v.rental.contract || '—')}</dd></div><div><dt>Retirada</dt><dd>${fmtDate(v.rental.pickupDate)}</dd></div><div><dt>Prazo</dt><dd>${fmtDate(v.rental.dueDate)} ${rs ? `(${rs.days < 0 ? 'vencida' : rs.days + ' dias'})` : ''}</dd></div></div>`, foot: `<button class="btn" data-go="veiculo" data-id="${v.id}">Abrir veículo</button>${isManager() ? `<button class="btn pri" data-act="rent-renew" data-id="${v.id}">Renovar</button>` : ''}` }); }
   if (k === 'done') { const r = byId(S.maintRecords, id); return openModal({ title: `Manutenção realizada · ${veh(r.vehicleId).plate}`, body: `<div class="pairs"><div><dt>Data</dt><dd>${fmtDate(r.at)}</dd></div><div><dt>Km</dt><dd>${nf(r.km)}</dd></div><div><dt>Serviços</dt><dd>${esc(r.items.join(', '))}</dd></div><div><dt>Custo</dt><dd>${money(r.cost)}</dd></div><div><dt>Oficina</dt><dd>${esc(recShop(r))}</dd></div></div>${r.notes ? `<p class="small muted">${esc(r.notes)}</p>` : ''}`, foot: isManager() ? `<button class="btn" data-act="mr-edit" data-id="${r.id}">${ic('edit')}Editar ou excluir</button>` : '' }); }
   const p = byId(S.plans, id); const v = veh(p.vehicleId); const d = planDue(p);

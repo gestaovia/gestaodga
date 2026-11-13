@@ -111,7 +111,7 @@ const DEFAULT_SETTINGS = () => ({
   dailyDeadline: '10:00', transferAlertHours: 4, oneVehiclePerDriver: true, requirePhotos: true,
   maint: { attentionKm: 1500, urgentKm: 500, attentionDays: 30, urgentDays: 7 }, fuelDeviationPct: 15, kmJumpMax: 2000,
   score: { criteria: { checklist: { on: true, weight: 30 }, conservacao: { on: true, weight: 20 }, abastecimento: { on: true, weight: 15 }, infracoes: { on: true, weight: 20 }, procedimentos: { on: true, weight: 15 } }, penalties: { atraso: 50, avaria: 5, limpeza: 2, leve: 3, media: 5, grave: 8, gravissima: 12, forcada: 5, semObra: 5, telemetria: 2 }, mode: 'faixas', minScore: 70, maxBonus: 300, tiers: [{ min: 90, value: 300 }, { min: 80, value: 200 }, { min: 70, value: 100 }] },
-  rental: { warnDays: 30, urgentDays: 7, kmWarnPct: 80, kmUrgentPct: 90 }, gps: GPS_DEF(), docs: { warnDays: 30, urgentDays: 7 },
+  rental: { warnDays: 30, urgentDays: 7, kmWarnPct: 80, kmUrgentPct: 90 }, gps: GPS_DEF(), docs: { warnDays: 30, urgentDays: 7 }, wash: { everyDays: 30, warnDays: 5 },
   bonus: { startPeriod: null, versions: [], closing: { auto: true }, holidays: [], odoSince: null }
 });
 function fillDefaults(dst, def) { for (const [k, v] of Object.entries(def)) { if (dst[k] === undefined || dst[k] === null) dst[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof dst[k] === 'object') fillDefaults(dst[k], v); } return dst; }
@@ -162,6 +162,7 @@ const CLOUD = {
       else go(homePage());
       try { autoCloseCheck(); } catch (e) { }
       try { ensureComProj(); } catch (e) { }
+      try { washRemind(); } catch (e) { }
       if (CUR.role === 'condutor') GPS.refresh();
       if (rec) toast(`${rec} registro(s) feito(s) sem conexão foram recuperados deste aparelho e estão sendo enviados.`);
     } catch (e) {

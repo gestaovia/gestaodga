@@ -68,3 +68,9 @@ window.TCANCEL = (dest, why = 'Bruno desistiu de receber') => {
   const r = $(`input[name="tac-dest"][value="${dest}"]`); if (r && !r.disabled) r.checked = true;
   $('#tac-why').value = why; ACTIONS['t-adm-cancel-ok']({ dataset: { id: 'tt' } });
 };
+// v1.19.0: lavagem pelo formulário (placa, dia, km, valor); devolve o texto de erro (vazio = gravou)
+window.WASH = (vid, date, kmv, value) => {
+  ACTIONS['wash-new']({ dataset: {} }); const f = $('#wash-form');
+  f.querySelector('[name=vid]').value = vid; f.querySelector('[name=date]').value = date; f.querySelector('[name=km]').value = kmv; f.querySelector('[name=value]').value = value;
+  ACTIONS['wash-save']({ dataset: {} }); const err = $('#wash-err')?.textContent || ''; closeModal(); return err;
+};

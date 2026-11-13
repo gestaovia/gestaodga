@@ -329,6 +329,7 @@ function saveFullChecklist(type, v, driverId, custodyId, kmv) {
   S.checklists.push(ck);
   v.odometer = Math.max(v.odometer, kmv); if (S.locations[v.id]) S.locations[v.id].km = v.odometer; kmJumpNote(v, driverId);
   const bad = CK_ITEMS.filter(([x]) => DRAFT.items[x] === 'ruim').map(([, l]) => l);
+  washCheckNotify(v, ck);
   log('checklist', `Checklist de ${CK_TYPES[type].toLowerCase()} concluído (${nf(kmv)} km)${bad.length || DRAFT.avarias ? ` com apontamentos: ${[...bad, DRAFT.avarias].filter(Boolean).join('; ')}` : ''}`, { vehicleId: v.id, driverId, data: { checklistId: ck.id } });
   return ck;
 }

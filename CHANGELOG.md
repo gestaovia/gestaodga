@@ -7,6 +7,19 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.19.0 — 13/11/2026
+- **Lavagem dos veículos.** Nova tela **Controle › Lavagens** (e aba **Lavagem** na tela do veículo). A gestão registra só **placa, dia, km e valor** — sem checklist. A lavagem pode ser editada ou excluída (com motivo); tudo fica na linha do tempo do veículo.
+  - **Lembrete para levar ao lavador:**
+    - pelo prazo: a cada **30 dias** depois da última lavagem, com aviso **5 dias antes** (os dois ajustáveis em **Configurações › Regras**);
+    - pelo checklist: quando um checklist completo (recebimento, entrega, devolução, entrada/saída de manutenção) marca **Limpeza = Ruim** depois da última lavagem. A gestão recebe a notificação na hora.
+  - O lembrete aparece em **Atenção** no painel, em **Próximos 30 dias**, no **Calendário**, no cartão do veículo e na tela Lavagens (filtro **Levar ao lavador**). Quando o prazo vence, a gestão recebe uma notificação (uma por prazo). Uma nova lavagem apaga o lembrete. Veículo na oficina ou inativo não gera lembrete; veículo sem nenhuma lavagem lançada só entra no lembrete pela limpeza ruim no checklist.
+  - O valor das lavagens entra nos custos: coluna **Lavagem** nos relatórios por veículo e por obra, total da frota no painel e em Indicadores (categoria Outros).
+- **Placas na cor Mercosul:** faixa azul no topo de todas as placas (na tela do veículo, com "BRASIL") e na etiqueta do QR Code.
+- **Cartão "Disponíveis" mostrava 1 a mais.** O cartão contava também veículos inativos (ex.: devolvido à locadora), que não aparecem na lista. Agora todos os números do painel (Veículos, Em uso, Disponíveis, Manutenção, Locações) contam só a frota ativa, e veículo inativo não gera mais avisos em Atenção.
+- **Painel da frota:** em *Status dos veículos*, os **disponíveis aparecem primeiro**.
+- Testes: 124 casos (`UI=1 node tests/run.js`).
+- Banco: sem migration (as lavagens ficam no próprio cadastro do veículo). Compatível com a v1.18.0.
+
 ## v1.18.0 — 10/11/2026
 - **Administrador cancela transferência já entregue.** Quando o condutor anterior já entregou o veículo (*Aguardando recebimento* ou *Checklist de recebimento em andamento*) e o novo condutor desiste de receber ou o veículo fica parado, o administrador pode cancelar a transferência — pelo botão **Cancelar** na lista de **Transferências** ou por **Cancelar transferência** na tela da transferência. Motivo obrigatório. Ele escolhe o destino do veículo:
   - **Devolver ao condutor anterior:** a mesma posse é reaberta, como se a entrega não tivesse acontecido (não disponível se ele estiver inativo, já estiver com outro veículo, se o veículo estiver em manutenção ou se for transferência forçada — esta continua com "Cancelar transferência forçada");

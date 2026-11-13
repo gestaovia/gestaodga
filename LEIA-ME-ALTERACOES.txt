@@ -1,23 +1,31 @@
-gestaovia v1.18.0 — alterações em relação à v1.17.0 publicada no GitHub
+gestaovia v1.19.0 — alterações em relação à v1.18.0 publicada no GitHub
 
 Como aplicar no GitHub: envie os arquivos desta pasta mantendo as mesmas pastas (substituindo os que já existem).
 Não há nada para apagar. Não há SQL para rodar no Supabase nesta versão.
 O version.json da raiz é essencial: é por ele que o app aberto nos celulares se atualiza sozinho.
 
-Arquivos para enviar (todos alterados):
+Arquivos para enviar (src/23-lavagem.js é novo; os demais foram alterados):
   CHANGELOG.md
   VERSION
+  build.py
   dist/index.html
   dist/version.json
   index.html
   manifest.webmanifest
+  src/02-logic.js
   src/03-shell.js
   src/04-driver.js
   src/05-manager.js
   src/06-modules.js
+  src/07-calendar.js
   src/11-cloud.js
+  src/13-relatorios.js
+  src/18-indicadores.js
+  src/23-lavagem.js
+  src/styles.css
   tests/cases.js
   tests/fixture.js
   version.json
+  LEIA-ME-ALTERACOES.txt
 
 O que mudou: veja o topo do CHANGELOG.md.

@@ -43,9 +43,9 @@ function monthReport(key) {
     const f = r => r.vehicleId === v.id; const fuels = S.fuel.filter(x => x.vehicleId === v.id && inP(x.at));
     const kmv = kmInPeriod(from, to, c => c.vehicleId === v.id); const lit = sum(fuels, x => x.liters);
     const o = { placa: v.plate, veiculo: `${v.brand} ${v.model}`, frota: v.ownership === 'locada' ? 'Locada' : 'Própria', uso: vFleet(v) === 'comercial' ? 'Comercial' : 'Obra', km: Math.round(kmv), litros: lit, consumo: lit ? kmv / lit : null,
-      combustivel: sumK(f, 'Combustível'), pedagios: sumK(f, 'Pedágios'), multas: sumK(f, 'Multas'), manutencao: sumK(f, 'Manutenção'), documentacao: sumK(f, 'Documentação'), locacao: rentalInMonth(v, from, to),
+      combustivel: sumK(f, 'Combustível'), pedagios: sumK(f, 'Pedágios'), multas: sumK(f, 'Multas'), manutencao: sumK(f, 'Manutenção'), lavagem: sumK(f, 'Lavagem'), documentacao: sumK(f, 'Documentação'), locacao: rentalInMonth(v, from, to),
       checklists: S.checklists.filter(k => k.vehicleId === v.id && inP(k.at)).length, ocorrencias: S.issues.filter(i => i.vehicleId === v.id && inP(i.at)).length };
-    o.total = o.combustivel + o.pedagios + o.multas + o.manutencao + o.documentacao + o.locacao; o.custoKm = o.km > 0 ? o.total / o.km : null;
+    o.total = o.combustivel + o.pedagios + o.multas + o.manutencao + o.lavagem + o.documentacao + o.locacao; o.custoKm = o.km > 0 ? o.total / o.km : null;
     return o;
   }).filter(o => o.km || o.total || o.checklists).sort((a, b) => b.total - a.total);
   const drivers = S.drivers.filter(d => !d._ro).map(d => {
@@ -64,16 +64,16 @@ function monthReport(key) {
     const f = r => (r.projectId || '_') === id; const p = prj(id);
     const cs = S.custody.filter(c => c.start < to && (!c.end || c.end > from) && c.segments.some(s => (s.projectId || '_') === id));
     const o = { obra: p ? p.code : 'Sem obra', descricao: p?.name || 'Custos sem obra identificada', km: Math.round(kmP[id] || 0),
-      combustivel: sumK(f, 'Combustível'), pedagios: sumK(f, 'Pedágios'), multas: sumK(f, 'Multas'), manutencao: sumK(f, 'Manutenção'), documentacao: sumK(f, 'Documentação'),
+      combustivel: sumK(f, 'Combustível'), pedagios: sumK(f, 'Pedágios'), multas: sumK(f, 'Multas'), manutencao: sumK(f, 'Manutenção'), lavagem: sumK(f, 'Lavagem'), documentacao: sumK(f, 'Documentação'),
       veiculos: new Set(cs.map(c => c.vehicleId)).size, condutores: new Set(cs.map(c => c.driverId)).size };
-    o.total = o.combustivel + o.pedagios + o.multas + o.manutencao + o.documentacao; return o;
+    o.total = o.combustivel + o.pedagios + o.multas + o.manutencao + o.lavagem + o.documentacao; return o;
   }).filter(o => o.km || o.total).sort((a, b) => b.total - a.total);
   return { key, from, to, vehicles, drivers, projects };
 }
 const COLS = {
-  vehicles: [['placa', 'Placa'], ['veiculo', 'Veículo'], ['frota', 'Frota'], ['uso', 'Uso'], ['km', 'Km rodados', 'int'], ['litros', 'Litros', 'n1'], ['consumo', 'Km/l', 'n1'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multas', 'Multas', 'R$'], ['manutencao', 'Manutenção', 'R$'], ['documentacao', 'Documentação', 'R$'], ['locacao', 'Locação', 'R$'], ['total', 'Total', 'R$'], ['custoKm', 'Custo/km', 'R$'], ['checklists', 'Checklists', 'int'], ['ocorrencias', 'Ocorrências', 'int']],
+  vehicles: [['placa', 'Placa'], ['veiculo', 'Veículo'], ['frota', 'Frota'], ['uso', 'Uso'], ['km', 'Km rodados', 'int'], ['litros', 'Litros', 'n1'], ['consumo', 'Km/l', 'n1'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multas', 'Multas', 'R$'], ['manutencao', 'Manutenção', 'R$'], ['lavagem', 'Lavagem', 'R$'], ['documentacao', 'Documentação', 'R$'], ['locacao', 'Locação', 'R$'], ['total', 'Total', 'R$'], ['custoKm', 'Custo/km', 'R$'], ['checklists', 'Checklists', 'int'], ['ocorrencias', 'Ocorrências', 'int']],
   drivers: [['condutor', 'Condutor'], ['tipo', 'Tipo'], ['km', 'Km rodados', 'int'], ['posses', 'Posses', 'int'], ['possDias', 'Dias c/ posse*'], ['diarios', 'Diários feitos*'], ['atrasos', 'Atrasos*', 'int'], ['abastecimentos', 'Abastec.', 'int'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multasQtd', 'Multas (qtd)', 'int'], ['multas', 'Multas', 'R$'], ['total', 'Total', 'R$'], ['pontuacao', 'Pontuação*', 'int'], ['premio', 'Prêmio*', 'R$']],
-  projects: [['obra', 'Obra (CC)'], ['descricao', 'Descrição'], ['km', 'Km rodados', 'int'], ['veiculos', 'Veículos', 'int'], ['condutores', 'Condutores', 'int'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multas', 'Multas', 'R$'], ['manutencao', 'Manutenção', 'R$'], ['documentacao', 'Documentação', 'R$'], ['total', 'Total', 'R$']]
+  projects: [['obra', 'Obra (CC)'], ['descricao', 'Descrição'], ['km', 'Km rodados', 'int'], ['veiculos', 'Veículos', 'int'], ['condutores', 'Condutores', 'int'], ['combustivel', 'Combustível', 'R$'], ['pedagios', 'Pedágios', 'R$'], ['multas', 'Multas', 'R$'], ['manutencao', 'Manutenção', 'R$'], ['lavagem', 'Lavagem', 'R$'], ['documentacao', 'Documentação', 'R$'], ['total', 'Total', 'R$']]
 };
 const REP_TITLES = { vehicles: 'Por veículo', drivers: 'Por condutor', projects: 'Por obra', premiacao: 'Fechamento da premiação' };
 const fmtCell = (v, t) => v == null || v === '' ? '—' : typeof v === 'string' && t ? v : t === 'R$' ? money(v) : t === 'int' ? nf(v) : t === 'n1' ? nf(v, 1) : String(v);

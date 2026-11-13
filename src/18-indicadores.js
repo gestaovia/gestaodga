@@ -22,7 +22,7 @@
 let KPI_TREND = null;
 const KPI_F = { m: null, p: '', v: '', o: '', u: '' }; // mês AAAA-MM, obra ('_' = sem obra), veículo, tipo de frota ('propria' | 'locada'), uso ('obra' | 'comercial')
 const KPI_CATS = [['fuel', 'Combustível'], ['maint', 'Manutenção'], ['rent', 'Locação'], ['fines', 'Multas'], ['inc', 'Incidentes'], ['other', 'Outros']];
-const KIND_CAT = { 'Combustível': 'fuel', 'Manutenção': 'maint', 'Locação': 'rent', 'Multas': 'fines', 'Incidentes': 'inc', 'Pedágios': 'other', 'Documentação': 'other' };
+const KIND_CAT = { 'Combustível': 'fuel', 'Manutenção': 'maint', 'Locação': 'rent', 'Multas': 'fines', 'Incidentes': 'inc', 'Pedágios': 'other', 'Documentação': 'other', 'Lavagem': 'other' };
 const CAT_VAR = Object.fromEntries(KPI_CATS.map(([k], i) => [k, `var(--viz-${i + 1})`]));
 const isLeased = v => v?.ownership === 'locada';
 const ownVar = v => isLeased(v) ? 'var(--viz-2)' : 'var(--viz-1)';

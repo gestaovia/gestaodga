@@ -68,7 +68,8 @@ PAGES.dashboard = {
   render() {
     const k = fleetCounts(); const att = attentionItems(); const crit = att.filter(a => ['bad', 'urg'].includes(a.c)).length;
     const inUse = S.custody.filter(c => !c.end).sort((a, b) => a.start - b.start);
-    const order = { bloqueado: 0, pendencia: 1, aguardando_transferencia: 2, em_uso: 3, deslocamento: 3, parado: 4, manutencao: 5, disponivel: 6 };
+    // v1.19.0: disponíveis primeiro (os que podem ser entregues a um condutor agora), depois os que pedem atenção
+    const order = { disponivel: -1, bloqueado: 0, pendencia: 1, aguardando_transferencia: 2, em_uso: 3, deslocamento: 3, parado: 4, manutencao: 5 };
     const vs = S.vehicles.filter(v => v.active).slice().sort((a, b) => order[vStatus(a)] - order[vStatus(b)] || a.plate.localeCompare(b.plate));
     return `<div class="stack">
       <div class="kpis">
@@ -98,7 +99,7 @@ PAGES.dashboard = {
     const ev = upcomingEvents(30).slice(0, 7);
     const from = startOfMonth(nowTs()); const rows = periodCosts(from, nowTs() + 1); const kms = kmInPeriod(from, nowTs() + 1); const tot = sum(rows, r => r.value);
     return `<div class="rb-section"><div class="rb-title">${ic('alert')}Atenção</div>${att.map(a => `<div class="rb-item ${a.c}" data-go="${a.go.page}" ${a.go.id ? `data-id="${a.go.id}"` : ''} ${a.go.vid ? `data-vid="${a.go.vid}"` : ''} ${a.go.f ? `data-f="${a.go.f}"` : ''} ${a.go.tab ? `data-tab="${a.go.tab}"` : ''}><div style="min-width:0"><b style="white-space:normal">${esc(a.title)}</b><small>${esc(a.sub)}</small></div></div>`).join('') || '<p class="empty">Tudo em dia.</p>'}</div>
-      <div class="rb-section"><div class="rb-title">${ic('cal')}Próximos 30 dias</div>${ev.map(e => `<div class="rb-item ${e.c}" data-go="calendario" data-vid="${e.vid}"><div style="min-width:0"><b style="white-space:normal">${e.plate} · ${esc(e.label)}</b><small>${e.kind === 'rent' ? 'Locação' : 'Manutenção'}</small></div><b>${e.date <= startOfDay(nowTs()) ? 'hoje' : fmtDate(e.date).slice(0, 5)}</b></div>`).join('') || '<p class="empty">Nada agendado.</p>'}</div>
+      <div class="rb-section"><div class="rb-title">${ic('cal')}Próximos 30 dias</div>${ev.map(e => `<div class="rb-item ${e.c}" data-go="calendario" data-vid="${e.vid}"><div style="min-width:0"><b style="white-space:normal">${e.plate} · ${esc(e.label)}</b><small>${{ rent: 'Locação', wash: 'Lavagem', doc: 'Documentação' }[e.kind] || 'Manutenção'}</small></div><b>${e.date <= startOfDay(nowTs()) ? 'hoje' : fmtDate(e.date).slice(0, 5)}</b></div>`).join('') || '<p class="empty">Nada agendado.</p>'}</div>
       <div class="rb-section"><div class="rb-title">${ic('report')}Custos de ${new Date().toLocaleDateString('pt-BR', { month: 'long' })}</div>
         <div class="rb-item" data-go="relatorios"><span>Total da frota</span><b>${money(tot)}</b></div>
         <div class="rb-item" data-go="abastecimento"><span>Combustível</span><b>${money(sum(rows.filter(r => r.kind === 'Combustível'), r => r.value))}</b></div>
@@ -125,6 +126,7 @@ function vehicleCard(v) {
     <div class="foot"><span class="tags">${ownTag(v)}${fleetTag(v)}${seatsTag(v)}${docBadge(v)}</span><span class="num">${km(v.odometer)}</span></div>
     ${rs ? `<div class="note ${rs.lvl === 'normal' ? '' : M_LEVEL[rs.lvl].c}" style="padding:7px 10px;font-size:.78rem">${ic('key')}<div>${rs.days < 0 ? `Devolução vencida há ${-rs.days} dias` : `Devolver ou renovar até ${fmtDate(v.rental.dueDate)}`}</div></div>` : ''}
     ${(() => { const rk = rentalKmState(v); return rk && rk.lvl !== 'normal' ? `<div class="note ${M_LEVEL[rk.lvl].c}" style="padding:7px 10px;font-size:.78rem">${ic('gauge')}<div>Km da locação: ${rentalKmText(rk)}</div></div>` : ''; })()}
+    ${washCardNote(v)}
   </div>`;
 }
 PAGES.veiculos = {
@@ -242,7 +244,7 @@ function qrSvg(text) {
 }
 function timelineHTML(entries) {
   if (!entries.length) return empty('Sem eventos.');
-  let day = null; const dotC = { posse_inicio: 'ok', posse_fim: 'gray', problema: 'bad', transferencia: 'warn', transferencia_forcada: 'urg', manutencao: 'urg', problema_resolvido: 'ok', locacao: 'warn' };
+  let day = null; const dotC = { posse_inicio: 'ok', posse_fim: 'gray', problema: 'bad', transferencia: 'warn', transferencia_forcada: 'urg', manutencao: 'urg', problema_resolvido: 'ok', locacao: 'warn', lavagem: 'ok' };
   return `<ul class="tl">${entries.map(a => {
     const d = fmtDate(a.at); const head = d !== day ? `<li class="day">${isToday(a.at) ? 'Hoje' : d}</li>` : ''; day = d;
     const who = a.userId && a.userId !== 'sistema' && !a.userId.startsWith('u_d') ? ` · ${esc(userName(a.userId))}` : '';
@@ -256,13 +258,14 @@ PAGES.veiculo = {
     const v = veh(id); if (!v) return empty('Veículo não encontrado.');
     const c = activeCustody(id); const seg = currentSegment(c); const t = activeTransfer(id); const mt = vehicleMaint(id); const loc = lastLocation(id); const rs = rentalState(v);
     const qr = S.qrcodes.find(q => q.vehicleId === id && q.active); const iss = openIssues(id); const dly = dailyDoneToday(id); const M = isManager(); const st = vStatus(v);
-    const tabs = [['tl', 'Linha do tempo'], ['posses', 'Posses'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['mnt', 'Manutenção'], ['docs', 'Documentos'], ['tf', 'Pedágios e multas']];
+    const tabs = [['tl', 'Linha do tempo'], ['posses', 'Posses'], ['ck', 'Checklists'], ['fuel', 'Abastecimentos'], ['mnt', 'Manutenção'], ['lav', 'Lavagem'], ['docs', 'Documentos'], ['tf', 'Pedágios e multas']];
     let body = '';
     if (tab === 'tl') { const all = S.audit.filter(a => a.vehicleId === id).sort((a, b) => b.at - a.at); const n = +(ROUTE.p.n || 25); body = `<div class="panel-b" style="padding-top:12px">${timelineHTML(all.slice(0, n))}${all.length > n ? `<button class="btn sm" data-go="veiculo" data-id="${id}" data-n="${n + 50}">Mostrar mais (${all.length - n})</button>` : ''}</div>`; }
     if (tab === 'posses') body = tbl(['Condutor', 'Início', 'Fim', 'Duração', '>Km rodados', 'Obras'], S.custody.filter(x => x.vehicleId === id).sort((a, b) => b.start - a.start).map(x => `<tr><td>${drvLink(x.driverId)}</td><td class="nowrap">${fmtDT(x.start)}</td><td class="nowrap">${x.end ? fmtDT(x.end) : pill('Posse ativa', 'ok')}</td><td class="nowrap">${dur((x.end || nowTs()) - x.start)}</td><td class="r">${nf((x.endKm || v.odometer) - x.startKm)}</td><td>${custObras(x)}</td></tr>`));
     if (tab === 'ck') body = checklistTable(S.checklists.filter(k => k.vehicleId === id));
     if (tab === 'fuel') body = `${isStaff() ? `<div class="panel-b" style="padding-bottom:0"><button class="btn ok sm" data-go="lancar_abastecimento" data-vid="${id}">${ic('plus')}Lançar abastecimento</button></div>` : ''}${fuelTable(S.fuel.filter(f => f.vehicleId === id))}`;
     if (tab === 'mnt') body = `<div class="panel-h"><h3>Serviços realizados</h3>${isManager() ? `<button class="btn sm" data-act="mr-new" data-vid="${id}">${ic('plus')}Lançar manutenção realizada</button>` : ''}</div>${maintRecordsTable(S.maintRecords.filter(r => r.vehicleId === id), { noVeh: true })}${planEditor(v)}`;
+    if (tab === 'lav') body = washTab(v);
     if (tab === 'docs') body = docsTab(v);
     if (tab === 'tf') body = `<div class="panel-h"><h3>Pedágios</h3></div>${tollTable(S.tolls.filter(x => x.plate === v.plate))}<div class="panel-h"><h3>Multas</h3></div>${fineTable(liveFines().filter(x => x.plate === v.plate))}`;
     return `<div class="stack">
