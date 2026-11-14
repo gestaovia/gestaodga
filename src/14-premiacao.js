@@ -111,6 +111,8 @@ function nbLabel(d) {
   return h ? `Feriado · ${h.name}` : cap(WDAY[new Date(d).getDay()]);
 }
 const nbShort = d => `${WDAY[new Date(d).getDay()].slice(0, 3)} ${fmtDate(d).slice(0, 5)}`;
+// v1.20.0: finalidade do uso informada pelo condutor no diário de dia não útil
+const nbPurposeTxt = k => k?.nbPurpose ? [k.nbPurpose.type, k.nbPurpose.desc].filter(Boolean).join(' · ') : 'não informada';
 function nbDecision(did, key, d) { const k = nbKey(d); return adjOf(did, key).filter(a => !a.voidedAt && NB_KINDS[a.kind] && a.key === k).at(-1) || null; }
 // dias não úteis do período em que o condutor estava com o veículo e fez checklist diário na posse
 function nonBizDays(did, key, cs) {
@@ -443,10 +445,11 @@ ACTIONS['bn-p'] = a => { BON_P = shiftMonth(BON_P || curPeriod(), +a.dataset.d);
 function nbCells(x) {
   const v = veh(x.vehicleId);
   const cks = x.checklists.map(k => `<button class="link small" data-act="ck-view" data-id="${k.id}">${fmtTime(tsOf(k))}</button>${k.ok === false ? ' ' + pill('com problema', 'warn') : ''}`).join(' · ');
+  const why = [...new Set(x.checklists.filter(k => k.nbPurpose).map(nbPurposeTxt))];
   return `<td><button class="link" data-go="condutor" data-id="${x.did}" data-tab="score">${esc(drv(x.did)?.name || '')}</button></td>
     <td class="nowrap"><b class="num">${fmtDate(x.d)}</b><div class="small muted">${esc(nbLabel(x.d))}${x.today ? ' · hoje' : ''}</div></td>
     <td class="nowrap">${v ? plate(v.plate) : '—'}<div class="small muted">${x.projectId ? projLabel(x.projectId) : 'Sem obra'}</div></td>
-    <td>${cks}</td><td class="r nowrap num">${dur(x.held)}</td>`;
+    <td>${cks}${why.length ? `<div class="small" style="max-width:280px"><span class="muted">Finalidade:</span> ${esc(why.join(' | '))}</div>` : ''}</td><td class="r nowrap num">${dur(x.held)}</td>`;
 }
 function nbView(key, M, closed) {
   const q = nbQueue(key); const pend = q.filter(x => !x.decision); const done = q.filter(x => x.decision);
@@ -469,7 +472,7 @@ function nbGuard(a) {
   if (x.decision) { toast('Este dia já foi avaliado. Use Desfazer para avaliar de novo.'); render(); return null; }
   return x;
 }
-const nbHead = x => { const v = veh(x.vehicleId); return `<dl class="dl"><dt>Condutor</dt><dd>${esc(drv(x.did)?.name || '')}</dd><dt>Dia</dt><dd>${fmtDate(x.d)} · ${esc(nbLabel(x.d))}</dd><dt>Veículo</dt><dd>${v ? esc(v.plate) : '—'}${x.projectId ? ' · ' + projFull(x.projectId) : ''}</dd><dt>Checklist diário</dt><dd>${x.checklists.map(k => fmtTime(tsOf(k))).join(', ')}</dd><dt>Posse no dia</dt><dd>${dur(x.held)}</dd></dl>`; };
+const nbHead = x => { const v = veh(x.vehicleId); return `<dl class="dl"><dt>Condutor</dt><dd>${esc(drv(x.did)?.name || '')}</dd><dt>Dia</dt><dd>${fmtDate(x.d)} · ${esc(nbLabel(x.d))}</dd><dt>Veículo</dt><dd>${v ? esc(v.plate) : '—'}${x.projectId ? ' · ' + projFull(x.projectId) : ''}</dd><dt>Checklist diário</dt><dd>${x.checklists.map(k => fmtTime(tsOf(k))).join(', ')}</dd>${x.checklists.some(k => k.nbPurpose) ? `<dt>Finalidade</dt><dd>${esc([...new Set(x.checklists.filter(k => k.nbPurpose).map(nbPurposeTxt))].join(' | '))}</dd>` : ''}<dt>Posse no dia</dt><dd>${dur(x.held)}</dd></dl>`; };
 ACTIONS['nb-yes'] = a => {
   const x = nbGuard(a); if (!x) return;
   // simulação: como fica o fator e o prêmio do condutor com o dia considerado

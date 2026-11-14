@@ -44,6 +44,7 @@ function vStatus(v) {
     if (loc && nowTs() - loc.at < 10 * MIN && loc.speed > 10) return 'deslocamento';
     return 'em_uso';
   }
+  if (vAssign(v)) return 'atribuido'; // v1.20.0: marcado pelo administrador, sem checklist de recebimento
   return 'disponivel';
 }
 function dailyDoneToday(vid) {
@@ -69,7 +70,8 @@ function ensureComProj() {
 }
 // diário obrigatório só para motorista de obra
 const dailyRequired = c => !!c && !isAdmDrv(c.driverId);
-function needsDaily(v) { const c = activeCustody(v.id); return !!c && !v.maintenance && dailyRequired(c) && !dailyDoneToday(v.id); }
+// v1.20.0: em sábado, domingo ou feriado o diário não é cobrado (sem aviso de "sem checklist hoje")
+function needsDaily(v) { const c = activeCustody(v.id); return !!c && !v.maintenance && dailyRequired(c) && isBizDay(nowTs()) && !dailyDoneToday(v.id); }
 /* checklist completo = todos os itens avaliados e as 5 fotos */
 const ckComplete = k => !!k && CK_ITEMS.every(([x]) => k.items && k.items[x]) && PHOTO_SLOTS.every(([x]) => k.photos && k.photos[x] && !String(k.photos[x]).startsWith('removida'));
 /* a entrega pode ser só a confirmação rápida quando o recebimento daquela posse teve o checklist completo */
@@ -278,6 +280,7 @@ function attentionItems() {
   if (unF) out.push({ c: 'warn', r: 1, icon: 'fine', title: `${unF} multa(s) sem condutor`, sub: 'Sem posse no horário', text: '', at: null, go: { page: 'multas' } });
   out.push(...docAttention());
   out.push(...washAttention());
+  out.push(...assignAttention());
   return out.sort((a, b) => b.r - a.r);
 }
 /* v1.19.0: os números do painel contam só a frota ativa (a mesma lista da tela Veículos). Antes um veículo

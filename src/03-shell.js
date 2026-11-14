@@ -51,6 +51,7 @@ const ICON = { // ícones Lucide (ISC) — https://lucide.dev
   trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   up: '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
   down: '<polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
   lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
 };
 const ic = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k] || ''}</svg>`;
@@ -329,8 +330,46 @@ function projectOptions(sel, com = false) {
   const cp = comProj(); const rest = S.projects.filter(p => p.active && !isComProj(p.id));
   return (com && cp ? o(cp) : '') + rest.map(o).join('');
 }
-// situação do checklist diário de hoje (motorista administrativo: opcional, sem pendência)
-const dailyTag = (dly, did) => dly ? `<span class="st"><span class="dot ok"></span>${fmtTime(dly.at)}</span>` : isAdmDrv(did) ? '<span class="muted">Opcional</span>' : '<span class="st"><span class="dot warn"></span>Pendente</span>';
+/* v1.20.0 · busca da obra pelo número: com muitas obras, rolar a lista no celular era difícil. Um campo acima da
+   lista recebe o número; a lista passa a mostrar só as obras que batem e, se uma bater exatamente (ou só uma
+   sobrar), ela já fica escolhida. Funciona em qualquer <select> de obra colocado junto com projFind() dentro de
+   .proj-pick. O campo de busca não tem "name": não vai para o formulário nem para o rascunho. */
+const projFind = (ph = 'Digite o número da obra') => `<input class="inp proj-find" type="search" inputmode="numeric" enterkeyhint="search" autocomplete="off" data-proj-find placeholder="${esc(ph)}" aria-label="Buscar obra pelo número">`;
+const projPick = (label, select, cls = 'full', help = '') => `<div class="field ${cls} proj-pick"><span>${label}</span>${projFind()}${select}<small class="proj-hint" aria-live="polite">${help}</small></div>`;
+const normTxt = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+function projMatch(q, code, name) {
+  const qd = q.replace(/\D/g, ''); const cd = normTxt(code).replace(/\D/g, '');
+  if (qd && cd) { if (cd === qd || (+cd === +qd && +qd > 0)) return 0; if (cd.startsWith(qd) || cd.replace(/^0+/, '').startsWith(qd.replace(/^0+/, ''))) return 1; if (cd.includes(qd)) return 2; }
+  if (normTxt(code).includes(q)) return 3;
+  if (!/^\d+$/.test(q) && normTxt(name).includes(q)) return 4;
+  return -1;
+}
+function projFilter(inp) {
+  const box = inp.closest('.proj-pick') || inp.parentElement; const sel = box && box.querySelector('select'); if (!sel) return;
+  if (!sel._all) sel._all = [...sel.options].map(o => ({ v: o.value, t: o.textContent }));
+  const hint = box.querySelector('.proj-hint'); if (hint && hint.dataset.help == null) hint.dataset.help = hint.innerHTML;
+  const q = normTxt(inp.value); const prev = sel.value;
+  const opt = (o, on) => `<option value="${esc(o.v)}" ${on ? 'selected' : ''}>${esc(o.t)}</option>`;
+  const blank = sel._all.find(o => !o.v);
+  if (!q) { sel.innerHTML = sel._all.map(o => opt(o, o.v === prev)).join(''); if (hint) { hint.innerHTML = hint.dataset.help; hint.className = 'proj-hint'; } return; }
+  const hits = sel._all.filter(o => o.v).map(o => { const p = prj(o.v); return [o, projMatch(q, p?.code || o.t, p?.name || '')]; }).filter(x => x[1] >= 0).sort((a, b) => a[1] - b[1] || a[0].t.localeCompare(b[0].t, 'pt-BR', { numeric: true }));
+  if (!hits.length) {
+    sel.innerHTML = sel._all.map(o => opt(o, o.v === prev)).join('');
+    if (hint) { hint.textContent = 'Nenhuma obra com esse número. Confira ou escolha na lista.'; hint.className = 'proj-hint err'; }
+    return;
+  }
+  const exact = hits.filter(x => x[1] === 0);
+  const pick = exact.length === 1 ? exact[0][0] : hits.length === 1 ? hits[0][0] : null;
+  const list = hits.map(x => x[0]);
+  sel.innerHTML = (pick ? '' : opt(blank || { v: '', t: 'Selecione' }, true).replace(/>[^<]*</, `>${hits.length} obras encontradas: escolha<`)) + list.map(o => opt(o, pick ? o === pick : false)).join('');
+  if (hint) { hint.textContent = pick ? `Obra escolhida: ${pick.t}` : `${hits.length} obras com esse número. Escolha na lista abaixo.`; hint.className = 'proj-hint ' + (pick ? 'ok' : ''); }
+  if (sel.value !== prev) sel.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.addEventListener('input', e => { if (e.target.matches?.('[data-proj-find]')) projFilter(e.target); });
+// Enter no campo de busca não envia o formulário (só confirma a busca e fecha o teclado)
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches?.('[data-proj-find]')) { e.preventDefault(); projFilter(e.target); e.target.blur(); } });
+// situação do checklist diário de hoje (motorista administrativo: opcional, sem pendência; v1.20.0: dia não útil sem pendência)
+const dailyTag = (dly, did) => dly ? `<span class="st"><span class="dot ok"></span>${fmtTime(dly.at)}</span>` : isAdmDrv(did) ? '<span class="muted">Opcional</span>' : !isBizDay(nowTs()) ? '<span class="muted" title="Sábado, domingo ou feriado: diário não obrigatório">Dia não útil</span>' : '<span class="st"><span class="dot warn"></span>Pendente</span>';
 const kindTag = d => isAdmDrv(d) ? pill('Administrativo') : '';
 const fleetTag = v => vFleet(v) === 'comercial' ? pill('Comercial', 'blue') : '';
 function ccOptions(sel) { return S.costCenters.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${c.code} – ${esc(c.name)}</option>`).join(''); }

@@ -76,12 +76,13 @@ PAGES.inicio = {
     const daily = v ? dailyDoneToday(v.id) : null;
     const seg = currentSegment(c);
     const sc = driverScore(d.id); const adm = isAdmDrv(d); // v1.14.0: administrativo = sem premiação, diário opcional
+    const biz = isBizDay(nowTs()); // v1.20.0: dia não útil = diário não obrigatório (sem "Pendente")
     const unread = myNotifications().filter(n => !n.read).length;
     // a placa abre os dados do veículo (substitui o antigo botão "Meu veículo")
     const card = v ? `<div class="veh-card">
         <div class="top-line"><button type="button" class="plate-btn" data-go="meu_veiculo" aria-label="Ver dados do veículo ${esc(v.plate)}" title="Ver dados do veículo">${plate(v.plate, true)}<span class="plate-hint">${ic('chev')}</span></button>${stTag(vStatus(v))}</div>
         <dl class="pairs"><div><dt>Obra</dt><dd>${seg ? esc(prj(seg.projectId).code) : '<span style="color:var(--orange)">Sem obra</span>'}</dd></div><div><dt>Com você há</dt><dd>${dur(nowTs() - c.start)}</dd></div>
-        ${daily ? `<div class="ck-done"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot ok"></span>Feito às ${fmtTime(daily.at)}</span></dd></div>` : adm ? `<div><dt>Checklist hoje</dt><dd><span class="muted">Opcional</span></dd></div>` : `<div class="ck-pend" role="status"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot bad"></span>Pendente</span></dd></div>`}<div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
+        ${daily ? `<div class="ck-done"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot ok"></span>Feito às ${fmtTime(daily.at)}</span></dd></div>` : adm ? `<div><dt>Checklist hoje</dt><dd><span class="muted">Opcional</span></dd></div>` : !biz ? `<div><dt>Checklist hoje</dt><dd><span class="muted">Dia não útil</span></dd></div>` : `<div class="ck-pend" role="status"><dt>Checklist hoje</dt><dd><span class="st"><span class="dot bad"></span>Pendente</span></dd></div>`}<div><dt>Quilometragem</dt><dd class="num">${nf(v.odometer)}</dd></div></dl>
       </div>` : `<div class="veh-card" style="align-items:center;text-align:center;padding:22px"><span class="avatar lg" style="background:var(--border2);color:var(--text3)">${ic('car')}</span><b>Nenhum veículo com você</b><span class="muted small">Escaneie o QR Code do carro para receber.</span></div>`;
     const dl = deadlineNow(); const [dh, dm] = dl.split(':');
     const dlTxt = `${+dh}h${dm && dm !== '00' ? dm : ''}`;
@@ -90,7 +91,7 @@ PAGES.inicio = {
     const main = v && adm
       ? `<button class="tile primary scan main-act" data-go="entregar" data-vid="${v.id}"><span class="ti">${ic('handoff')}</span><span><b>Entregar veículo</b><small>Checklist de entrega ao devolver</small></span></button>`
       : v
-      ? `<button class="tile primary scan main-act ${daily ? 'is-done' : ''}" data-go="diario" data-vid="${v.id}"><span class="ti">${ic('check')}</span><span><b>Checklist diário</b><small>${daily ? `Feito hoje às ${fmtTime(daily.at)}` : `Prazo até ${dlTxt}`}</small></span></button>`
+      ? `<button class="tile primary scan main-act ${daily ? 'is-done' : ''}" data-go="diario" data-vid="${v.id}"><span class="ti">${ic('check')}</span><span><b>Checklist diário</b><small>${daily ? `Feito hoje às ${fmtTime(daily.at)}` : biz ? `Prazo até ${dlTxt}` : 'Dia não útil: se for usar, informe a finalidade'}</small></span></button>`
       : `<button class="tile primary scan main-act" data-go="scanner"><span class="ti">${ic('qr')}</span><span><b>Escanear veículo</b><small>Ler o QR Code do carro</small></span></button>`;
     const dis = v ? '' : 'disabled';
     const T = (go, icon, t, s, cls = '') => `<button class="tile ${cls}" data-go="${go}" ${v ? `data-vid="${v.id}"` : ''} ${dis}><span class="ti">${ic(icon)}</span><span><b>${t}</b><small>${s}</small></span></button>`;
@@ -301,16 +302,24 @@ function bindDraft(form) {
   form.addEventListener('input', upd); form.addEventListener('change', upd);
   form.addEventListener('change', async e => {
     const slot = e.target.dataset.photo; if (!slot || !e.target.files[0] || !DRAFT) return;
-    DRAFT.photos[slot] = await readPhoto(e.target.files[0]);
+    const file = e.target.files[0]; const gal = e.target.dataset.gal === '1';
+    DRAFT.photos[slot] = await readPhoto(file);
+    if (!DRAFT) return;
     const tile = form.querySelector(`[data-slot="${slot}"]`);
     const lab = tile?.dataset.label || { cupom: 'Foto do cupom ou nota fiscal', hodometro: 'Foto do hodômetro (obrigatória)', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
-    if (tile) tile.outerHTML = ['cupom', 'hodometro', 'problema', 'painel_d'].includes(slot) ? singlePhoto(slot, lab) : photoTile(slot, lab);
+    if (tile) tile.outerHTML = ['cupom', 'hodometro', 'problema', 'painel_d'].includes(slot) ? singlePhoto(slot, lab, tile.dataset.gallery === '1') : photoTile(slot, lab);
+    DRAFT._onPhoto?.(slot, gal ? file.lastModified : null);
     DRAFT._onChange?.();
   });
 }
 ACTIONS['ck-allok'] = () => { CK_ITEMS.forEach(([k]) => { DRAFT.items[k] = 'ok'; const r = $(`input[name="it_${k}"][value="ok"]`); if (r) r.checked = true; }); };
-function singlePhoto(slot, label) {
+function singlePhoto(slot, label, gallery = false) {
   const p = DRAFT.photos[slot];
+  // v1.20.0 · abastecimento: foto pela câmera OU pela galeria. Na estrada, sem internet, o motorista fotografa
+  // o hodômetro e o cupom com a câmera do celular e registra depois, escolhendo as fotos na galeria.
+  if (gallery) return `<div class="ph-pick ${p ? 'done' : ''}" data-slot="${slot}" data-label="${esc(label)}" data-gallery="1">
+      <div class="ph-view">${p ? `<img src="${esc(photoSrc(p))}" alt="${esc(label)}" data-act="photo"><span>${label} ✓</span>` : `${ic('camera')}<span>${label}</span>`}</div>
+      <div class="ph-src"><label class="btn sm">${ic('camera')}${p ? 'Tirar outra' : 'Câmera'}<input type="file" accept="image/*" capture="environment" data-photo="${slot}" aria-label="${esc(label)}: tirar foto com a câmera"></label><label class="btn sm">${ic('image')}${p ? 'Trocar pela galeria' : 'Galeria'}<input type="file" accept="image/*" data-photo="${slot}" data-gal="1" aria-label="${esc(label)}: escolher da galeria"></label></div></div>`;
   return `<label class="ph ${p ? 'done' : ''}" data-slot="${slot}" data-label="${esc(label)}" style="aspect-ratio:auto;min-height:92px;flex-direction:row;gap:10px">${p ? `<img src="${esc(photoSrc(p))}" alt=""><span class="cap">${label} ✓ (toque para trocar)</span>` : `${ic('camera')}<span>${label}</span>`}<input type="file" accept="image/*" capture="environment" data-photo="${slot}" aria-label="${label}"></label>`;
 }
 function validateFull(v) {
@@ -392,8 +401,8 @@ PAGES.receber = {
       <div><p class="label">Checklist completo · ${rc.t ? 'Troca de condutor' : first ? 'Primeiro recebimento' : 'Recebimento'}</p><h1>Recebimento do veículo</h1></div>
       ${tInfo}${ckHeader(v)}
       ${isAdmDrv(CUR.driverId) ? `<div class="panel"><div class="panel-h"><h3>Uso e finalidade</h3><span class="muted small">Frota comercial</span></div><div class="panel-b form-grid">
-        <label class="field full"><span>Uso</span><select class="inp" name="projectId" id="f-proj">${comProj() ? '' : '<option value="">Selecione</option>'}${projectOptions(DRAFT.projectId, true)}</select><small>Comercial, ou escolha a obra se for até uma.</small></label>` : `<div class="panel"><div class="panel-h"><h3>Obra e finalidade</h3><span class="muted small">Obrigatório para iniciar a posse</span></div><div class="panel-b form-grid">
-        <label class="field full"><span>Obra</span><select class="inp" name="projectId" id="f-proj"><option value="">Selecione a obra</option>${projectOptions(DRAFT.projectId)}</select></label>`}
+        ${projPick('Uso', `<select class="inp" name="projectId" id="f-proj">${comProj() ? '' : '<option value="">Selecione</option>'}${projectOptions(DRAFT.projectId, true)}</select>`, 'full', 'Comercial, ou escolha a obra se for até uma.')}` : `<div class="panel"><div class="panel-h"><h3>Obra e finalidade</h3><span class="muted small">Obrigatório para iniciar a posse</span></div><div class="panel-b form-grid">
+        ${projPick('Obra', `<select class="inp" name="projectId" id="f-proj"><option value="">Selecione a obra</option>${projectOptions(DRAFT.projectId)}</select>`)}`}
         <label class="field"><span>Atividade ou finalidade</span><select class="inp" name="purpose">${purposeOptions(DRAFT.purpose)}</select></label>
       </div></div>
       ${refPanel()}
@@ -517,14 +526,15 @@ PAGES.diario = {
     const d = myDriver(); vid = vid || (d && driverCustodies(d.id)[0]?.vehicleId);
     const v = vid && veh(vid); const c = v && activeCustody(vid);
     if (!v || !c || (d && c.driverId !== d.id)) return `<div class="drv"><h1>Checklist diário</h1><div class="note">O checklist diário é feito pelo condutor responsável pelo veículo. Escaneie o veículo para começar.</div><button class="btn ok lg block" data-go="scanner">Escanear veículo</button></div>`;
-    if (!DRAFT || DRAFT.kind !== 'diario') { newDraft('diario', vid, { km: '', answer: null, projOk: '1', projectId: currentSegment(c)?.projectId || '', ccId: currentSegment(c)?.ccId || '', type: '', desc: '', severity: '', canRun: '' }); captureLocation(v); }
-    const done = dailyDoneToday(vid); const seg = currentSegment(c); const D = DRAFT;
+    if (!DRAFT || DRAFT.kind !== 'diario') { newDraft('diario', vid, { km: '', answer: null, projOk: '1', projectId: currentSegment(c)?.projectId || '', ccId: currentSegment(c)?.ccId || '', type: '', desc: '', severity: '', canRun: '', nbType: '', nbDesc: '' }); captureLocation(v); }
+    const done = dailyDoneToday(vid); const seg = currentSegment(c); const D = DRAFT; const nb = !isBizDay(nowTs());
     const sim = D.answer === 'sim', nao = D.answer === 'nao';
     return `<form class="drv" id="dform" novalidate>
       <div class="veh-card"><div class="top-line">${plate(v.plate, true)}<span class="pill ok">Veículo identificado</span></div>
         <dl class="kv"><dt>Condutor</dt><dd>${esc(drv(c.driverId).name)}</dd><dt>Obra atual</dt><dd>${seg ? projFull(seg.projectId) : projLabel(null)}</dd><dt>Data</dt><dd>${fmtDT(nowTs())}</dd></dl></div>
       ${isAdmDrv(c.driverId) && !done ? '<div class="note">Para motorista administrativo o checklist diário é opcional: registre quando quiser informar a quilometragem ou um problema.</div>' : ''}
       ${done ? `<div class="note ok">Checklist de hoje já registrado às ${fmtTime(done.at)}. Você pode registrar outro se a situação mudou.</div>` : ''}
+      ${nb ? `<div class="note">${ic('cal')}<div>Hoje é <b>${esc(nbLabel(nowTs()).toLowerCase())}</b> (dia não útil): o checklist diário não é obrigatório. Se você vai usar o veículo, faça o checklist e informe a finalidade do uso.</div></div>` : ''}
       <p class="big-q">O veículo está em condições normais de utilização?</p>
       <div class="yn"><button type="button" class="${sim ? 'on-ok' : ''}" data-act="d-ans" data-v="sim">Sim</button><button type="button" class="${nao ? 'on-bad' : ''}" data-act="d-ans" data-v="nao">Não</button></div>
       ${D.answer ? `
@@ -532,10 +542,14 @@ PAGES.diario = {
         <label class="field"><span>Quilometragem atual</span><input class="inp big num" name="km" inputmode="numeric" value="${D.km ?? ''}" placeholder="Km do painel"><small>Digite o km que aparece no painel agora.</small></label>
         ${singlePhoto('painel_d', 'Foto do painel com o hodômetro')}
       </div></div>` : ''}
+      ${D.answer && nb ? `<div class="panel"><div class="panel-h"><h3>Finalidade do uso hoje</h3><span class="muted small">Obrigatório em dia não útil</span></div><div class="panel-b stack" style="gap:12px">
+        <label class="field"><span>Finalidade</span><select class="inp" name="nbType"><option value="">Selecione a finalidade</option>${[...PURPOSES, 'Outra finalidade'].map(x => `<option ${x === D.nbType ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+        <label class="field"><span>Descreva o uso</span><textarea class="inp" name="nbDesc" maxlength="300" placeholder="Ex.: plantão na obra 1234 para acompanhar a concretagem">${esc(D.nbDesc)}</textarea><small>Para onde vai e por quê. A gestão usa esta informação para avaliar o dia.</small></label>
+      </div></div>` : ''}
       ${sim ? `<div class="panel"><div class="panel-b stack" style="gap:10px">
         <span class="field"><span>Confirmar obra</span></span>
         <div class="seg"><label><input type="radio" name="projOk" value="1" ${D.projOk === '1' ? 'checked' : ''}><span>Continuo em ${seg ? esc(prj(seg.projectId).code) : '—'}</span></label><label><input type="radio" name="projOk" value="0" ${D.projOk === '0' ? 'checked' : ''}><span>Mudar obra</span></label></div>
-        <div id="proj-change" ${D.projOk === '0' || !seg ? '' : 'hidden'}><select class="inp" name="projectId"><option value="">Selecione a obra</option>${projectOptions(D.projectId, isAdmDrv(c.driverId))}</select></div>
+        <div id="proj-change" ${D.projOk === '0' || !seg ? '' : 'hidden'}>${projPick('Nova obra', `<select class="inp" name="projectId"><option value="">Selecione a obra</option>${projectOptions(D.projectId, isAdmDrv(c.driverId))}</select>`, '')}</div>
       </div></div>` : ''}
       ${nao ? `<div class="panel"><div class="panel-h"><h3>Descreva o problema</h3></div><div class="panel-b stack" style="gap:14px">${problemFields()}</div></div>` : ''}
       <div class="note bad" id="ck-err" hidden role="alert"></div>
@@ -555,22 +569,26 @@ PAGES.diario = {
       if (k) kmGuard(v, k, errs);
       if (D.answer === 'sim' && (D.projOk === '0' || !currentSegment(c)) && !D.projectId) errs.push('Selecione a obra.');
       if (D.answer === 'nao') errs.push(...problemErrors());
+      // v1.20.0: em sábado, domingo ou feriado o condutor informa a finalidade do uso
+      const nb = !isBizDay(nowTs());
+      if (nb && !D.nbType) errs.push('Informe a finalidade do uso do veículo hoje (dia não útil).');
+      if (nb && String(D.nbDesc || '').trim().length < 5) errs.push('Descreva o uso do veículo hoje (para onde vai e por quê).');
       if (errs.length) return showErrors(errs);
       const kmv = k;
       const [h, m] = deadlineNow().split(':').map(Number); const n = new Date();
-      const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: n.getHours() * 60 + n.getMinutes() > h * 60 + m };
+      const ck = { id: uid('ck'), type: 'diario', vehicleId: v.id, driverId: c.driverId, userId: CUR.id, custodyId: c.id, at: nowTs(), km: kmv, ok: D.answer === 'sim', problem: null, photos: { painel: D.photos.painel_d || null }, location: D.geo, late: !nb && n.getHours() * 60 + n.getMinutes() > h * 60 + m, ...(nb ? { nbPurpose: { type: D.nbType, desc: String(D.nbDesc || '').trim() } } : {}) };
       S.checklists.push(ck); v.odometer = Math.max(v.odometer, kmv); kmJumpNote(v, c.driverId);
       // v1.13.0: diário em sábado, domingo ou feriado vai para a fila da gestão (Premiação › Dias não úteis)
-      if (!isBizDay(ck.at) && !isAdmDrv(c.driverId)) notify('gestao', `${drv(c.driverId)?.name || 'Condutor'} fez checklist diário do ${v.plate} em dia não útil (${nbShort(ck.at)}). Avalie se conta na premiação.`, { level: 'warn', link: { page: 'bonificacao', id: '' } });
+      if (!isBizDay(ck.at) && !isAdmDrv(c.driverId)) notify('gestao', `${drv(c.driverId)?.name || 'Condutor'} fez checklist diário do ${v.plate} em dia não útil (${nbShort(ck.at)}). Finalidade: ${nbPurposeTxt(ck)}. Avalie se conta na premiação.`, { level: 'warn', link: { page: 'bonificacao', id: '' } });
       if (D.answer === 'sim') {
-        log('checklist', `Checklist diário: condições normais (${nf(kmv)} km)${ck.late ? ' · fora do prazo' : ''}`, { vehicleId: v.id, driverId: c.driverId });
+        log('checklist', `Checklist diário: condições normais (${nf(kmv)} km)${ck.late ? ' · fora do prazo' : ''}${ck.nbPurpose ? ` · dia não útil · finalidade: ${nbPurposeTxt(ck)}` : ''}`, { vehicleId: v.id, driverId: c.driverId });
         const seg = currentSegment(c);
         if ((D.projOk === '0' || !seg) && D.projectId && D.projectId !== seg?.projectId) changeProject(c, D.projectId, prj(D.projectId).ccId, seg?.purpose || PURPOSES[0]);
         save(); toast('Checklist diário concluído.'); go('inicio');
       } else {
         const iss = createIssue(v, c.driverId, 'diario');
         ck.problem = { issueId: iss.id };
-        log('checklist', `Checklist diário: veículo com problema (${nf(kmv)} km)`, { vehicleId: v.id, driverId: c.driverId });
+        log('checklist', `Checklist diário: veículo com problema (${nf(kmv)} km)${ck.nbPurpose ? ` · dia não útil · finalidade: ${nbPurposeTxt(ck)}` : ''}`, { vehicleId: v.id, driverId: c.driverId });
         save(); const crit = iss.severity === 'critica' || !iss.canRun; toast(crit ? 'Problema crítico registrado. A gestão foi alertada.' : 'Checklist registrado com o problema informado.'); crit ? go('seguro', { vid: v.id }) : go('inicio');
       }
     });
@@ -698,7 +716,7 @@ PAGES.obra = {
       <div class="veh-card"><div class="top-line">${plate(veh(vid).plate, true)}<span>Agora: <b>${seg ? esc(prj(seg.projectId).code) : 'sem obra'}</b></span></div>
         <div><p class="label" style="margin-bottom:4px">Histórico da posse</p>${c.segments.slice(-6).map(s => `<div class="row small"><span class="mono num">${fmtShort(s.at)}</span><span>${esc(prj(s.projectId).code)}</span><span class="muted">${esc(s.purpose || '')}</span></div>`).join('') || '<span class="muted small">Sem obra registrada</span>'}</div></div>
       <div class="panel"><div class="panel-b stack" style="gap:12px">
-        <label class="field"><span>${isAdmDrv(c.driverId) ? 'Nova obra ou comercial' : 'Nova obra'}</span><select class="inp" name="projectId" id="o-proj" required><option value="">Selecione</option>${projectOptions('', isAdmDrv(c.driverId))}</select></label>
+        ${projPick(isAdmDrv(c.driverId) ? 'Nova obra ou comercial' : 'Nova obra', `<select class="inp" name="projectId" id="o-proj" required><option value="">Selecione</option>${projectOptions('', isAdmDrv(c.driverId))}</select>`, '')}
         <label class="field"><span>Finalidade</span><select class="inp" name="purpose">${purposeOptions(seg?.purpose)}</select></label>
       </div></div>
       <div class="note bad" id="ck-err" hidden></div>
@@ -716,27 +734,32 @@ PAGES.obra = {
 };
 
 /* ---------- Abastecimento (registro) ---------- */
+// v1.20.0: o condutor pode registrar depois um abastecimento feito sem internet (até FUEL_BACK_DAYS dias, dentro da posse atual)
+const FUEL_BACK_DAYS = 7;
+const fuelMinWhen = c => Math.max(c.start, nowTs() - FUEL_BACK_DAYS * DAY);
 PAGES.abastecer = {
   driver: true, title: 'Abastecimento',
   render({ vid }) {
     const d = myDriver(); vid = vid || (d && driverCustodies(d.id)[0]?.vehicleId);
     const v = vid && veh(vid); const c = v && activeCustody(vid);
     if (!v || !c) return `<div class="drv"><h1>Abastecer</h1><div class="note">O abastecimento é vinculado à posse atual. Escaneie o veículo que está com você.</div><button class="btn ok lg block" data-go="scanner">Escanear veículo</button></div>`;
-    if (!DRAFT || DRAFT.kind !== 'abastecer') { newDraft('abastecer', vid, { km: '', liters: '', total: '', fuelType: v.fuelType, station: '' }); captureLocation(v); }
+    if (!DRAFT || DRAFT.kind !== 'abastecer') { newDraft('abastecer', vid, { km: '', liters: '', total: '', fuelType: v.fuelType, station: '', when: dtLocal(nowTs()), whenSet: false }); captureLocation(v); }
+    const minWhen = fuelMinWhen(c);
     const seg = currentSegment(c); const stations = [...new Set(S.fuel.map(f => f.station))];
     const types = v.fuelType.startsWith('Diesel') ? ['Diesel S10', 'Diesel S500'] : ['Gasolina', 'Etanol'];
     const wrap = CUR.role === 'condutor' ? 'drv' : 'drv" style="margin:0;max-width:560px';
     return `<form class="${wrap}" id="fform" novalidate>
       <div><h1>Abastecimento</h1>${CUR.role === 'condutor' ? '<p class="muted small">Registro opcional. A gestão da frota também pode lançar este abastecimento; se ela já lançou, não precisa registrar de novo.</p>' : ''}</div>
       <div class="veh-card"><div class="top-line">${plate(v.plate, true)}<span class="muted small">${esc(v.model)}</span></div>
-        <dl class="kv"><dt>Condutor</dt><dd>${esc(drv(c.driverId).name)}</dd><dt>Obra</dt><dd>${seg ? projLabel(seg.projectId) : projLabel(null)}</dd><dt>Data e hora</dt><dd>${fmtDT(nowTs())}</dd></dl></div>
+        <dl class="kv"><dt>Condutor</dt><dd>${esc(drv(c.driverId).name)}</dd><dt>Obra</dt><dd>${seg ? projLabel(seg.projectId) : projLabel(null)}</dd></dl></div>
       <div class="panel"><div class="panel-b form-grid">
+        <label class="field full"><span>Data e hora do abastecimento</span><input class="inp" type="datetime-local" name="when" value="${esc(DRAFT.when)}" min="${dtLocal(minWhen)}" max="${dtLocal(nowTs())}"><small id="when-h">${DRAFT.whenAuto ? 'Preenchido pelo horário da foto do hodômetro. Confira.' : 'Abasteceu sem internet e está registrando depois? Informe quando foi.'}</small></label>
         <label class="field full"><span>Quilometragem no abastecimento</span><input class="inp big num" name="km" inputmode="numeric" value="${esc(DRAFT.km)}" placeholder="${nf(suggestedKm(v))}"><small>Último registro: ${km(lastRecordedKm(v.id))}</small></label>
         <label class="field"><span>Litros</span><input class="inp num" name="liters" inputmode="decimal" value="${esc(DRAFT.liters)}" placeholder="0,00"></label>
         <label class="field"><span>Valor total (R$)</span><input class="inp num" name="total" inputmode="decimal" value="${esc(DRAFT.total)}" placeholder="0,00"></label>
         <div class="field full"><span>Combustível</span><div class="seg">${types.map(t => `<label><input type="radio" name="fuelType" value="${t}" ${DRAFT.fuelType === t ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
         <label class="field full"><span>Posto</span><input class="inp" name="station" list="stations" value="${esc(DRAFT.station)}" placeholder="Nome do posto"><datalist id="stations">${stations.map(s => `<option value="${esc(s)}">`).join('')}</datalist></label>
-        <div class="full stack" style="gap:8px">${singlePhoto('hodometro', 'Foto do hodômetro (obrigatória)')}${singlePhoto('cupom', 'Foto do cupom ou nota fiscal')}</div>
+        <div class="full stack" style="gap:10px">${singlePhoto('hodometro', 'Foto do hodômetro (obrigatória)', true)}${singlePhoto('cupom', 'Foto do cupom ou nota fiscal', true)}<small class="muted">Sem internet no posto? Tire as fotos com a câmera do celular e, quando registrar, escolha-as em <b>Galeria</b>.</small></div>
       </div></div>
       <div class="panel"><div class="panel-h"><h3>Cálculo automático</h3></div><div class="panel-b" id="fuel-calc"></div></div>
       <div class="note bad" id="ck-err" hidden role="alert"></div>
@@ -762,19 +785,41 @@ PAGES.abastecer = {
       $('#fuel-calc').innerHTML = html + '</dl>';
     };
     DRAFT._onChange = calc; calc();
+    f.addEventListener('change', e => { if (e.target.name === 'when') { DRAFT.whenSet = true; DRAFT.whenAuto = false; const h = $('#when-h'); if (h) h.textContent = 'Horário informado por você.'; } });
+    // foto escolhida na galeria: se foi tirada antes (ex.: na estrada, sem internet), sugere a data e hora dela
+    DRAFT._onPhoto = (slot, at) => {
+      if (slot !== 'hodometro' || !at || DRAFT.whenSet) return;
+      const c = activeCustody(DRAFT.vid); if (!c) return;
+      if (at < nowTs() - 30 * MIN && at >= fuelMinWhen(c) && at <= nowTs()) {
+        DRAFT.when = dtLocal(at); DRAFT.whenAuto = true;
+        const el = f.querySelector('[name="when"]'); if (el) el.value = DRAFT.when;
+        const h = $('#when-h'); if (h) h.textContent = 'Preenchido pelo horário da foto do hodômetro. Confira.';
+      }
+    };
     f.addEventListener('submit', e => {
       e.preventDefault();
       const v = veh(DRAFT.vid); const c = activeCustody(v.id); const errs = [];
       const k = parseInt(String(DRAFT.km).replace(/\D/g, ''), 10); const l = num(DRAFT.liters); const t = num(DRAFT.total);
-      if (!k) errs.push('Informe a quilometragem.'); else kmGuard(v, k, errs);
+      // v1.20.0: data e hora informadas (registro feito depois, sem internet no posto). Precisa estar dentro da posse atual.
+      // só vale como "registrado depois" se o horário foi mudado pelo condutor ou veio da foto (formulário aberto há muito tempo continua "agora")
+      let ts = parseDtLocal(DRAFT.when); const past = (DRAFT.whenSet || DRAFT.whenAuto) && !isNaN(ts) && ts < nowTs() - 30 * MIN;
+      if (isNaN(ts)) errs.push('Informe a data e a hora do abastecimento.');
+      else if (ts > nowTs() + 5 * MIN) errs.push('A data do abastecimento não pode ser no futuro.');
+      else if (ts < fuelMinWhen(c)) errs.push(ts < c.start ? `O abastecimento precisa ser depois que você recebeu o veículo (${fmtDT(c.start)}).` : `Só é possível registrar abastecimentos dos últimos ${FUEL_BACK_DAYS} dias. Avise a gestão.`);
+      if (!past) ts = nowTs();
+      if (!k) errs.push('Informe a quilometragem.');
+      else if (!past) kmGuard(v, k, errs);
+      else if (!isNaN(ts)) { const ar = kmAround(v.id, ts); if (k < ar.prev) errs.push(`A quilometragem não pode ser menor que o registro anterior a esse horário (${km(ar.prev)}).`); if (ar.next != null && k > ar.next) errs.push(`A quilometragem não pode ser maior que o registro seguinte a esse horário (${km(ar.next)}). Confira a data, a hora e o km.`);
+        const mx = +S.settings.kmJumpMax || 2000; if (!errs.length && ar.prev && k - ar.prev > mx && DRAFT._kmConf !== k) { DRAFT._kmConf = k; errs.push(`Confira a quilometragem: ${nf(k)} km são ${nf(k - ar.prev)} km a mais que o registro anterior (${km(ar.prev)}). Se estiver certa, toque no botão de novo para confirmar.`); } }
       if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.'); errs.push(...fuelLimitErrs(l, t));
       if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.hodometro) errs.push('Envie a foto do hodômetro (vale pontos na premiação).'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
-      if (!errs.length && k && l) { const dup = fuelDuplicates(v.id, nowTs(), k, l); if (dup.same.length) errs.push(fuelByStaff(dup.same[0]) ? 'A gestão já lançou este abastecimento. Não é preciso registrar de novo.' : 'Este abastecimento já foi registrado.'); }
+      if (!errs.length && k && l) { const dup = fuelDuplicates(v.id, ts, k, l); if (dup.same.length) errs.push(fuelByStaff(dup.same[0]) ? 'A gestão já lançou este abastecimento. Não é preciso registrar de novo.' : 'Este abastecimento já foi registrado.'); }
       if (errs.length) return showErrors(errs);
       const seg = currentSegment(c);
-      const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: seg?.projectId || null, at: nowTs(), km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, odoPhoto: DRAFT.photos.hodometro, location: DRAFT.geo };
-      S.fuel.push(rec); v.odometer = Math.max(v.odometer, k); kmJumpNote(v, c.driverId);
-      log('abastecimento', `Abastecimento: ${nf(l, 1)} L, ${money(t)} em ${rec.station}`, { vehicleId: v.id, driverId: c.driverId });
+      const sg = past ? segmentAt(c, ts) || seg : seg;
+      const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: sg?.projectId || null, at: ts, km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, odoPhoto: DRAFT.photos.hodometro, location: past ? null : DRAFT.geo, ...(past ? { atManual: true, registeredAt: nowTs() } : {}) };
+      S.fuel.push(rec); v.odometer = Math.max(v.odometer, k); if (!past) kmJumpNote(v, c.driverId);
+      log('abastecimento', `Abastecimento: ${nf(l, 1)} L, ${money(t)} em ${rec.station}${past ? ` · feito em ${fmtDT(ts)} e registrado depois` : ''}`, { vehicleId: v.id, driverId: c.driverId });
       const m = fuelOutlier(rec);
       if (m) notify('gestao', `Consumo fora do padrão no ${v.plate}: ${nf(m.kmL, 1)} km/l (${m.delta > 0 ? '+' : ''}${nf(m.delta, 0)}% da média).`, { level: 'warn', link: { page: 'abastecimento' } });
       save(); toast('Abastecimento registrado.'); go(CUR.role === 'condutor' ? 'inicio' : 'abastecimento');
@@ -800,7 +845,7 @@ PAGES.meu_veiculo = {
         <dt>Próxima manutenção</dt><dd>${mt.next ? `${esc(mt.next.p.item)} em ${nf(mt.next.s.remKm)} km ${mLvl(mt.next.s.lvl)}` : '—'}</dd></dl></div>
       ${t ? `<div class="note warn">Transferência em andamento para ${esc(drv(t.toDriverId).name)}: ${T_LABEL[t.status]}.</div>` : ''}
       <div class="actions">
-        ${!daily ? `<button class="act ${dailyRequired(c) ? 'primary' : ''}" data-go="diario" data-vid="${v.id}">${ic('check')}<span>Fazer checklist diário${dailyRequired(c) ? '' : '<small>Opcional</small>'}</span></button>` : ''}
+        ${!daily ? `<button class="act ${dailyRequired(c) && isBizDay(nowTs()) ? 'primary' : ''}" data-go="diario" data-vid="${v.id}">${ic('check')}<span>Fazer checklist diário${!dailyRequired(c) ? '<small>Opcional</small>' : isBizDay(nowTs()) ? '' : '<small>Dia não útil</small>'}</span></button>` : ''}
         <button class="act" data-go="obra" data-vid="${v.id}">${ic('pin')}<span>Alterar obra<small>Sem encerrar a posse</small></span></button>
         <button class="act" data-go="abastecer" data-vid="${v.id}">${ic('fuel')}<span>Registrar abastecimento<small>Opcional</small></span></button>
         <button class="act" data-go="problema" data-vid="${v.id}">${ic('alert')}<span>Informar problema</span></button>
@@ -899,6 +944,7 @@ function showChecklist(id) {
     title: `Checklist ${CK_TYPES[k.type].toLowerCase()} · ${v.plate}`, wide: true,
     body: `<dl class="dl"><dt>Data e hora</dt><dd>${fmtDT(k.at)}${k.late ? ' ' + pill('fora do prazo', 'warn') : ''}${k.serverAt && Math.abs(k.serverAt - k.at) > CLOCK_TOL ? `<br><span class="small ${k.offlineQueued ? 'muted' : ''}" style="${k.offlineQueued ? '' : 'color:var(--orange)'}">${k.offlineQueued ? 'Feito sem conexão' : 'Relógio do celular diferente'}: recebido pelo servidor ${fmtDT(k.serverAt)}</span>` : ''}${k.kmFix?.length ? `<br><span class="small muted">Km corrigido pela gestão (registrado ${nf(k.kmFix[0].from)} km)</span>` : ''}</dd><dt>Condutor</dt><dd>${k.driverId ? esc(drv(k.driverId).name) : esc(userName(k.userId || 'u_gestor'))}</dd>
       <dt>Quilometragem</dt><dd class="num">${km(k.km)}</dd>${k.fuelLevel ? `<dt>Combustível</dt><dd>${k.fuelLevel}</dd>` : ''}
+      ${k.nbPurpose ? `<dt>Finalidade (dia não útil)</dt><dd>${esc(nbPurposeTxt(k))}</dd>` : ''}${k.edits?.length ? `<dt>Editado pela gestão</dt><dd class="small">${editsHTML(k.edits)}</dd>` : ''}
       <dt>Resultado</dt><dd>${k.ok ? pill('Sem apontamentos', 'ok') : pill('Com apontamentos', 'warn')}${k.quick ? ' ' + pill('Confirmação rápida') : ''}</dd>
       ${k.quick ? `<dt>Entrega</dt><dd>Sem alterações desde o recebimento${byId(S.checklists, k.refChecklistId) ? ` (${ckLink(k.refChecklistId)})` : ''}</dd>` : ''}
       ${k.location ? `<dt>Localização</dt><dd class="small">${geoText(k.location)}</dd>` : ''}</dl>
@@ -909,6 +955,6 @@ function showChecklist(id) {
       ${k.avarias ? `<div class="note warn"><div><b>Avarias:</b> ${esc(k.avarias)}</div></div>` : ''}${k.notes ? `<p><b>Observações:</b> ${esc(k.notes)}</p>` : ''}
       ${iss ? `<div class="note ${SEVERITY[iss.severity].c === 'gray' ? '' : SEVERITY[iss.severity].c}"><div><b>${esc(iss.type)} · ${SEVERITY[iss.severity].l}</b> — ${esc(iss.desc)} ${iss.canRun ? '' : '(veículo não pode circular)'}</div></div>` : ''}
       <div><p class="label" style="margin-bottom:6px">Fotos</p>${thumbs(k.photos)}</div>`,
-    foot: `<button class="btn" data-act="modal-close">Fechar</button><button class="btn pri" data-act="ck-pdf" data-id="${k.id}">${ic('fine')}Gerar PDF</button>`
+    foot: `${ckCanEdit(k) ? `<button class="btn" data-act="ck-edit" data-id="${k.id}" style="margin-right:auto">${ic('edit')}Editar</button>` : ''}<button class="btn" data-act="modal-close">Fechar</button><button class="btn pri" data-act="ck-pdf" data-id="${k.id}">${ic('fine')}Gerar PDF</button>`
   });
 }

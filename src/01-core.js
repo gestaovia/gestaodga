@@ -28,7 +28,7 @@ const ROLES = { admin: 'Administrador', gestor: 'Gestor de Frota', supervisor: '
 const V_STATUS = {
   disponivel: { l: 'Disponível', c: 'vs-free' }, em_uso: { l: 'Em uso', c: 'vs-drv' }, deslocamento: { l: 'Em deslocamento', c: 'vs-drv' },
   parado: { l: 'Parado', c: 'gray' }, aguardando_transferencia: { l: 'Aguardando transferência', c: 'vs-drv' },
-  manutencao: { l: 'Em manutenção', c: 'gray' }, bloqueado: { l: 'Bloqueado', c: 'vs-prob' }, pendencia: { l: 'Com pendência', c: 'vs-prob' }
+  manutencao: { l: 'Em manutenção', c: 'gray' }, atribuido: { l: 'Atribuído (sem checklist)', c: 'vs-drv' }, bloqueado: { l: 'Bloqueado', c: 'vs-prob' }, pendencia: { l: 'Com pendência', c: 'vs-prob' }
 };
 const VS_LEGEND = [['vs-free', 'Disponível'], ['vs-drv', 'Com condutor'], ['vs-prob', 'Com problema'], ['gray', 'Em manutenção']];
 const T_STATUS = [

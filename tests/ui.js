@@ -108,8 +108,13 @@ module.exports.v113 = async (p, ok, shots) => {
   await p.waitForTimeout(80); await p.click('[data-act="d-ans"][data-v="sim"]'); await p.waitForTimeout(60);
   await p.evaluate(() => { DRAFT.photos.painel_d = 'data:image/png;base64,AA=='; });
   await p.fill('#dform [name="km"]', '15050'); await p.evaluate(() => document.querySelector('#dform').requestSubmit()); await p.waitForTimeout(100);
-  const n = await p.evaluate(() => ({ ck: S.checklists.length, nt: S.notifications.filter(x => x.to === 'gestao' && /dia não útil/.test(x.text)).map(x => x.text) }));
-  ok('UI condutor: diário no sábado avisa a gestão', n.ck === 1 && n.nt.length === 1, n);
+  // v1.20.0: em dia não útil a finalidade é obrigatória
+  const n0 = await p.evaluate(() => ({ ck: S.checklists.length, err: document.querySelector('#ck-err')?.textContent || '' }));
+  ok('UI condutor: diário no sábado exige a finalidade do uso', n0.ck === 0 && /finalidade/.test(n0.err), n0);
+  await p.selectOption('#dform [name="nbType"]', 'Transporte de equipe'); await p.fill('#dform [name="nbDesc"]', 'plantão na obra OB-01');
+  await p.evaluate(() => document.querySelector('#dform').requestSubmit()); await p.waitForTimeout(100);
+  const n = await p.evaluate(() => ({ ck: S.checklists.length, np: S.checklists[0]?.nbPurpose, nt: S.notifications.filter(x => x.to === 'gestao' && /dia não útil/.test(x.text)).map(x => x.text) }));
+  ok('UI condutor: diário no sábado avisa a gestão', n.ck === 1 && n.nt.length === 1 && /plantão na obra OB-01/.test(n.nt[0]) && n.np?.type === 'Transporte de equipe', n);
   await p.evaluate(() => { const N0 = new Date('2026-10-20T12:00:00-03:00').getTime(); Date.now = () => N0; });
 
   // visualizador de fotos
@@ -186,4 +191,124 @@ module.exports.v114 = async (p, ok, shots) => {
   // indicadores: filtro de uso
   await p.evaluate(() => { ADMSET(); CUR = S.users[0]; CLOUD.on = false; go('indicadores'); }); await W();
   ok('UI indicadores: filtro Obra e comercial', await p.isVisible('#kf-u'));
+};
+// v1.20.0: busca de obra, edição pelo administrador, atribuição, dia não útil, fotos pela galeria
+module.exports.v120 = async (p, ok, shots) => {
+  const shot = async n => { if (shots) await p.screenshot({ path: `${shots}/${n}.png` }); };
+  const W = (ms = 90) => p.waitForTimeout(ms);
+  const N0 = new Date('2026-10-20T12:00:00-03:00').getTime();
+  // ---- busca de obra pelo número (recebimento no celular) ----
+  await p.setViewportSize({ width: 390, height: 860 });
+  await p.evaluate(() => { FIX(); CLOUD.on = false; DRAFT = null;
+    ['1234', '1240', '0012', '512'].forEach((c, i) => S.projects.push({ id: 'px' + i, code: c, name: 'Obra ' + c, ccId: 'cc1', active: true }));
+    CUR = S.users[1]; go('receber', { vid: 'v2' }); });
+  await W(); await shot('v120-obra-busca');
+  await p.fill('#ckform [data-proj-find]', '12'); await W(40);
+  const b1 = await p.evaluate(() => ({ v: document.querySelector('#f-proj').value, opts: [...document.querySelector('#f-proj').options].map(o => o.textContent), d: DRAFT.projectId, hint: document.querySelector('.proj-hint').textContent }));
+  ok('UI obra: número exato escolhe a obra (12 → 0012)', b1.v === 'px2' && b1.d === 'px2' && /0012/.test(b1.hint), b1);
+  await p.fill('#ckform [data-proj-find]', '4'); await W(40);
+  const b2 = await p.evaluate(() => ({ v: document.querySelector('#f-proj').value, opts: [...document.querySelector('#f-proj').options].map(o => o.textContent), d: DRAFT.projectId }));
+  ok('UI obra: número que serve para várias filtra a lista sem escolher', b2.v === '' && b2.d === '' && b2.opts.length === 3 && /2 obras encontradas/.test(b2.opts[0]) && /1234/.test(b2.opts[1]) && /1240/.test(b2.opts[2]), b2);
+  await p.fill('#ckform [data-proj-find]', '1234'); await p.keyboard.press('Enter'); await W(40);
+  const b3 = await p.evaluate(() => ({ v: document.querySelector('#f-proj').value, d: DRAFT.projectId, page: ROUTE.page, cks: S.checklists.length }));
+  ok('UI obra: Enter no campo de busca não envia o checklist', b3.v === 'px0' && b3.d === 'px0' && b3.page === 'receber' && b3.cks === 0, b3);
+  await p.fill('#ckform [data-proj-find]', '999'); await W(40);
+  const b4 = await p.evaluate(() => ({ n: document.querySelector('#f-proj').options.length, hint: document.querySelector('.proj-hint').textContent, v: document.querySelector('#f-proj').value }));
+  ok('UI obra: sem resultado mostra aviso e a lista completa', b4.n === 7 && /Nenhuma obra/.test(b4.hint) && b4.v === 'px0', b4);
+  // troca de obra e diário também têm a busca
+  await p.evaluate(() => { DRAFT = null; FORM_DIRTY = false; const T = FIX(); ['1234'].forEach((c, i) => S.projects.push({ id: 'px' + i, code: c, name: 'Obra ' + c, ccId: 'cc1', active: true })); CUR = S.users[1];
+    S.custody.push({ id: 'c5', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-19T07:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-19T07:00'), projectId: 'p1' }] }); go('obra', { vid: 'v1' }); });
+  await W(); await p.fill('#oform [data-proj-find]', '1234'); await W(40);
+  ok('UI obra: busca na troca de obra', await p.$eval('#o-proj', s => s.value) === 'px0');
+  // ---- dia não útil: sem "Pendente" e sem aviso na gestão ----
+  await p.evaluate(() => { const T = FIX(); DRAFT = null; FORM_DIRTY = false; const N = T('2026-10-24T09:00'); Date.now = () => N; CUR = S.users[1];
+    S.custody.push({ id: 'c9', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-23T07:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-23T07:00'), projectId: 'p1' }] }); go('inicio'); });
+  await W(); await shot('v120-sabado-inicio');
+  const s1 = await p.evaluate(() => ({ pend: !!document.querySelector('.ck-pend'), txt: document.querySelector('.veh-card').textContent, att: attentionItems().filter(a => /sem checklist hoje/.test(a.title)).length, semCk: fleetCounts().semCk }));
+  ok('UI dia não útil: condutor sem "Pendente" e gestão sem aviso de diário', !s1.pend && /Dia não útil/.test(s1.txt) && s1.att === 0 && s1.semCk === 0, s1);
+  await p.evaluate(N => { Date.now = () => N; render(); }, new Date('2026-10-23T11:00:00-03:00').getTime()); await W(40);
+  const s2 = await p.evaluate(() => ({ pend: !!document.querySelector('.ck-pend'), att: attentionItems().filter(a => /sem checklist hoje/.test(a.title)).length }));
+  ok('UI dia útil continua cobrando o diário', s2.pend && s2.att === 1, s2);
+  await p.evaluate(N => { Date.now = () => N; }, N0);
+  // ---- abastecimento: câmera ou galeria, data do abastecimento feito sem internet ----
+  await p.evaluate(() => { const T = FIX(); DRAFT = null; FORM_DIRTY = false; CUR = S.users[1];
+    S.custody.push({ id: 'c7', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-17T07:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-17T07:00'), projectId: 'p1' }] });
+    S.checklists.push({ id: 'kd', type: 'diario', vehicleId: 'v1', driverId: 'd1', custodyId: 'c7', at: T('2026-10-20T08:00'), km: 15400, photos: { painel: 'x:painel' } }); S.vehicles[0].odometer = 15400; go('abastecer', { vid: 'v1' }); });
+  await W(); await shot('v120-abastecer');
+  const g = await p.evaluate(() => ({ cam: [...document.querySelectorAll('input[data-photo="hodometro"]')].map(i => i.hasAttribute('capture')), gal: document.querySelectorAll('input[data-photo][data-gal="1"]').length, when: !!document.querySelector('#fform [name="when"]') }));
+  ok('UI abastecimento: foto pela câmera ou pela galeria', g.cam.length === 2 && g.cam[0] === true && g.cam[1] === false && g.gal === 2 && g.when, g);
+  // foto escolhida na galeria (tirada ontem às 18:10) preenche a data
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+  const tPhoto = new Date('2026-10-19T18:10:00-03:00').getTime();
+  await p.evaluate(({ b64, t }) => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    const f = new File([u], 'odo.png', { type: 'image/png', lastModified: t }); const dt = new DataTransfer(); dt.items.add(f);
+    const inp = document.querySelector('input[data-photo="hodometro"][data-gal="1"]'); inp.files = dt.files; inp.dispatchEvent(new Event('change', { bubbles: true })); }, { b64: PNG.toString('base64'), t: tPhoto });
+  await W(300);
+  const g2 = await p.evaluate(() => ({ when: DRAFT.when, inp: document.querySelector('#fform [name="when"]').value, ph: !!DRAFT.photos.hodometro, done: !!document.querySelector('.ph-pick.done[data-slot="hodometro"]') }));
+  ok('UI abastecimento: foto da galeria sugere a data e hora do abastecimento', g2.when === '2026-10-19T18:10' && g2.inp === g2.when && g2.ph && g2.done, g2);
+  await p.evaluate(() => { DRAFT.photos.cupom = 'data:image/png;base64,AA=='; });
+  await p.fill('#fform [name="km"]', '15500'); await p.fill('#fform [name="liters"]', '30'); await p.fill('#fform [name="total"]', '180'); await p.fill('#fform [name="station"]', 'Posto BR');
+  await p.evaluate(() => document.querySelector('#fform').requestSubmit()); await W();
+  const g3 = await p.evaluate(() => ({ n: S.fuel.length, err: document.querySelector('#ck-err')?.textContent }));
+  ok('UI abastecimento: registro posterior não pode ter km maior que o registro seguinte', g3.n === 0 && /registro seguinte/.test(g3.err), g3);
+  await p.fill('#fform [name="km"]', '15350'); await p.evaluate(() => document.querySelector('#fform').requestSubmit()); await W();
+  const g4 = await p.evaluate(() => { const f = S.fuel[0]; return f ? { at: f.at, man: f.atManual, km: f.km, odo: S.vehicles[0].odometer } : null; });
+  ok('UI abastecimento: grava com a data informada (registrado depois)', g4 && g4.at === tPhoto && g4.man === true && g4.km === 15350 && g4.odo === 15400, g4);
+  await p.setViewportSize({ width: 1280, height: 900 });
+  // ---- administrador edita checklist (km diferente da foto) ----
+  await p.evaluate(() => { const T = FIX(); DRAFT = null; FORM_DIRTY = false; CLOUD.on = false; CUR = S.users[0];
+    S.checklists.push({ id: 'ke', type: 'diario', vehicleId: 'v1', driverId: 'd1', custodyId: 'c8', at: T('2026-10-20T08:00'), km: 150400, photos: { painel: 'x:painel' }, ok: true });
+    S.custody.push({ id: 'c8', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-17T07:00'), end: null, startKm: 15000, segments: [] }); S.vehicles[0].odometer = 150400; showChecklist('ke'); });
+  await W();
+  ok('UI administrador: botão Editar no checklist', await p.isVisible('#modal [data-act="ck-edit"]'));
+  await p.click('#modal [data-act="ck-edit"]'); await W(); await shot('v120-ck-edit');
+  ok('UI editar checklist: mostra a foto do painel', await p.isVisible('#modal .thumbs img'));
+  await p.fill('#re-form [name="km"]', '15040'); await p.click('[data-act="ck-edit-ok"]'); await W(40);
+  ok('UI editar checklist: exige motivo', /motivo/.test(await p.textContent('#re-err')));
+  await p.fill('#re-form [name="reason"]', 'km diferente da foto do painel'); await p.click('[data-act="ck-edit-ok"]'); await W();
+  const e1 = await p.evaluate(() => { const k = byId(S.checklists, 'ke'); return { km: k.km, fix: k.kmFix?.[0]?.from, ed: k.edits?.length, odo: S.vehicles[0].odometer, log: S.audit.some(a => /editado por Mauricio/.test(a.text)), nt: S.notifications.some(n => n.to === 'd1' && /corrigiu o seu checklist/.test(n.text)), modal: document.querySelector('#modal')?.textContent || '' }; });
+  ok('UI editar checklist: corrige km, hodômetro, histórico e avisa o condutor', e1.km === 15040 && e1.fix === 150400 && e1.ed === 1 && e1.odo === 15040 && e1.log && e1.nt && /Editado pela gestão/.test(e1.modal), e1);
+  await p.evaluate(() => closeModal());
+  // gestor de frota não edita
+  await p.evaluate(() => { S.users.push({ id: 'u_g', name: 'Gil', role: 'gestor', active: true }); CUR = byId(S.users, 'u_g'); showChecklist('ke'); }); await W(40);
+  ok('UI editar checklist: só o administrador vê Editar', !(await p.$('#modal [data-act="ck-edit"]')));
+  await p.evaluate(() => closeModal());
+  // ---- administrador edita abastecimento ----
+  await p.evaluate(() => { const T = FIX(); CUR = S.users[0];
+    S.fuel.push({ id: 'fe', vehicleId: 'v1', driverId: 'd1', at: T('2026-10-19T10:00'), km: 51200, liters: 30, total: 180, fuelType: 'Gasolina', station: 'Posto', odoPhoto: 'x:painel', receipt: 'x:cupom' });
+    S.fuel.push({ id: 'fp', vehicleId: 'v1', driverId: 'd1', at: T('2026-10-15T10:00'), km: 14800, liters: 30, total: 180, fuelType: 'Gasolina', station: 'Posto' });
+    S.vehicles[0].odometer = 51200; go('veiculo', { id: 'v1', tab: 'fuel' }); });
+  await W();
+  await p.click('[data-act="fuel-edit"][data-id="fe"]'); await W(); await shot('v120-fuel-edit');
+  await p.fill('#re-form [name="km"]', '15120'); await p.fill('#re-form [name="liters"]', '32,5'); await p.fill('#re-form [name="reason"]', 'km digitado errado'); await p.click('[data-act="fuel-edit-ok"]'); await W();
+  const e2 = await p.evaluate(() => { const f = byId(S.fuel, 'fe'); return { km: f.km, l: f.liters, ed: f.edits?.[0]?.changes, odo: S.vehicles[0].odometer, modal: !!document.querySelector('#modal'), pill: /editado/.test(document.querySelector('#app').textContent) }; });
+  ok('UI editar abastecimento: corrige km e litros, hodômetro e marca "editado"', e2.km === 15120 && e2.l === 32.5 && e2.ed.km && e2.ed.liters && e2.odo === 15120 && !e2.modal && e2.pill, e2);
+  // km fora da sequência pede confirmação
+  await p.click('[data-act="fuel-edit"][data-id="fe"]'); await W();
+  await p.fill('#re-form [name="km"]', '14700'); await p.fill('#re-form [name="reason"]', 'teste sequência'); await p.click('[data-act="fuel-edit-ok"]'); await W(40);
+  const e3 = await p.evaluate(() => ({ km: byId(S.fuel, 'fe').km, err: document.querySelector('#re-err').textContent }));
+  await p.click('[data-act="fuel-edit-ok"]'); await W(40);
+  const e4 = await p.evaluate(() => byId(S.fuel, 'fe').km);
+  ok('UI editar abastecimento: km fora da sequência pede confirmação', e3.km === 15120 && /Fora da sequência/.test(e3.err) && e4 === 14700, { e3, e4 });
+  // ---- atribuição administrativa ----
+  await p.evaluate(() => { FIX(); CUR = S.users[0]; go('veiculo', { id: 'v2' }); }); await W();
+  ok('UI atribuição: botão no veículo sem condutor', await p.isVisible('[data-act="veh-assign"]'));
+  await p.click('[data-act="veh-assign"]'); await W();
+  await p.click('[data-act="veh-assign-ok"]'); await W(40);
+  ok('UI atribuição: exige o condutor', /Selecione o condutor/.test(await p.textContent('#as-err')));
+  await p.selectOption('#as-drv', 'd2'); await p.fill('#as-form [name="note"]', 'saiu sem checklist'); await p.click('[data-act="veh-assign-ok"]'); await W(); await shot('v120-atribuido');
+  const a1 = await p.evaluate(() => ({ st: vStatus(veh('v2')), as: veh('v2').assign?.driverId, att: attentionItems().some(a => /atribuído sem checklist/.test(a.title)), nt: S.notifications.some(n => n.to === 'd2' && /está com você/.test(n.text)), txt: document.querySelector('#app').textContent, disp: fleetCounts().disp, custody: S.custody.length }));
+  ok('UI atribuição: marca o condutor, avisa, aparece na atenção e não cria posse', a1.st === 'atribuido' && a1.as === 'd2' && a1.att && a1.nt && /Bruno Lima/.test(a1.txt) && /Atribuído/.test(a1.txt) && a1.disp === 1 && a1.custody === 0, a1);
+  await p.evaluate(() => go('condutor', { id: 'd2' })); await W(40);
+  ok('UI atribuição: aparece na página do condutor', /atribuído sem checklist/.test(await p.textContent('#app')));
+  // o condutor faz o recebimento → atribuição termina sozinha
+  await p.evaluate(() => { S.custody.push({ id: 'cz', vehicleId: 'v2', driverId: 'd2', start: nowTs() + 1, end: null, startKm: 30000, segments: [{ at: nowTs(), projectId: 'p1' }] }); });
+  const a2 = await p.evaluate(() => ({ st: vStatus(veh('v2')), as: vAssign(veh('v2')), att: attentionItems().some(a => /atribuído sem checklist/.test(a.title)) }));
+  ok('UI atribuição: termina quando o checklist de recebimento é feito', a2.st === 'em_uso' && !a2.as && !a2.att, a2);
+  // remover
+  await p.evaluate(() => { S.custody = []; veh('v2').assign = { driverId: 'd1', at: nowTs(), by: 'u_adm', note: '' }; go('veiculo', { id: 'v2' }); }); await W();
+  await p.click('[data-act="veh-unassign"]'); await W(); await p.click('[data-act="veh-unassign-ok"]'); await W();
+  ok('UI atribuição: remover volta para Disponível', await p.evaluate(() => vStatus(veh('v2')) === 'disponivel' && S.audit.some(a => /removida por/.test(a.text))));
+  await p.evaluate(() => { CUR = byId(S.users, 'u_adm'); S.users.push({ id: 'u_g', name: 'Gil', role: 'gestor', active: true }); CUR = byId(S.users, 'u_g'); render(); }); await W(40);
+  ok('UI atribuição: só o administrador atribui', !(await p.$('[data-act="veh-assign"]')));
 };

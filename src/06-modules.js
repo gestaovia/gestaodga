@@ -5,17 +5,17 @@ function fuelTable(list, emptyTxt = 'Nenhum abastecimento.') {
   const M = isManager();
   return tbl(['Data', 'Veículo', 'Condutor', 'Obra', '>Km', '>Litros', '>Valor', '>km/l', '>Custo/km', '>Variação', 'Fotos', 'Lançado por', ...(M ? [''] : [])], list.sort((a, b) => b.at - a.at).slice(0, 150).map(f => {
     const m = fuelMetrics(f); const out = m.delta != null && Math.abs(m.delta) > S.settings.fuelDeviationPct;
-    return `<tr><td class="nowrap">${fmtShort(f.at)}</td><td>${vehLink(f.vehicleId)}</td><td>${drvLink(f.driverId)}</td><td>${projLabel(f.projectId)}</td><td class="r">${nf(f.km)}</td><td class="r">${nf(f.liters, 2)}</td><td class="r">${money(f.total)}</td>
+    return `<tr><td class="nowrap">${fmtShort(f.at)}${f.edits?.length ? ' ' + pill('editado') : ''}${f.atManual ? ` <span class="pill" title="Registrado depois pelo condutor (${esc(fmtDT(f.registeredAt))})">depois</span>` : ''}</td><td>${vehLink(f.vehicleId)}</td><td>${drvLink(f.driverId)}</td><td>${projLabel(f.projectId)}</td><td class="r">${nf(f.km)}</td><td class="r">${nf(f.liters, 2)}</td><td class="r">${money(f.total)}</td>
       <td class="r">${m.kmL ? nf(m.kmL, 1) : '—'}</td><td class="r">${m.costKm ? money(m.costKm) : '—'}</td><td class="r nowrap">${m.delta != null ? (out ? pill(`${m.delta > 0 ? '+' : ''}${nf(m.delta, 0)}%`, m.delta < 0 ? 'urg' : 'warn') : `<span class="muted">${m.delta > 0 ? '+' : ''}${nf(m.delta, 0)}%</span>`) : '—'}</td>
       <td class="nowrap">${[['odoPhoto', 'Hodômetro'], ['receipt', 'Cupom']].map(([k, l]) => f[k] ? `<img src="${esc(photoSrc(f[k]))}" alt="${l}" title="${l}" data-act="photo" style="width:34px;height:26px;object-fit:cover;border:1px solid var(--line);border-radius:2px;cursor:pointer;margin-right:3px">` : '').join('') || '<span class="muted">—</span>'}${!fuelHasOdo(f) && !fuelByStaff(f) ? ' ' + pill('sem hodômetro', 'warn') : ''}</td>
-      <td class="small nowrap">${fuelByStaff(f) ? `${pill('Gestão', 'neu')} <span class="muted">${esc(userName(f.enteredBy) || '')}</span>` : '<span class="muted">Condutor</span>'}</td>${M ? `<td><button class="icon-btn" data-act="fuel-del" data-id="${f.id}" aria-label="Excluir abastecimento" title="Excluir (duplicidade)">${ic('trash')}</button></td>` : ''}</tr>`;
+      <td class="small nowrap">${fuelByStaff(f) ? `${pill('Gestão', 'neu')} <span class="muted">${esc(userName(f.enteredBy) || '')}</span>` : '<span class="muted">Condutor</span>'}</td>${M ? `<td class="nowrap">${fuelCanEdit(f) ? `<button class="icon-btn" data-act="fuel-edit" data-id="${f.id}" aria-label="Editar abastecimento" title="Editar (ex.: km diferente da foto)">${ic('edit')}</button>` : ''}<button class="icon-btn" data-act="fuel-del" data-id="${f.id}" aria-label="Excluir abastecimento" title="Excluir (duplicidade)">${ic('trash')}</button></td>` : ''}</tr>`;
   }), emptyTxt);
 }
 let FUEL_M = 0; const FUEL_F = { v: '', d: '', p: '' };
 PAGES.abastecimento = {
   title: 'Abastecimento',
   render() {
-    const base = new Date(); base.setDate(1); base.setHours(0, 0, 0, 0); base.setMonth(base.getMonth() + FUEL_M);
+    const base = new Date(nowTs()); base.setDate(1); base.setHours(0, 0, 0, 0); base.setMonth(base.getMonth() + FUEL_M);
     const from = base.getTime(); const nx = new Date(base); nx.setMonth(nx.getMonth() + 1); const to = Math.min(nx.getTime(), nowTs() + 1);
     const F = FUEL_F;
     const pass = f => (!F.v || f.vehicleId === F.v) && (!F.d || f.driverId === F.d) && (!F.p || f.projectId === F.p);

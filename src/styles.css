@@ -823,3 +823,17 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 .pv-strip button.on{border-color:#fff;opacity:1}
 .pv-strip img{width:100%;height:100%;object-fit:cover;display:block}
 @media (max-width:640px){.pv-stage{padding:0 8px}.pv-nav{width:44px;height:44px;background:rgba(0,0,0,.45)}.pv-nav.prev{left:6px}.pv-nav.next{right:6px}}
+/* v1.20.0 · busca da obra pelo número */
+.proj-pick .proj-find{min-height:44px;font-size:1rem}
+.proj-pick .proj-hint:empty{display:none}
+.proj-pick .proj-hint.ok{color:var(--text);font-weight:600}
+.proj-pick .proj-hint.err{color:var(--red);font-size:.74rem}
+/* v1.20.0 · foto pela câmera ou pela galeria (abastecimento) */
+.ph-pick{display:flex;flex-direction:column;gap:6px}
+.ph-pick .ph-src{display:flex;gap:8px}
+.ph-pick .ph-src label{flex:1;position:relative;overflow:hidden;justify-content:center}
+.ph-pick .ph-src input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.ph-pick .ph-view{display:flex;align-items:center;gap:10px;border:2px dashed var(--border);border-radius:var(--r-sm);padding:8px 10px;min-height:64px;color:var(--text2);background:var(--surface2);font-size:.82rem}
+.ph-pick.done .ph-view{border-style:solid;border-color:var(--text2);color:var(--text)}
+.ph-pick .ph-view svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.5;flex:none}
+.ph-pick .ph-view img{width:72px;height:54px;object-fit:cover;border-radius:4px}
