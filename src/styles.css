@@ -252,6 +252,9 @@ textarea.inp{min-height:76px;resize:vertical}
 .ph.done{border-style:solid;border-color:var(--text2)}
 .ph .cap{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);color:#fff;font-size:.7rem;padding:3px 5px;z-index:1}
 .ph svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.5}
+/* v1.20.1: foto sendo preparada */
+.ph[aria-busy="true"],.ph-pick[aria-busy="true"]{opacity:.6;pointer-events:none;position:relative}
+.ph[aria-busy="true"]::after,.ph-pick[aria-busy="true"]::after{content:"Preparando a foto…";position:absolute;left:0;right:0;bottom:0;z-index:2;background:rgba(0,0,0,.7);color:#fff;font-size:.72rem;padding:4px 6px;text-align:center}
 .thumbs{display:flex;gap:6px;flex-wrap:wrap}
 .thumbs img{width:64px;height:48px;object-fit:cover;border-radius:3px;border:1px solid var(--border);cursor:pointer}
 

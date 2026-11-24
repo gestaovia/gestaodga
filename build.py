@@ -6,7 +6,7 @@ import json, pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SRC = ROOT / 'src'
-ORDER = ['01-core.js', '02-logic.js', '03-shell.js', '04-driver.js', '05-manager.js', '07-calendar.js',
+ORDER = ['01-core.js', '02-logic.js', '03-shell.js', '25-rascunho-foto.js', '04-driver.js', '05-manager.js', '07-calendar.js',
          '08-gps.js', '09-docs.js', '10-pdf.js', '11-cloud.js', '12-perfil.js', '13-relatorios.js', '14-premiacao.js', '15-oficinas-seguro.js', '16-consulta-data.js', '17-abastecimento-gestao.js', '18-indicadores.js', '19-correcao-obra.js', '20-pedagios.js', '21-correcao-km.js', '23-lavagem.js', '24-registros-atribuicao.js', '06-modules.js', '22-atualizacao.js']
 
 cfg = json.loads((ROOT / 'config.json').read_text(encoding='utf-8'))

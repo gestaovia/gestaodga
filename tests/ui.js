@@ -312,3 +312,48 @@ module.exports.v120 = async (p, ok, shots) => {
   await p.evaluate(() => { CUR = byId(S.users, 'u_adm'); S.users.push({ id: 'u_g', name: 'Gil', role: 'gestor', active: true }); CUR = byId(S.users, 'u_g'); render(); }); await W(40);
   ok('UI atribuição: só o administrador atribui', !(await p.$('[data-act="veh-assign"]')));
 };
+// v1.20.1: foto no checklist não derruba o app e, se o celular fechar o app, o checklist é recuperado
+module.exports.v1201 = async (p, ok, shots) => {
+  const shot = async n => { if (shots) await p.screenshot({ path: `${shots}/${n}.png` }); };
+  const W = (ms = 90) => p.waitForTimeout(ms);
+  await p.setViewportSize({ width: 390, height: 860 });
+  // foto "de câmera" grande (4000 x 3000) gerada no próprio navegador
+  const big = await p.evaluate(async () => { const c = document.createElement('canvas'); c.width = 4000; c.height = 3000; const x = c.getContext('2d'); x.fillStyle = '#3a6'; x.fillRect(0, 0, 4000, 3000); x.fillStyle = '#fff'; x.fillRect(100, 100, 800, 600);
+    const b = await new Promise(r => c.toBlob(r, 'image/jpeg', .95)); const a = new Uint8Array(await b.arrayBuffer()); let s = ''; for (let i = 0; i < a.length; i += 8192) s += String.fromCharCode(...a.subarray(i, i + 8192)); return btoa(s); });
+  const r1 = await p.evaluate(async b64 => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    const d = await readPhoto(new File([u], 'cam.jpg', { type: 'image/jpeg' })); const im = new Image(); await new Promise(r => { im.onload = r; im.src = d; }); return { w: im.width, h: im.height, jpg: d.startsWith('data:image/jpeg'), kb: Math.round(d.length / 1024) }; }, big);
+  ok('Foto: câmera em alta resolução vira JPEG de 640 px', r1.w === 640 && r1.h === 480 && r1.jpg && r1.kb < 200, r1);
+  const r2 = await p.evaluate(async () => { const out = {};
+    try { await readPhoto(new File([new Uint8Array(4 * 1024 * 1024)], 'x.heic', { type: 'image/heic' })); out.big = 'aceitou'; } catch (e) { out.big = e.message; }
+    try { out.small = (await readPhoto(new File([new Uint8Array(500)], 'y.heic', { type: 'image/heic' }))).slice(0, 15); } catch (e) { out.small = 'recusou'; }
+    return out; });
+  ok('Foto: formato que não abre e é grande é recusado com aviso; pequeno segue como antes', /HEIF/.test(r2.big) && r2.small === 'data:image/heic', r2);
+  // diário: km e foto pelo botão (arquivo de verdade no <input>)
+  await p.evaluate(() => { const T = FIX(); CUR = S.users[1]; CLOUD.on = false; DRAFT = null; FORM_DIRTY = false;
+    S.custody.push({ id: 'c9', vehicleId: 'v1', driverId: 'd1', start: T('2026-10-19T07:00'), end: null, startKm: 15000, segments: [{ at: T('2026-10-19T07:00'), projectId: 'p1' }] }); go('diario', { vid: 'v1' }); });
+  await W(); await p.click('[data-act="d-ans"][data-v="sim"]'); await W(80);
+  await p.fill('#dform [name="km"]', '15020');
+  await p.setInputFiles('#dform input[data-photo="painel_d"]', { name: 'painel.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(big, 'base64') });
+  await p.waitForFunction(() => !!DRAFT?.photos?.painel_d && !PHOTO_BUSY); await W(500);
+  const st = await p.evaluate(async () => { const s = await PENDING.get('rascunho:' + CUR.id); return s && { page: s.route.page, km: s.draft.km, ph: !!s.draft.photos.painel_d, ans: s.draft.answer }; });
+  ok('Rascunho: checklist com foto fica guardado no aparelho', st && st.page === 'diario' && st.km === '15020' && st.ph && st.ans === 'sim', st);
+  // o celular fecha o app (página recarrega do zero): memória perdida, volta ao início
+  await p.evaluate(() => { DRAFT = null; FORM_DIRTY = false; ROUTE = { page: 'inicio', p: {} }; render(); });
+  const back = await p.evaluate(async () => { const s = await DRAFT_STORE.take(); if (s) DRAFT_STORE.resume(s); await new Promise(r => setTimeout(r, 60));
+    return { page: ROUTE.page, km: document.querySelector('#dform [name="km"]')?.value, ph: !!document.querySelector('#dform [data-slot="painel_d"] img'), dirty: FORM_DIRTY, toast: document.body.textContent.includes('foi recuperado') }; });
+  await shot('v1201-recuperado');
+  ok('Rascunho: ao reabrir, volta ao diário com km e foto', back.page === 'diario' && back.km === '15020' && back.ph && back.dirty && back.toast, back);
+  // concluir enquanto a foto ainda está sendo preparada: espera
+  const busy = await p.evaluate(() => { PHOTO_BUSY = 1; const n0 = S.checklists.length; document.querySelector('#dform').requestSubmit(); const r = { n: S.checklists.length - n0, page: ROUTE.page }; PHOTO_BUSY = 0; return r; });
+  ok('Foto em preparo: concluir espera', busy.n === 0 && busy.page === 'diario', busy);
+  await p.evaluate(() => document.querySelector('#dform').requestSubmit()); await W(400);
+  const done = await p.evaluate(async () => ({ page: ROUTE.page, n: S.checklists.filter(k => k.type === 'diario' && k.km === 15020 && k.photos.painel).length, kept: await PENDING.get('rascunho:' + CUR.id) }));
+  ok('Rascunho: concluir salva o checklist e apaga o rascunho do aparelho', done.page === 'inicio' && done.n === 1 && !done.kept, done);
+  // outro usuário ou rascunho velho não é recuperado
+  const other = await p.evaluate(async () => { CUR = S.users[1]; DRAFT = { kind: 'diario', vid: 'v1', km: '1', photos: {}, items: {} }; ROUTE = { page: 'diario', p: { vid: 'v1' } }; await DRAFT_STORE.saveNow();
+    const s = await PENDING.get('rascunho:' + CUR.id); s.at = Date.now() - 13 * 36e5; await PENDING.put('rascunho:' + CUR.id, s); DRAFT = null;
+    const old = await DRAFT_STORE.take(); return { old: old === null, gone: (await PENDING.get('rascunho:' + CUR.id)) == null }; });
+  ok('Rascunho: com mais de 12 h é descartado', other.old && other.gone, other);
+  await p.evaluate(() => { DRAFT = null; FORM_DIRTY = false; });
+  await p.setViewportSize({ width: 1280, height: 900 });
+};

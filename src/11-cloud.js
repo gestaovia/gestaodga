@@ -157,7 +157,10 @@ const CLOUD = {
       let rec = 0; try { rec = await this.replayPending(); } catch (e) { }
       this.startPolling();
       let back = null; try { back = JSON.parse(sessionStorage.getItem('gv-route') || 'null'); } catch (e) { }
+      // v1.20.1: o celular fechou o app no meio de um checklist (ex.: ao abrir a câmera): volta para ele
+      let kept = null; try { kept = await DRAFT_STORE.take(); } catch (e) { }
       if (prof.must_change_password || RECOVERY) go('senha');
+      else if (kept) DRAFT_STORE.resume(kept);
       else if (back?.page && PAGES[back.page] && back.page !== 'login' && back.page !== 'senha') go(back.page, back.p || {}, { noPush: true });
       else go(homePage());
       try { autoCloseCheck(); } catch (e) { }

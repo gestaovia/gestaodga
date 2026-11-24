@@ -7,6 +7,17 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.20.1 — 24/11/2026
+- **Foto do checklist fazia o app "travar e voltar ao início".** Em alguns celulares (Android com pouca memória livre), ao tirar a foto e tocar em *Salvar*/OK na câmera, o celular fechava o app enquanto a câmera estava aberta ou ao ler a foto em alta resolução. Ao voltar, o app abria do zero e o checklist preenchido era perdido.
+  - O checklist em andamento (respostas, km e fotos já tiradas) agora fica guardado no próprio aparelho a cada alteração, ao tocar no botão de foto e quando o app sai da tela. Se o celular fechar o app, ao abrir de novo ele volta para o mesmo checklist e avisa: *"o que você preencheu foi recuperado"* — basta conferir e, se a última foto não aparecer, tirá-la de novo. O rascunho é apagado ao concluir ou cancelar e vale por até 12 h, só para o mesmo usuário. Vale para recebimento, entrega, diário, problema, manutenção e abastecimento.
+  - A foto passa a ser lida com bem menos memória (sem a cópia completa do arquivo original em texto), o que reduz a chance de o celular fechar o app.
+  - Enquanto a foto é preparada, o quadro mostra *"Preparando a foto…"* e o botão de concluir espera, em vez de enviar sem a foto.
+  - Foto em formato que o navegador não abre (ex.: HEIF/"alta eficiência" no Android) e maior que 3 MB agora mostra um aviso para tirar de novo, em vez de seguir com o arquivo original pesado.
+- Testes: 157 casos (`UI=1 node tests/run.js`).
+
+## v1.20.0 — 14/11/2026
+- Busca da obra pelo número, edição de abastecimentos e checklists pelo administrador, atribuição de veículo a condutor, finalidade do uso em dia não útil e fotos do abastecimento pela câmera ou pela galeria (ver regras do projeto).
+
 ## v1.19.0 — 13/11/2026
 - **Lavagem dos veículos.** Nova tela **Controle › Lavagens** (e aba **Lavagem** na tela do veículo). A gestão registra só **placa, dia, km e valor** — sem checklist. A lavagem pode ser editada ou excluída (com motivo); tudo fica na linha do tempo do veículo.
   - **Lembrete para levar ao lavador:**

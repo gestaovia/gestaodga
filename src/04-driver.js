@@ -298,13 +298,22 @@ function bindDraft(form) {
     else if (el.type === 'checkbox') DRAFT[el.name] = el.checked;
     else DRAFT[el.name] = el.value;
     DRAFT._onChange?.();
+    DRAFT_STORE.save();
   };
   form.addEventListener('input', upd); form.addEventListener('change', upd);
   form.addEventListener('change', async e => {
     const slot = e.target.dataset.photo; if (!slot || !e.target.files[0] || !DRAFT) return;
-    const file = e.target.files[0]; const gal = e.target.dataset.gal === '1';
-    DRAFT.photos[slot] = await readPhoto(file);
-    if (!DRAFT) return;
+    const file = e.target.files[0]; const gal = e.target.dataset.gal === '1'; const d0 = DRAFT;
+    // v1.20.1: enquanto a foto é preparada, "Concluir" espera (antes saía sem a foto e parecia travado)
+    const busy = form.querySelector(`[data-slot="${slot}"]`); busy?.setAttribute('aria-busy', 'true');
+    PHOTO_BUSY++;
+    let data;
+    try { data = await readPhoto(file); }
+    catch (err) { e.target.value = ''; toast(err?.message || 'Não foi possível ler a foto. Tire a foto de novo.'); return; }
+    finally { PHOTO_BUSY = Math.max(0, PHOTO_BUSY - 1); busy?.removeAttribute('aria-busy'); }
+    if (!DRAFT || DRAFT !== d0) return; // a tela foi trocada enquanto a foto era preparada
+    DRAFT.photos[slot] = data;
+    DRAFT_STORE.saveNow();
     const tile = form.querySelector(`[data-slot="${slot}"]`);
     const lab = tile?.dataset.label || { cupom: 'Foto do cupom ou nota fiscal', hodometro: 'Foto do hodômetro (obrigatória)', problema: 'Foto do problema', painel_d: 'Foto do painel (opcional)' }[slot] || (PHOTO_SLOTS.find(s => s[0] === slot) || [0, 'Foto'])[1];
     if (tile) tile.outerHTML = ['cupom', 'hodometro', 'problema', 'painel_d'].includes(slot) ? singlePhoto(slot, lab, tile.dataset.gallery === '1') : photoTile(slot, lab);

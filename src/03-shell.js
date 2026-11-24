@@ -86,7 +86,7 @@ const PAGES = {}; // registrado nos demais arquivos: PAGES[nome] = { title, rend
 function go(page, p = {}, opts = {}) {
   ROUTE = { page, p };
   if (CUR && page !== 'login') { try { sessionStorage.setItem('gv-route', JSON.stringify({ page, p })); } catch (e) { } }
-  if (!opts.keepDraft) DRAFT = null;
+  if (!opts.keepDraft) { DRAFT = null; DRAFT_STORE.clear(); }
   FORM_DIRTY = false;
   SIDE_OPEN = false;
   if (!opts.noPush) { try { history.pushState({ page, p }, ''); } catch (e) { } }
@@ -96,8 +96,8 @@ function go(page, p = {}, opts = {}) {
 window.addEventListener('popstate', e => {
   if (!e.state || !CUR) return;
   // voltar do navegador/celular com formulário preenchido: fica na tela e pergunta antes
-  if (FORM_DIRTY) { const back = e.state; try { history.pushState({ page: ROUTE.page, p: ROUTE.p }, ''); } catch (x) { } return confirmLeave(() => { FORM_DIRTY = false; ROUTE = back; DRAFT = null; render(); window.scrollTo(0, 0); }); }
-  closePhotoViewer(); ROUTE = e.state; DRAFT = null; render();
+  if (FORM_DIRTY) { const back = e.state; try { history.pushState({ page: ROUTE.page, p: ROUTE.p }, ''); } catch (x) { } return confirmLeave(() => { FORM_DIRTY = false; ROUTE = back; DRAFT = null; DRAFT_STORE.clear(); render(); window.scrollTo(0, 0); }); }
+  closePhotoViewer(); ROUTE = e.state; if (DRAFT) { DRAFT = null; DRAFT_STORE.clear(); } render();
 });
 
 /* ----- formulário em andamento: só sai por Cancelar ou concluindo -----
@@ -377,21 +377,40 @@ function purposeOptions(sel) { return PURPOSES.map(p => `<option ${p === sel ? '
 function driverOptions(sel, filter = () => true) { return S.drivers.filter(filter).map(d => `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${esc(d.name)}</option>`).join(''); }
 
 // redimensiona a foto antes do envio (economiza dados móveis e armazenamento)
+// v1.20.1: a foto da câmera (12 a 50 MP, 3 a 15 MB) não passa mais por uma cópia base64 inteira na memória
+// (FileReader). O navegador abre o arquivo direto (URL temporária), só a versão reduzida vira texto e o canvas
+// é liberado logo depois. Em celulares com pouca memória a leitura antiga derrubava a página (voltava ao início).
 function readPhoto(file, maxW = 640) {
   return new Promise((res, rej) => {
-    const fr = new FileReader();
-    fr.onerror = rej;
-    fr.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const sc = Math.min(1, maxW / img.width); const c = document.createElement('canvas');
-        c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+    if (!file) return rej(new Error('Nenhuma foto recebida. Tire a foto de novo.'));
+    let url = null; try { url = URL.createObjectURL(file); } catch (e) { }
+    if (!url) return readPhotoRaw(file).then(res, rej);
+    const img = new Image(); img.decoding = 'async';
+    const done = () => { img.onload = img.onerror = null; try { URL.revokeObjectURL(url); } catch (e) { } };
+    img.onload = () => {
+      let c = null;
+      try {
+        const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height; if (!w || !h) throw new Error('vazia');
+        const sc = Math.min(1, maxW / w); c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w * sc)); c.height = Math.max(1, Math.round(h * sc));
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        res(c.toDataURL('image/jpeg', .62));
-      };
-      img.onerror = () => res(fr.result);
-      img.src = fr.result;
+        const out = c.toDataURL('image/jpeg', .62);
+        if (!out || out.length < 100) throw new Error('vazia');
+        res(out);
+      } catch (e) { rej(new Error('Não foi possível preparar a foto. Tire a foto de novo.')); }
+      finally { done(); if (c) { c.width = 0; c.height = 0; } img.removeAttribute('src'); }
     };
+    // formato que o navegador não abre (ex.: HEIC/HEIF no Android): guarda o original só se for pequeno
+    img.onerror = () => { done(); readPhotoRaw(file).then(res, rej); };
+    img.src = url;
+  });
+}
+function readPhotoRaw(file) {
+  return new Promise((res, rej) => {
+    if (file.size > 3 * 1024 * 1024) return rej(new Error('Este formato de foto não pôde ser aberto. Tire a foto de novo; se repetir, nas configurações da câmera desative o formato HEIF/"alta eficiência".'));
+    const fr = new FileReader();
+    fr.onerror = () => rej(new Error('Não foi possível ler a foto. Tire a foto de novo.'));
+    fr.onload = () => res(fr.result);
     fr.readAsDataURL(file);
   });
 }
