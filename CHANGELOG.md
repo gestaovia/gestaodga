@@ -7,6 +7,14 @@ Cada versão tem duas pastas em `versoes/vX.Y.Z/`:
 Numeração: **X** muda o sistema por inteiro, **Y** traz funções novas, **Z** corrige algo sem mudar o uso.
 Mudanças no banco (Supabase) ficam em `supabase/migrations/` e já são aplicadas por Claude no projeto; não precisam ser enviadas ao GitHub Pages para funcionar.
 
+## v1.20.2 — 26/11/2026
+- **Abastecimento com km menor que o último registro não é mais recusado.** Antes, se o condutor esquecesse o checklist de um dia e registrasse o abastecimento depois (ou se outro registro tivesse km maior), o app recusava com *"A quilometragem não pode ser menor que o último registro"* (ou *"…maior que o registro seguinte"*). Agora o abastecimento é gravado normalmente — tanto pelo condutor quanto em *Lançar abastecimento* pela gestão.
+  - O km do veículo continua sem diminuir: um abastecimento com km menor não baixa o hodômetro.
+  - Continua a conferência de salto grande (acima do limite em Configurações › Regras): pede para tocar de novo e avisa a gestão.
+  - Abastecimentos com km fora de ordem já ficam fora do cálculo de consumo e aparecem em Indicadores como pendência para conferir.
+  - Checklists (recebimento, diário, entrega) continuam com a regra de km que não diminui.
+- Testes: 157 casos (`UI=1 node tests/run.js`).
+
 ## v1.20.1 — 24/11/2026
 - **Foto do checklist fazia o app "travar e voltar ao início".** Em alguns celulares (Android com pouca memória livre), ao tirar a foto e tocar em *Salvar*/OK na câmera, o celular fechava o app enquanto a câmera estava aberta ou ao ler a foto em alta resolução. Ao voltar, o app abria do zero e o checklist preenchido era perdido.
   - O checklist em andamento (respostas, km e fotos já tiradas) agora fica guardado no próprio aparelho a cada alteração, ao tocar no botão de foto e quando o app sai da tela. Se o celular fechar o app, ao abrir de novo ele volta para o mesmo checklist e avisa: *"o que você preencheu foi recuperado"* — basta conferir e, se a última foto não aparecer, tirá-la de novo. O rascunho é apagado ao concluir ou cancelar e vale por até 12 h, só para o mesmo usuário. Vale para recebimento, entrega, diário, problema, manutenção e abastecimento.

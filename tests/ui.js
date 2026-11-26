@@ -248,12 +248,16 @@ module.exports.v120 = async (p, ok, shots) => {
   ok('UI abastecimento: foto da galeria sugere a data e hora do abastecimento', g2.when === '2026-10-19T18:10' && g2.inp === g2.when && g2.ph && g2.done, g2);
   await p.evaluate(() => { DRAFT.photos.cupom = 'data:image/png;base64,AA=='; });
   await p.fill('#fform [name="km"]', '15500'); await p.fill('#fform [name="liters"]', '30'); await p.fill('#fform [name="total"]', '180'); await p.fill('#fform [name="station"]', 'Posto BR');
-  await p.evaluate(() => document.querySelector('#fform').requestSubmit()); await W();
-  const g3 = await p.evaluate(() => ({ n: S.fuel.length, err: document.querySelector('#ck-err')?.textContent }));
-  ok('UI abastecimento: registro posterior não pode ter km maior que o registro seguinte', g3.n === 0 && /registro seguinte/.test(g3.err), g3);
   await p.fill('#fform [name="km"]', '15350'); await p.evaluate(() => document.querySelector('#fform').requestSubmit()); await W();
   const g4 = await p.evaluate(() => { const f = S.fuel[0]; return f ? { at: f.at, man: f.atManual, km: f.km, odo: S.vehicles[0].odometer } : null; });
   ok('UI abastecimento: grava com a data informada (registrado depois)', g4 && g4.at === tPhoto && g4.man === true && g4.km === 15350 && g4.odo === 15400, g4);
+  // v1.20.2: km menor que o último registro não bloqueia mais (condutor esqueceu o checklist e registra o abastecimento depois)
+  await p.evaluate(() => { DRAFT = null; FORM_DIRTY = false; go('abastecer', { vid: 'v1' }); }); await W();
+  await p.evaluate(() => { DRAFT.photos.cupom = 'data:image/png;base64,AA=='; DRAFT.photos.hodometro = 'data:image/png;base64,AA=='; });
+  await p.fill('#fform [name="km"]', '15200'); await p.fill('#fform [name="liters"]', '25'); await p.fill('#fform [name="total"]', '150'); await p.fill('#fform [name="station"]', 'Posto BR');
+  await p.evaluate(() => document.querySelector('#fform').requestSubmit()); await W();
+  const g5 = await p.evaluate(() => ({ n: S.fuel.length, km: S.fuel[1]?.km, odo: S.vehicles[0].odometer, err: document.querySelector('#ck-err')?.textContent || '' }));
+  ok('UI abastecimento: km menor que o último registro é aceito (v1.20.2) e não baixa o hodômetro', g5.n === 2 && g5.km === 15200 && g5.odo === 15400, g5);
   await p.setViewportSize({ width: 1280, height: 900 });
   // ---- administrador edita checklist (km diferente da foto) ----
   await p.evaluate(() => { const T = FIX(); DRAFT = null; FORM_DIRTY = false; CLOUD.on = false; CUR = S.users[0];

@@ -24,6 +24,15 @@ function kmJumpNote(v, driverId) {
   notify('gestao', `${v.plate}: quilometragem subiu ${nf(j.to - j.from)} km de uma vez (de ${nf(j.from)} para ${nf(j.to)} km), confirmada por ${CUR.name}. Se estiver errada, use Corrigir km no veículo.`, { level: 'warn', link: { page: 'veiculo', id: v.id } });
 }
 
+// v1.20.2 · abastecimento: km fora da sequência não bloqueia; salto acima do limite pede para tocar de novo
+function fuelJumpCheck(k, ref, refTxt, errs) {
+  const max = +S.settings.kmJumpMax || 2000; DRAFT._kmJump = null;
+  if (!ref || k - ref <= max) return;
+  if (DRAFT._kmConf === k) { DRAFT._kmJump = { from: ref, to: k }; return; }
+  DRAFT._kmConf = k;
+  errs.push(`Confira a quilometragem: ${nf(k)} km são ${nf(k - ref)} km a mais que ${refTxt} (${km(ref)}). Se estiver certa, toque no botão de novo para confirmar.`);
+}
+
 function captureLocation(v) {
   const tl = currentLocation(v.id);
   if (tl && nowTs() - tl.at < 15 * MIN) DRAFT.geo = { lat: tl.lat, lng: tl.lng, source: 'celular' };
@@ -817,9 +826,10 @@ PAGES.abastecer = {
       else if (ts < fuelMinWhen(c)) errs.push(ts < c.start ? `O abastecimento precisa ser depois que você recebeu o veículo (${fmtDT(c.start)}).` : `Só é possível registrar abastecimentos dos últimos ${FUEL_BACK_DAYS} dias. Avise a gestão.`);
       if (!past) ts = nowTs();
       if (!k) errs.push('Informe a quilometragem.');
-      else if (!past) kmGuard(v, k, errs);
-      else if (!isNaN(ts)) { const ar = kmAround(v.id, ts); if (k < ar.prev) errs.push(`A quilometragem não pode ser menor que o registro anterior a esse horário (${km(ar.prev)}).`); if (ar.next != null && k > ar.next) errs.push(`A quilometragem não pode ser maior que o registro seguinte a esse horário (${km(ar.next)}). Confira a data, a hora e o km.`);
-        const mx = +S.settings.kmJumpMax || 2000; if (!errs.length && ar.prev && k - ar.prev > mx && DRAFT._kmConf !== k) { DRAFT._kmConf = k; errs.push(`Confira a quilometragem: ${nf(k)} km são ${nf(k - ar.prev)} km a mais que o registro anterior (${km(ar.prev)}). Se estiver certa, toque no botão de novo para confirmar.`); } }
+      // v1.20.2: o abastecimento não é mais recusado por km menor que o último registro (ex.: condutor esqueceu o
+      // checklist de um dia e registra o abastecimento depois). Fica só a conferência de salto grande (2º toque).
+      else if (!past) fuelJumpCheck(k, lastRecordedKm(v.id), 'o último registro', errs);
+      else if (!isNaN(ts)) fuelJumpCheck(k, kmAround(v.id, ts).prev, 'o registro anterior', errs);
       if (!l || l <= 0) errs.push('Informe os litros.'); if (!t || t <= 0) errs.push('Informe o valor total.'); errs.push(...fuelLimitErrs(l, t));
       if (!DRAFT.station) errs.push('Informe o posto.'); if (!DRAFT.photos.hodometro) errs.push('Envie a foto do hodômetro (vale pontos na premiação).'); if (!DRAFT.photos.cupom) errs.push('Envie a foto do cupom ou nota fiscal.');
       if (!errs.length && k && l) { const dup = fuelDuplicates(v.id, ts, k, l); if (dup.same.length) errs.push(fuelByStaff(dup.same[0]) ? 'A gestão já lançou este abastecimento. Não é preciso registrar de novo.' : 'Este abastecimento já foi registrado.'); }
@@ -827,7 +837,7 @@ PAGES.abastecer = {
       const seg = currentSegment(c);
       const sg = past ? segmentAt(c, ts) || seg : seg;
       const rec = { id: uid('fuel'), vehicleId: v.id, driverId: c.driverId, custodyId: c.id, projectId: sg?.projectId || null, at: ts, km: k, liters: l, total: t, fuelType: DRAFT.fuelType, station: DRAFT.station, receipt: DRAFT.photos.cupom, odoPhoto: DRAFT.photos.hodometro, location: past ? null : DRAFT.geo, ...(past ? { atManual: true, registeredAt: nowTs() } : {}) };
-      S.fuel.push(rec); v.odometer = Math.max(v.odometer, k); if (!past) kmJumpNote(v, c.driverId);
+      S.fuel.push(rec); v.odometer = Math.max(v.odometer, k); if (!past) kmJumpNote(v, c.driverId); else DRAFT._kmJump = null;
       log('abastecimento', `Abastecimento: ${nf(l, 1)} L, ${money(t)} em ${rec.station}${past ? ` · feito em ${fmtDT(ts)} e registrado depois` : ''}`, { vehicleId: v.id, driverId: c.driverId });
       const m = fuelOutlier(rec);
       if (m) notify('gestao', `Consumo fora do padrão no ${v.plate}: ${nf(m.kmL, 1)} km/l (${m.delta > 0 ? '+' : ''}${nf(m.delta, 0)}% da média).`, { level: 'warn', link: { page: 'abastecimento' } });
